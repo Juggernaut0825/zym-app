@@ -85,3 +85,33 @@ DerivedData/
 
 # Reference repo not part of app product
 cats-company/
+
+# Local status docs / utility scripts (not published)
+/COMPLETE.md
+/COMPLETION_REPORT.md
+/CURRENT_STATUS.md
+/DEPLOYMENT.md
+/DEPLOYMENT_GUIDE.md
+/FINAL_STATUS.md
+/FIXED.md
+/IOS_COMPLETION_REPORT.md
+/MVP_STATUS.md
+/PRODUCTION_READY.md
+/PROGRESS_REPORT.md
+/REFACTOR_PLAN.md
+/SETUP.md
+/STARTUP.md
+/STATUS.md
+/TEST_REPORT.md
+/WORKING.md
+/fix_plan.md
+/iOS_FIXED.md
+/DEMO.sh
+/START.sh
+/STOP.sh
+/TEST.sh
+/production-check.sh
+/server/FINAL_SUMMARY.md
+/server/PROGRESS.md
+/web/CURRENT_STATUS.md
+/web/IMPLEMENTATION_STATUS.md

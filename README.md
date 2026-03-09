@@ -36,25 +36,25 @@ cp server/.env.example server/.env
 # set OPENROUTER_API_KEY in server/.env (minimum required)
 ```
 
-### 2) Start all services
+### 2) Start backend
 
 ```bash
-./START.sh dev
+cd server
+npm run dev
 ```
 
-Production-like mode:
+### 3) Start web
 
 ```bash
-./START.sh prod
+cd web
+npm run dev
 ```
 
-Stop all local services:
+Backend default: `http://localhost:3001`  
+Web default: `http://localhost:3000`  
+WebSocket default: `ws://localhost:8080`
 
-```bash
-./STOP.sh
-```
-
-### 3) iOS
+### 4) iOS
 
 ```bash
 open ios/ZYM.xcodeproj
@@ -64,13 +64,15 @@ Run scheme `ZYM` on simulator.
 
 ## Regression Test
 
-Run full MVP regression (build server/web/iOS + real E2E):
+Run core build checks:
 
 ```bash
-./TEST.sh
+cd server && npm run build
+cd web && npm run build
+cd ios && xcodebuild -project ZYM.xcodeproj -scheme ZYM -configuration Debug -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO build
 ```
 
-This script automatically stops services at the end.
+For API/manual regression, keep `server` and `web` dev servers running and test from web/iOS clients.
 
 ## Optional web env
 
