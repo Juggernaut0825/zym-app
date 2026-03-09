@@ -1,0 +1,430 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		12ED1F8D74B4EFA699ADBBDB /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9C4752E53D4931D33ABB63 /* InboxView.swift */; };
+		24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */; };
+		2F36C85D56BA0DAA9A4531B1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E21EC2DA70234A6B1CC728A8 /* Foundation.framework */; };
+		3D990E2FD78D1C53327F4997 /* CreatePostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E953F40CD0755DFA2272B07 /* CreatePostView.swift */; };
+		700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */; };
+		70DE2935BEC343D85E049018 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */; };
+		77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */; };
+		7A2CC21A04186119F18BA02C /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */; };
+		8D178E02BC5BDB4B7CA2B947 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F9455F05EA97DAFBC4A2508 /* LoginView.swift */; };
+		91B5A26C9249BACADD975613 /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E78D6AD1A2DA7C9152A4E6 /* FriendsView.swift */; };
+		97CE01195CE02A06CEE85392 /* LeaderboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2488A3305811E676260085D /* LeaderboardView.swift */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		98C10EF3662F6A0B4D129931 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7650D1583361CD88A0543424 /* AppState.swift */; };
+		9A75F1662455211AC9D82DAF /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6CC540213497006A295B2E1 /* RegisterView.swift */; };
+		A026086ABE5CC0A7752222CE /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC61CF138FD5E4180092DB82 /* FeedView.swift */; };
+		A5E96CAFDC3B09E07A29EC0E /* APIResponses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBA823B57936AAADB82FE2A /* APIResponses.swift */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		BD61835EA67486247630D80B /* ZYMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC0AD496B349508F2DACC2B /* ZYMApp.swift */; };
+		CD4BA61072A48CE5D1453411 /* CreateGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */; };
+		CE8987FFE4A6FCE04D7A3E37 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CE85FAD3EB546359D5A70E2 /* DesignSystem.swift */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
+		E40934E3D10D01642281B039 /* CoachSelectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WebSocketManager.swift; path = ZYM/Services/WebSocketManager.swift; sourceTree = "<group>"; };
+		19B9B981ABA4CAE059FB13B5 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
+		29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreateGroupView.swift; path = ZYM/Views/CreateGroupView.swift; sourceTree = "<group>"; };
+		29E78D6AD1A2DA7C9152A4E6 /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FriendsView.swift; path = ZYM/Views/FriendsView.swift; sourceTree = "<group>"; };
+		3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ChatView.swift; path = ZYM/Views/ChatView.swift; sourceTree = "<group>"; };
+		3E3AB9DAFE367D7AC79E74DA /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FriendsView.swift; path = ZYM/Views/FriendsView.swift; sourceTree = "<group>"; };
+		3FBA823B57936AAADB82FE2A /* APIResponses.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIResponses.swift; path = ZYM/Models/APIResponses.swift; sourceTree = "<group>"; };
+		4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = ZYM/Views/ProfileView.swift; sourceTree = "<group>"; };
+		4DC0AD496B349508F2DACC2B /* ZYMApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ZYMApp.swift; path = ZYM/ZYMApp.swift; sourceTree = "<group>"; };
+		58A099D1E2D7F3D503DF4720 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
+		5B884708410E573BF990D221 /* InboxView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InboxView.swift; path = ZYM/Views/InboxView.swift; sourceTree = "<group>"; };
+		5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
+		661183241A9A7448204EBBF0 /* InboxView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InboxView.swift; path = ZYM/Views/InboxView.swift; sourceTree = "<group>"; };
+		7650D1583361CD88A0543424 /* AppState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppState.swift; path = ZYM/AppState.swift; sourceTree = "<group>"; };
+		768F663449D003B2EDBF37F0 /* ZYM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZYM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8E953F40CD0755DFA2272B07 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
+		9CE85FAD3EB546359D5A70E2 /* DesignSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DesignSystem.swift; path = ZYM/DesignSystem.swift; sourceTree = "<group>"; };
+		9F9455F05EA97DAFBC4A2508 /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = ZYM/Views/LoginView.swift; sourceTree = "<group>"; };
+		ABD8953369AFD68CF2995D07 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
+		B977A73E78161F25F55F9612 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
+		BD07A6AD2F8347E734C7B699 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
+		C3B5354881D825F89198A6AA /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = ZYM/Info.plist; sourceTree = "<group>"; };
+		C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MainTabView.swift; path = ZYM/Views/MainTabView.swift; sourceTree = "<group>"; };
+		CC9C4752E53D4931D33ABB63 /* InboxView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InboxView.swift; path = ZYM/Views/InboxView.swift; sourceTree = "<group>"; };
+		DBCD55BC8C19211CEF48AD6D /* InboxView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = InboxView.swift; path = ZYM/Views/InboxView.swift; sourceTree = "<group>"; };
+		E21EC2DA70234A6B1CC728A8 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		E2488A3305811E676260085D /* LeaderboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LeaderboardView.swift; path = ZYM/Views/LeaderboardView.swift; sourceTree = "<group>"; };
+		F6CC540213497006A295B2E1 /* RegisterView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RegisterView.swift; path = ZYM/Views/RegisterView.swift; sourceTree = "<group>"; };
+		F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CoachSelectView.swift; path = ZYM/Views/CoachSelectView.swift; sourceTree = "<group>"; };
+		FC61CF138FD5E4180092DB82 /* FeedView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FeedView.swift; path = ZYM/Views/FeedView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		986FBD65D2CED642F3E66DFC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2F36C85D56BA0DAA9A4531B1 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A7E4B019E4273FF99C23711 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				9F9455F05EA97DAFBC4A2508 /* LoginView.swift */,
+				F6CC540213497006A295B2E1 /* RegisterView.swift */,
+				F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */,
+				3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */,
+				FC61CF138FD5E4180092DB82 /* FeedView.swift */,
+				4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */,
+				C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */,
+				CC9C4752E53D4931D33ABB63 /* InboxView.swift */,
+				5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */,
+				DBCD55BC8C19211CEF48AD6D /* InboxView.swift */,
+				58A099D1E2D7F3D503DF4720 /* ConversationView.swift */,
+				8E953F40CD0755DFA2272B07 /* CreatePostView.swift */,
+				661183241A9A7448204EBBF0 /* InboxView.swift */,
+				BD07A6AD2F8347E734C7B699 /* ConversationView.swift */,
+				ABD8953369AFD68CF2995D07 /* CreatePostView.swift */,
+				29E78D6AD1A2DA7C9152A4E6 /* FriendsView.swift */,
+				5B884708410E573BF990D221 /* InboxView.swift */,
+				B977A73E78161F25F55F9612 /* ConversationView.swift */,
+				19B9B981ABA4CAE059FB13B5 /* CreatePostView.swift */,
+				3E3AB9DAFE367D7AC79E74DA /* FriendsView.swift */,
+				29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */,
+				E2488A3305811E676260085D /* LeaderboardView.swift */,
+			);
+			name = Views;
+			sourceTree = "<group>";
+		};
+		5DF6432FEC99BA6C3B2EC9CD /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				E21EC2DA70234A6B1CC728A8 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		661BDC0178CE3A07AABDD031 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				768F663449D003B2EDBF37F0 /* ZYM.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8E89A70C95EF31757DA32DA9 = {
+			isa = PBXGroup;
+			children = (
+				661BDC0178CE3A07AABDD031 /* Products */,
+				D710A9B77586A5C5BB7F023A /* Frameworks */,
+				9A8C58DC4E45ED882081085C /* ZYM */,
+			);
+			sourceTree = "<group>";
+		};
+		9A8C58DC4E45ED882081085C /* ZYM */ = {
+			isa = PBXGroup;
+			children = (
+				1A7E4B019E4273FF99C23711 /* Views */,
+				BC2B14D539FEFC57C6452CA1 /* Services */,
+				4DC0AD496B349508F2DACC2B /* ZYMApp.swift */,
+				7650D1583361CD88A0543424 /* AppState.swift */,
+				C3B5354881D825F89198A6AA /* Info.plist */,
+				FF08263C02AA5C9EA9F0083B /* Models */,
+				9CE85FAD3EB546359D5A70E2 /* DesignSystem.swift */,
+			);
+			name = ZYM;
+			sourceTree = "<group>";
+		};
+		BC2B14D539FEFC57C6452CA1 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */,
+			);
+			name = Services;
+			sourceTree = "<group>";
+		};
+		D710A9B77586A5C5BB7F023A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5DF6432FEC99BA6C3B2EC9CD /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		FF08263C02AA5C9EA9F0083B /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				3FBA823B57936AAADB82FE2A /* APIResponses.swift */,
+			);
+			name = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F99B0537C56773C440B7A541 /* ZYM */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F5C517A15807771AAA2A0288 /* Build configuration list for PBXNativeTarget "ZYM" */;
+			buildPhases = (
+				BB5EC7E206F930BF4AC2C142 /* Sources */,
+				986FBD65D2CED642F3E66DFC /* Frameworks */,
+				3F688F6D1EAB3A9D804D30CB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZYM;
+			productName = ZYM;
+			productReference = 768F663449D003B2EDBF37F0 /* ZYM.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9AD03B722F30A86E24CA616A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = F8BF53F31C1838C08ADD7730 /* Build configuration list for PBXProject "ZYM" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 8E89A70C95EF31757DA32DA9;
+			minimizedProjectReferenceProxies = 0;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 661BDC0178CE3A07AABDD031 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F99B0537C56773C440B7A541 /* ZYM */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3F688F6D1EAB3A9D804D30CB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BB5EC7E206F930BF4AC2C142 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BD61835EA67486247630D80B /* ZYMApp.swift in Sources */,
+				98C10EF3662F6A0B4D129931 /* AppState.swift in Sources */,
+				8D178E02BC5BDB4B7CA2B947 /* LoginView.swift in Sources */,
+				9A75F1662455211AC9D82DAF /* RegisterView.swift in Sources */,
+				E40934E3D10D01642281B039 /* CoachSelectView.swift in Sources */,
+				7A2CC21A04186119F18BA02C /* ChatView.swift in Sources */,
+				A026086ABE5CC0A7752222CE /* FeedView.swift in Sources */,
+				700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */,
+				24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */,
+				77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */,
+				12ED1F8D74B4EFA699ADBBDB /* InboxView.swift in Sources */,
+				70DE2935BEC343D85E049018 /* ConversationView.swift in Sources */,
+				3D990E2FD78D1C53327F4997 /* CreatePostView.swift in Sources */,
+				91B5A26C9249BACADD975613 /* FriendsView.swift in Sources */,
+				CD4BA61072A48CE5D1453411 /* CreateGroupView.swift in Sources */,
+				CE8987FFE4A6FCE04D7A3E37 /* DesignSystem.swift in Sources */,
+				A5E96CAFDC3B09E07A29EC0E /* APIResponses.swift in Sources */,
+				97CE01195CE02A06CEE85392 /* LeaderboardView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		42A75E46FA94941F7BD8A9EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				INFOPLIST_FILE = ZYM/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zym.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		663F04FAE366BBF890CA1808 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F426116FF1C9358E65CF96DB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				INFOPLIST_FILE = ZYM/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.zym.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F42CA8AD6E64BDF548BADEB2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F5C517A15807771AAA2A0288 /* Build configuration list for PBXNativeTarget "ZYM" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F426116FF1C9358E65CF96DB /* Release */,
+				42A75E46FA94941F7BD8A9EC /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F8BF53F31C1838C08ADD7730 /* Build configuration list for PBXProject "ZYM" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				663F04FAE366BBF890CA1808 /* Debug */,
+				F42CA8AD6E64BDF548BADEB2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9AD03B722F30A86E24CA616A /* Project object */;
+}
