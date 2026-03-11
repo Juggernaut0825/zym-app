@@ -103,9 +103,14 @@ def resolve_media(media_id: str) -> Dict[str, Any]:
 
 def resolve_stored_path(stored_path: str) -> Path:
     candidate = Path(stored_path)
-    if candidate.is_absolute():
-        return candidate
-    return PROJECT_DIR / stored_path
+    resolved = candidate if candidate.is_absolute() else (PROJECT_DIR / candidate)
+    resolved = resolved.resolve()
+    media_root = (get_data_dir() / "media").resolve()
+
+    if resolved != media_root and media_root not in resolved.parents:
+        raise PermissionError("media path is outside allowed user media directory")
+
+    return resolved
 
 
 def append_analysis_id(media_id: str, analysis_id: str) -> None:

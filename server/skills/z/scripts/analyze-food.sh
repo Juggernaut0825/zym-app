@@ -35,7 +35,7 @@ echo "Analyzing food image..."
 python3 - "$FILE_PATH" "$DATA_DIR" "$OPENROUTER_API_KEY" << 'PY'
 import sys, os, json, base64
 from urllib import request, error
-from datetime import date, datetime
+from datetime import datetime, timezone
 
 file_path = sys.argv[1]
 data_dir = sys.argv[2]
@@ -145,8 +145,9 @@ total = {
 description = str(data.get("description", "Food"))[:500]
 
 # Save to daily records
-t = date.today().isoformat()
-time_str = datetime.now().strftime("%H:%M")
+now_utc = datetime.now(timezone.utc)
+t = now_utc.date().isoformat()
+time_str = now_utc.strftime("%H:%M")
 
 logs = load_json("daily.json", {})
 if not isinstance(logs, dict):

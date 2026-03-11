@@ -1,16 +1,23 @@
-import { API_BASE_URL } from './config';
-import { clearAuth } from './auth-storage';
+import { API_BASE_URL, resolveApiAssetUrl } from './config';
+import { clearAuth, getAuth, setAuthTokens } from './auth-storage';
 import {
+  AbuseReport,
+  AuthSession,
+  CoachRecordsResponse,
+  FeedComment,
   ChatMessage,
   FeedResponse,
   FriendsResponse,
   GroupMember,
   GroupResponse,
+  HealthMomentumResponse,
   InboxResponse,
   LeaderboardResponse,
+  MentionNotification,
   PublicProfileResponse,
   PublicUser,
   Profile,
+  SecurityEvent,
   RequestsResponse,
   UserSummary,
 } from './types';
@@ -20,6 +27,18 @@ function handleUnauthorized(path: string) {
   clearAuth();
   window.dispatchEvent(new CustomEvent('zym-auth-expired', { detail: { path } }));
 }
+
+function detectClientTimeZone(): string | undefined {
+  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return undefined;
+  try {
+    const timezone = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim();
+    return timezone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
 
 function buildHeaders(initHeaders?: HeadersInit, includeJsonContentType = true): Headers {
   const headers = new Headers(initHeaders || {});
@@ -45,9 +64,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   const payload = await response.json().catch(() => ({}));
-  if (response.status === 401) {
+
+  if (response.status === 401 && path !== '/auth/refresh') {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
+        ...init,
+        headers: buildHeaders(init?.headers, true),
+      });
+
+      const retryPayload = await retryResponse.json().catch(() => ({}));
+      if (!retryResponse.ok) {
+        if (retryResponse.status === 401) {
+          handleUnauthorized(path);
+        }
+        throw new Error(retryPayload?.error || 'Request failed');
+      }
+      return retryPayload as T;
+    }
     handleUnauthorized(path);
   }
+
   if (!response.ok) {
     const message = payload?.error || 'Request failed';
     throw new Error(message);
@@ -56,17 +93,67 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function refreshAccessToken(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (refreshInFlight) return refreshInFlight;
+
+  const auth = getAuth();
+  if (!auth?.refreshToken) return false;
+
+  refreshInFlight = (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: new Headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          refreshToken: auth.refreshToken,
+          timezone: detectClientTimeZone(),
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.token || !payload?.refreshToken) {
+        if (response.status === 401) {
+          clearAuth();
+        }
+        return false;
+      }
+
+      setAuthTokens(String(payload.token), String(payload.refreshToken));
+      window.dispatchEvent(new CustomEvent('zym-auth-refreshed', {
+        detail: {
+          token: String(payload.token),
+          refreshToken: String(payload.refreshToken),
+        },
+      }));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 export interface LoginResponse {
   userId: number;
   token: string;
+  refreshToken: string;
   username: string;
   selectedCoach: 'zj' | 'lc';
+  timezone?: string | null;
 }
 
-export async function login(username: string, password: string): Promise<LoginResponse> {
+export async function login(username: string, password: string, timezone?: string): Promise<LoginResponse> {
   return request<LoginResponse>('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({
+      username,
+      password,
+      timezone: timezone || detectClientTimeZone(),
+    }),
   });
 }
 
@@ -120,6 +207,17 @@ export async function sendMessage(payload: {
   });
 }
 
+export async function markMessagesRead(payload: {
+  userId: number;
+  topic: string;
+  messageId?: number;
+}): Promise<void> {
+  await request('/messages/read', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export interface UploadedMedia {
   url: string;
   mediaId?: string | null;
@@ -129,22 +227,38 @@ export async function uploadFile(file: File): Promise<UploadedMedia> {
   const body = new FormData();
   body.append('file', file);
 
-  const response = await fetch(`${API_BASE_URL}/media/upload`, {
+  let response = await fetch(`${API_BASE_URL}/media/upload`, {
     method: 'POST',
     body,
     headers: buildHeaders(undefined, false),
   });
 
-  const payload = await response.json().catch(() => ({}));
+  let payload = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    handleUnauthorized('/media/upload');
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      response = await fetch(`${API_BASE_URL}/media/upload`, {
+        method: 'POST',
+        body,
+        headers: buildHeaders(undefined, false),
+      });
+      payload = await response.json().catch(() => ({}));
+    } else {
+      handleUnauthorized('/media/upload');
+    }
   }
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized('/media/upload');
+    }
     throw new Error(payload?.error || 'Upload failed');
   }
 
+  const rawUrl = String(payload.url || payload.path || '').trim();
+  const resolvedUrl = resolveApiAssetUrl(rawUrl);
+
   return {
-    url: payload.url || payload.path,
+    url: resolvedUrl || rawUrl,
     mediaId: payload.mediaId || null,
   };
 }
@@ -254,8 +368,43 @@ export async function reactToPost(postId: number, userId: number, reactionType =
   });
 }
 
+export async function getPostComments(postId: number): Promise<FeedComment[]> {
+  const response = await request<{ comments: FeedComment[] }>(`/community/post/${postId}/comments`);
+  return response.comments;
+}
+
+export async function createPostComment(payload: {
+  postId: number;
+  userId: number;
+  content: string;
+}): Promise<void> {
+  await request('/community/comment', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getMentionNotifications(userId: number): Promise<MentionNotification[]> {
+  const response = await request<{ mentions: MentionNotification[] }>(`/notifications/mentions/${userId}`);
+  return response.mentions;
+}
+
+export async function markMentionNotificationsRead(payload: {
+  userId: number;
+  ids?: number[];
+}): Promise<void> {
+  await request('/notifications/mentions/read', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getLeaderboard(userId: number): Promise<LeaderboardResponse> {
   return request<LeaderboardResponse>(`/health/leaderboard/${userId}`);
+}
+
+export async function getHealthMomentum(userId: number): Promise<HealthMomentumResponse> {
+  return request<HealthMomentumResponse>(`/health/momentum/${userId}`);
 }
 
 export async function syncHealth(payload: { userId: number; steps: number; calories: number }): Promise<void> {
@@ -280,9 +429,122 @@ export async function updateProfile(payload: {
   hobbies?: string;
   avatar_url?: string;
   background_url?: string;
+  timezone?: string;
 }): Promise<void> {
   await request('/profile/update', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getCoachRecords(userId: number, days = 21): Promise<CoachRecordsResponse> {
+  const safeDays = Math.min(120, Math.max(1, Math.floor(Number(days) || 21)));
+  return request<CoachRecordsResponse>(`/coach/records/${userId}?days=${safeDays}`);
+}
+
+export async function updateCoachRecordProfile(payload: {
+  userId: number;
+  height_cm?: number;
+  weight_kg?: number;
+  age?: number;
+  body_fat_pct?: number;
+  training_days?: number;
+  gender?: 'male' | 'female';
+  activity_level?: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
+  goal?: 'cut' | 'maintain' | 'bulk';
+  timezone?: string;
+}): Promise<void> {
+  await request('/coach/records/profile/update', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCoachMealRecord(payload: {
+  userId: number;
+  day: string;
+  mealId: string;
+  description?: string;
+  calories?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+  time?: string;
+  timezone?: string;
+  occurredAtUtc?: string | null;
+}): Promise<void> {
+  await request('/coach/records/meal/update', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCoachTrainingRecord(payload: {
+  userId: number;
+  day: string;
+  trainingId: string;
+  name?: string;
+  sets?: number;
+  reps?: string;
+  weight_kg?: number;
+  notes?: string;
+  time?: string;
+  timezone?: string;
+  occurredAtUtc?: string | null;
+}): Promise<void> {
+  await request('/coach/records/training/update', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createAbuseReport(payload: {
+  userId: number;
+  targetType: 'user' | 'post' | 'message' | 'group';
+  targetId: number;
+  reason: string;
+  details?: string;
+}): Promise<number> {
+  const response = await request<{ reportId: number }>('/moderation/report', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return response.reportId;
+}
+
+export async function getAbuseReports(userId: number): Promise<AbuseReport[]> {
+  const response = await request<{ reports: AbuseReport[] }>(`/moderation/reports/${userId}`);
+  return response.reports;
+}
+
+export async function getSecurityEvents(userId: number, limit = 50): Promise<SecurityEvent[]> {
+  const safeLimit = Math.min(120, Math.max(1, Math.floor(Number(limit) || 50)));
+  const response = await request<{ events: SecurityEvent[] }>(`/security/events/${userId}?limit=${safeLimit}`);
+  return response.events;
+}
+
+export async function logoutSession(): Promise<void> {
+  await request('/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export async function logoutAllSessions(): Promise<void> {
+  await request('/auth/logout-all', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export async function getAuthSessions(): Promise<AuthSession[]> {
+  const response = await request<{ sessions: AuthSession[] }>('/auth/sessions');
+  return response.sessions;
+}
+
+export async function revokeAuthSession(sessionId: string): Promise<void> {
+  await request('/auth/sessions/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
   });
 }

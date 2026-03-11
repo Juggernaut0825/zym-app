@@ -45,6 +45,11 @@ export interface ToolDefinition {
       type: string;
       description: string;
       enum?: string[];
+      minLength?: number;
+      maxLength?: number;
+      minimum?: number;
+      maximum?: number;
+      pattern?: string;
     }>;
     required?: string[];
   };
@@ -63,6 +68,8 @@ export interface ToolExecutionContext {
   workingDirectory: string;
   userId?: string;
   platform?: string;
+  conversationScope?: 'coach_dm' | 'group' | 'p2p' | 'unknown';
+  allowWriteTools?: boolean;
   conversationHistory?: Message[];
   dataDirectory?: string;
   contextDirectory?: string;

@@ -7,6 +7,8 @@ struct FriendsView: View {
     @State private var friends: [Friend] = []
     @State private var requests: [Friend] = []
     @State private var showAddFriend = false
+    @State private var selectedConversation: Conversation?
+    @State private var showConversation = false
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -45,7 +47,7 @@ struct FriendsView: View {
                             }
 
                             ForEach(Array(friends.enumerated()), id: \.element.id) { index, friend in
-                                FriendRow(friend: friend)
+                                FriendRow(friend: friend, onDM: { openDM(with: friend) })
                                     .zymAppear(delay: Double(index) * 0.02)
                             }
                         }
@@ -66,6 +68,21 @@ struct FriendsView: View {
             .sheet(isPresented: $showAddFriend) {
                 AddFriendView(onAdd: loadFriends)
             }
+            .background(
+                NavigationLink(
+                    isActive: $showConversation,
+                    destination: {
+                        if let selectedConversation {
+                            ConversationView(conversation: selectedConversation)
+                                .environmentObject(appState)
+                        } else {
+                            EmptyView()
+                        }
+                    },
+                    label: { EmptyView() }
+                )
+                .hidden()
+            )
             .onAppear(perform: loadFriends)
         }
     }
@@ -76,7 +93,7 @@ struct FriendsView: View {
         if let url = apiURL("/friends/\(userId)") {
             var request = URLRequest(url: url)
             applyAuthorizationHeader(&request, token: appState.token)
-            URLSession.shared.dataTask(with: request) { data, _, _ in
+            authorizedDataTask(appState: appState, request: request) { data, _, _ in
                 guard let data = data,
                       let response = try? JSONDecoder().decode(FriendsResponse.self, from: data) else { return }
                 DispatchQueue.main.async {
@@ -88,7 +105,7 @@ struct FriendsView: View {
         if let url = apiURL("/friends/requests/\(userId)") {
             var request = URLRequest(url: url)
             applyAuthorizationHeader(&request, token: appState.token)
-            URLSession.shared.dataTask(with: request) { data, _, _ in
+            authorizedDataTask(appState: appState, request: request) { data, _, _ in
                 guard let data = data,
                       let response = try? JSONDecoder().decode(RequestsResponse.self, from: data) else { return }
                 DispatchQueue.main.async {
@@ -107,9 +124,42 @@ struct FriendsView: View {
         applyAuthorizationHeader(&request, token: appState.token)
         let body = ["userId": userId, "friendId": friendId]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {
                 loadFriends()
+            }
+        }.resume()
+    }
+
+    func openDM(with friend: Friend) {
+        guard let userId = appState.userId,
+              let url = apiURL("/messages/open-dm") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "otherUserId": friend.id,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let payload = try? JSONDecoder().decode(DMOpenResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                selectedConversation = Conversation(
+                    id: payload.topic,
+                    name: friend.username,
+                    isGroup: false,
+                    isCoach: false,
+                    coachEnabled: nil,
+                    avatarUrl: friend.avatar_url,
+                    otherUserId: friend.id,
+                    unreadCount: 0,
+                    mentionCount: 0
+                )
+                showConversation = true
             }
         }.resume()
     }
@@ -117,6 +167,12 @@ struct FriendsView: View {
 
 struct FriendRow: View {
     let friend: Friend
+    let onDM: (() -> Void)?
+
+    init(friend: Friend, onDM: (() -> Void)? = nil) {
+        self.friend = friend
+        self.onDM = onDM
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -132,6 +188,12 @@ struct FriendRow: View {
                 .foregroundColor(Color.zymText)
                 .font(.system(size: 15, weight: .semibold))
             Spacer()
+            if let onDM {
+                Button("DM") {
+                    onDM()
+                }
+                .buttonStyle(ZYMGhostButton())
+            }
         }
         .zymCard()
     }
@@ -366,7 +428,7 @@ struct AddFriendView: View {
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
             DispatchQueue.main.async {
                 pending = false
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -401,7 +463,7 @@ struct AddFriendView: View {
               let url = apiURL("/friends/connect/\(userId)") else { return }
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             guard let data = data,
                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let code = payload["connectCode"] as? String else {
@@ -473,6 +535,10 @@ struct FriendsResponse: Codable {
 
 struct RequestsResponse: Codable {
     let requests: [Friend]
+}
+
+struct DMOpenResponse: Codable {
+    let topic: String
 }
 
 func makeQRCodeImage(from payload: String) -> UIImage? {

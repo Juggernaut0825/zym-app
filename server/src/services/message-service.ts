@@ -1,4 +1,5 @@
 import { getDB } from '../database/sqlite-db.js';
+import { stripCoachMentions } from '../utils/coach-mention.js';
 
 export interface ParsedMessage {
   id: number;
@@ -12,6 +13,19 @@ export interface ParsedMessage {
   username: string;
   avatar_url: string | null;
   is_coach: boolean;
+}
+
+export interface MentionNotification {
+  id: number;
+  topic: string | null;
+  message_id: number | null;
+  source_type: 'message' | 'post_comment';
+  source_id: number;
+  snippet: string;
+  is_read: boolean;
+  created_at: string;
+  actor_user_id: number | null;
+  actor_username: string | null;
 }
 
 function parseJsonArray(value: unknown): string[] {
@@ -51,6 +65,10 @@ function parseGroupTopic(topic: string): { groupId: number } | null {
   const groupId = Number(topic.replace('grp_', ''));
   if (!Number.isInteger(groupId)) return null;
   return { groupId };
+}
+
+function uniqueLower(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean)));
 }
 
 export function buildP2PTopic(userIdA: number, userIdB: number): string {
@@ -106,6 +124,18 @@ export class MessageService {
   static async getInbox(userId: string) {
     const db = getDB();
     const currentUserId = Number(userId);
+    const unreadCountStmt = db.prepare(`
+      SELECT COUNT(1) AS count
+      FROM messages
+      WHERE topic = ?
+        AND id > COALESCE((SELECT last_read_message_id FROM message_reads WHERE user_id = ? AND topic = ?), 0)
+        AND from_user_id != ?
+    `);
+    const unreadMentionStmt = db.prepare(`
+      SELECT COUNT(1) AS count
+      FROM mention_notifications
+      WHERE user_id = ? AND topic = ? AND is_read = 0
+    `);
 
     const p2pTopics = db.prepare(`
       SELECT topic, MAX(created_at) as last_message_at
@@ -124,6 +154,8 @@ export class MessageService {
         const otherUserId = parsed.userA === currentUserId ? parsed.userB : parsed.userA;
         const user = db.prepare('SELECT id, username, avatar_url FROM users WHERE id = ?').get(otherUserId) as any;
         const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(item.topic) as any;
+        const unreadRow = unreadCountStmt.get(item.topic, currentUserId, item.topic, currentUserId) as { count?: number } | undefined;
+        const mentionRow = unreadMentionStmt.get(currentUserId, item.topic) as { count?: number } | undefined;
 
         return {
           topic: item.topic,
@@ -132,6 +164,8 @@ export class MessageService {
           avatar_url: user?.avatar_url || null,
           last_message_at: item.last_message_at,
           last_message_preview: preview?.content || '',
+          unread_count: Number(unreadRow?.count || 0),
+          mention_count: Number(mentionRow?.count || 0),
         };
       })
       .filter(Boolean);
@@ -145,26 +179,35 @@ export class MessageService {
       GROUP BY g.id
       ORDER BY last_message_at DESC
     `).all(currentUserId).map((group: any) => {
-      const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(`grp_${group.id}`) as any;
+      const topic = `grp_${group.id}`;
+      const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(topic) as any;
+      const unreadRow = unreadCountStmt.get(topic, currentUserId, topic, currentUserId) as { count?: number } | undefined;
+      const mentionRow = unreadMentionStmt.get(currentUserId, topic) as { count?: number } | undefined;
       return {
         id: group.id,
-        topic: `grp_${group.id}`,
+        topic,
         name: group.name,
         coach_enabled: group.coach_enabled,
         last_message_at: group.last_message_at || null,
         last_message_preview: preview?.content || '',
+        unread_count: Number(unreadRow?.count || 0),
+        mention_count: Number(mentionRow?.count || 0),
       };
     });
 
     const coachTopic = `coach_${currentUserId}`;
     const coachLast = db.prepare('SELECT MAX(created_at) as last_message_at FROM messages WHERE topic = ?').get(coachTopic) as any;
     const coachPreview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
+    const coachUnread = unreadCountStmt.get(coachTopic, currentUserId, coachTopic, currentUserId) as { count?: number } | undefined;
+    const coachMentions = unreadMentionStmt.get(currentUserId, coachTopic) as { count?: number } | undefined;
 
     return {
       coach: {
         topic: coachTopic,
         last_message_at: coachLast?.last_message_at || null,
         last_message_preview: coachPreview?.content || '',
+        unread_count: Number(coachUnread?.count || 0),
+        mention_count: Number(coachMentions?.count || 0),
       },
       dms,
       groups,
@@ -218,5 +261,188 @@ export class MessageService {
     );
 
     return Number(result.lastInsertRowid);
+  }
+
+  static async getLatestMessageId(topic: string): Promise<number> {
+    const row = getDB()
+      .prepare('SELECT id FROM messages WHERE topic = ? ORDER BY id DESC LIMIT 1')
+      .get(topic) as { id?: number } | undefined;
+    const id = Number(row?.id || 0);
+    return Number.isInteger(id) && id > 0 ? id : 0;
+  }
+
+  static async markTopicRead(userId: number, topic: string, messageId?: number): Promise<void> {
+    const latestMessageId = Number.isInteger(messageId) ? Number(messageId) : await MessageService.getLatestMessageId(topic);
+    const safeMessageId = Number.isInteger(latestMessageId) && latestMessageId > 0 ? latestMessageId : 0;
+    getDB()
+      .prepare(`
+        INSERT INTO message_reads (user_id, topic, last_read_message_id, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, topic)
+        DO UPDATE SET
+          last_read_message_id = CASE
+            WHEN excluded.last_read_message_id > message_reads.last_read_message_id THEN excluded.last_read_message_id
+            ELSE message_reads.last_read_message_id
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      `)
+      .run(userId, topic, safeMessageId);
+  }
+
+  static async createMessageMentionNotifications(
+    fromUserId: number,
+    topic: string,
+    mentionHandles: string[],
+    messageId: number,
+    snippet: string,
+  ): Promise<number[]> {
+    const handles = stripCoachMentions(uniqueLower(mentionHandles));
+    if (handles.length === 0) return [];
+
+    const participants = await MessageService.getTopicParticipants(topic);
+    if (participants.length === 0) return [];
+    const participantSet = new Set(participants);
+
+    const placeholders = handles.map(() => '?').join(',');
+    const rows = getDB()
+      .prepare(`SELECT id, lower(username) AS username_lower FROM users WHERE lower(username) IN (${placeholders})`)
+      .all(...handles) as Array<{ id: number; username_lower: string }>;
+
+    const insertStmt = getDB().prepare(`
+      INSERT INTO mention_notifications (user_id, topic, message_id, source_type, source_id, snippet, is_read)
+      VALUES (?, ?, ?, 'message', ?, ?, 0)
+    `);
+
+    const notified = new Set<number>();
+    for (const row of rows) {
+      if (!participantSet.has(Number(row.id))) continue;
+      if (Number(row.id) === fromUserId) continue;
+
+      insertStmt.run(row.id, topic, messageId, messageId, snippet.slice(0, 400));
+      notified.add(Number(row.id));
+    }
+
+    return Array.from(notified);
+  }
+
+  static createPostCommentMentionNotifications(
+    fromUserId: number,
+    postId: number,
+    mentionHandles: string[],
+    commentId: number,
+    snippet: string,
+  ): number[] {
+    const db = getDB();
+    const handles = uniqueLower(mentionHandles);
+    const post = db.prepare('SELECT user_id FROM posts WHERE id = ?').get(postId) as { user_id?: number } | undefined;
+    const recipients = new Set<number>();
+
+    if (Number.isInteger(post?.user_id) && Number(post?.user_id) > 0 && Number(post?.user_id) !== fromUserId) {
+      recipients.add(Number(post?.user_id));
+    }
+
+    if (handles.length > 0) {
+      const placeholders = handles.map(() => '?').join(',');
+      const users = db
+        .prepare(`SELECT id FROM users WHERE lower(username) IN (${placeholders})`)
+        .all(...handles) as Array<{ id: number }>;
+      users.forEach((user) => {
+        const id = Number(user.id);
+        if (Number.isInteger(id) && id > 0 && id !== fromUserId) {
+          recipients.add(id);
+        }
+      });
+    }
+
+    if (recipients.size === 0) return [];
+
+    const insertStmt = db.prepare(`
+      INSERT INTO mention_notifications (user_id, topic, message_id, source_type, source_id, snippet, is_read)
+      VALUES (?, ?, NULL, 'post_comment', ?, ?, 0)
+    `);
+
+    recipients.forEach((userId) => {
+      insertStmt.run(userId, `post_${postId}`, commentId, snippet.slice(0, 400));
+    });
+
+    return Array.from(recipients);
+  }
+
+  static getMentionNotifications(userId: number, limit = 40): MentionNotification[] {
+    const rows = getDB()
+      .prepare(`
+        SELECT
+          mn.id,
+          mn.topic,
+          mn.message_id,
+          mn.source_type,
+          mn.source_id,
+          mn.snippet,
+          mn.is_read,
+          mn.created_at,
+          m.from_user_id AS message_actor_id,
+          mu.username AS message_actor_username,
+          pc.user_id AS comment_actor_id,
+          cu.username AS comment_actor_username
+        FROM mention_notifications mn
+        LEFT JOIN messages m ON m.id = mn.message_id
+        LEFT JOIN users mu ON mu.id = m.from_user_id
+        LEFT JOIN post_comments pc
+          ON mn.source_type = 'post_comment' AND pc.id = mn.source_id
+        LEFT JOIN users cu ON cu.id = pc.user_id
+        WHERE mn.user_id = ?
+        ORDER BY datetime(mn.created_at) DESC
+        LIMIT ?
+      `)
+      .all(userId, limit) as Array<{
+        id: number;
+        topic: string | null;
+        message_id: number | null;
+        source_type: 'message' | 'post_comment';
+        source_id: number;
+        snippet: string | null;
+        is_read: number;
+        created_at: string;
+        message_actor_id: number | null;
+        message_actor_username: string | null;
+        comment_actor_id: number | null;
+        comment_actor_username: string | null;
+      }>;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      topic: row.topic || null,
+      message_id: row.message_id ? Number(row.message_id) : null,
+      source_type: row.source_type,
+      source_id: Number(row.source_id),
+      snippet: String(row.snippet || ''),
+      is_read: Number(row.is_read || 0) === 1,
+      created_at: String(row.created_at),
+      actor_user_id: row.source_type === 'post_comment'
+        ? (row.comment_actor_id ? Number(row.comment_actor_id) : null)
+        : (row.message_actor_id ? Number(row.message_actor_id) : null),
+      actor_username: row.source_type === 'post_comment'
+        ? (row.comment_actor_username || null)
+        : (row.message_actor_username || null),
+    }));
+  }
+
+  static markMentionNotificationsRead(userId: number, ids?: number[]) {
+    const normalizedIds = (ids || [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item > 0);
+
+    if (normalizedIds.length === 0) {
+      const result = getDB()
+        .prepare('UPDATE mention_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0')
+        .run(userId);
+      return Number(result.changes || 0);
+    }
+
+    const placeholders = normalizedIds.map(() => '?').join(',');
+    const result = getDB()
+      .prepare(`UPDATE mention_notifications SET is_read = 1 WHERE user_id = ? AND id IN (${placeholders})`)
+      .run(userId, ...normalizedIds);
+    return Number(result.changes || 0);
   }
 }

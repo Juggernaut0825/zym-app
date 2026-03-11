@@ -24,7 +24,8 @@ export class CommunityService {
   static getFeed(userId: number) {
     const posts = getDB().prepare(`
       SELECT p.*, u.username, u.avatar_url,
-        (SELECT COUNT(*) FROM post_reactions WHERE post_id = p.id) as reaction_count
+        (SELECT COUNT(*) FROM post_reactions WHERE post_id = p.id) as reaction_count,
+        (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.user_id = ?
@@ -49,6 +50,57 @@ export class CommunityService {
       userId,
       reactionType,
     );
+  }
+
+  static addComment(postId: number, userId: number, content: string) {
+    const result = getDB()
+      .prepare('INSERT INTO post_comments (post_id, user_id, content) VALUES (?, ?, ?)')
+      .run(postId, userId, content);
+    return Number(result.lastInsertRowid);
+  }
+
+  static getComments(postId: number) {
+    return getDB()
+      .prepare(`
+        SELECT pc.id, pc.post_id, pc.user_id, pc.content, pc.created_at, u.username, u.avatar_url
+        FROM post_comments pc
+        JOIN users u ON u.id = pc.user_id
+        WHERE pc.post_id = ?
+        ORDER BY datetime(pc.created_at) ASC
+      `)
+      .all(postId)
+      .map((row: any) => ({
+        id: Number(row.id),
+        post_id: Number(row.post_id),
+        user_id: Number(row.user_id),
+        username: String(row.username || ''),
+        avatar_url: row.avatar_url || null,
+        content: String(row.content || ''),
+        created_at: String(row.created_at || ''),
+      }));
+  }
+
+  static canAccessPost(viewerUserId: number, postId: number): boolean {
+    const post = getDB()
+      .prepare('SELECT user_id FROM posts WHERE id = ?')
+      .get(postId) as { user_id?: number } | undefined;
+    if (!post?.user_id) return false;
+
+    if (Number(post.user_id) === viewerUserId) return true;
+
+    const relation = getDB()
+      .prepare(`
+        SELECT 1
+        FROM friendships
+        WHERE status = 'accepted'
+          AND (
+            (user_id = ? AND friend_id = ?)
+            OR (user_id = ? AND friend_id = ?)
+          )
+        LIMIT 1
+      `)
+      .get(viewerUserId, Number(post.user_id), Number(post.user_id), viewerUserId);
+    return Boolean(relation);
   }
 
   static addFriend(userId: number, friendId: number) {

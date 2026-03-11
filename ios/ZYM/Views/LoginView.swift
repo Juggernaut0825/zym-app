@@ -109,7 +109,11 @@ struct LoginView: View {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: String] = ["username": username, "password": password]
+        let body: [String: String] = [
+            "username": username,
+            "password": password,
+            "timezone": TimeZone.current.identifier,
+        ]
         request.httpBody = try? JSONEncoder().encode(body)
 
         URLSession.shared.dataTask(with: request) { data, _, _ in
@@ -126,6 +130,7 @@ struct LoginView: View {
                 pending = false
                 appState.username = username
                 appState.token = loginResponse.token
+                appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId
                 appState.selectedCoach = loginResponse.selectedCoach
                 appState.isLoggedIn = true
@@ -136,6 +141,7 @@ struct LoginView: View {
 
 struct LoginResponse: Codable {
     let token: String
+    let refreshToken: String
     let userId: Int
     let selectedCoach: String?
 }

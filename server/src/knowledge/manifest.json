@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "generatedAt": "2026-03-11T01:23:52.000Z",
+  "documents": [
+    {
+      "file": "nutrition-basics.md",
+      "sha256": "ce5c4d9826ecba70977ebe1722cef469d02cdf66fce49609c1c161082be0d9b5",
+      "source": "nutrition-basics",
+      "domain": "nutrition",
+      "approved": true
+    },
+    {
+      "file": "training-basics.md",
+      "sha256": "1e79cd4ef43d9272d6b79584abf04218938a6283fde29ddb2db3fe21148945fa",
+      "source": "training-basics",
+      "domain": "fitness",
+      "approved": true
+    }
+  ]
+}

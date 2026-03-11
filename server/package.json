@@ -6,6 +6,8 @@
     "predev": "npm run rebuild:native",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "check:agent-security": "node scripts/agent-tool-boundary-check.mjs",
+    "kb:manifest": "node scripts/generate-knowledge-manifest.mjs",
     "prestart": "npm run rebuild:native",
     "start": "node dist/index.js",
     "rebuild:native": "npm rebuild better-sqlite3",

@@ -1,10 +1,9 @@
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import { resolveSkillScriptPath } from '../utils/path-resolver.js';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 export class MediaService {
@@ -73,8 +72,7 @@ export class MediaService {
 
   static async analyzeForm(videoPath: string): Promise<string> {
     const script = resolveSkillScriptPath('analyze-form.sh');
-    const escapedPath = videoPath.replace(/"/g, '\\"');
-    const { stdout } = await execAsync(`bash "${script}" "${escapedPath}"`, {
+    const { stdout } = await execFileAsync('bash', [script, videoPath], {
       env: process.env,
       maxBuffer: 10 * 1024 * 1024,
       timeout: 120_000,

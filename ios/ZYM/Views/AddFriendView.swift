@@ -61,7 +61,7 @@ struct AddFriendView: View {
         applyAuthorizationHeader(&request, token: appState.token)
         let body = ["userId": userId, "phoneNumber": phoneNumber] as [String: Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             DispatchQueue.main.async {
                 if let data = data, let response = try? JSONDecoder().decode([String: String].self, from: data) {
                     message = response["message"] ?? "Request sent"

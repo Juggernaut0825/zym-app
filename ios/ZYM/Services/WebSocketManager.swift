@@ -19,6 +19,7 @@ struct LegacyWSMessage: Identifiable {
 
 enum SocketEvent {
     case authSuccess(userId: Int)
+    case authFailed
     case subscribed(topic: String)
     case messageCreated(topic: String, message: SocketChatMessage)
     case typing(topic: String, userId: String, isTyping: Bool)
@@ -83,7 +84,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
         sendRaw(["type": "typing", "topic": topic, "isTyping": isTyping])
     }
 
-    func sendMessage(topic: String, content: String, mediaUrls: [String] = []) {
+    func sendMessage(topic: String, content: String, mediaUrls: [String] = [], mediaIds: [String] = []) {
         var payload: [String: Any] = [
             "type": "send_message",
             "topic": topic,
@@ -91,6 +92,9 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
         ]
         if !mediaUrls.isEmpty {
             payload["mediaUrls"] = mediaUrls
+        }
+        if !mediaIds.isEmpty {
+            payload["mediaIds"] = mediaIds
         }
         sendRaw(payload)
     }
@@ -152,6 +156,15 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             let userId = payload["userId"] as? Int ?? 0
             DispatchQueue.main.async {
                 self.onEvent?(.authSuccess(userId: userId))
+            }
+
+        case "auth_failed":
+            isAuthenticated = false
+            shouldReconnect = false
+            authToken = nil
+            webSocket?.cancel(with: .normalClosure, reason: nil)
+            DispatchQueue.main.async {
+                self.onEvent?(.authFailed)
             }
 
         case "subscribed":

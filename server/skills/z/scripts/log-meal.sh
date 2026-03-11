@@ -20,7 +20,7 @@ echo "Estimating nutrition for: $DESC..."
 python3 - "$DESC" "$DATA_DIR" "$OPENROUTER_API_KEY" << 'PY'
 import sys, os, json
 from urllib import request, error
-from datetime import date, datetime
+from datetime import datetime, timezone
 
 desc = sys.argv[1]
 data_dir = sys.argv[2]
@@ -109,8 +109,9 @@ if not isinstance(total, dict):
 description = str(data.get("description", desc))[:500]
 
 # Save to daily records
-t = date.today().isoformat()
-time_str = datetime.now().strftime("%H:%M")
+now_utc = datetime.now(timezone.utc)
+t = now_utc.date().isoformat()
+time_str = now_utc.strftime("%H:%M")
 
 log_path = os.path.join(data_dir, "daily.json")
 if os.path.exists(log_path):

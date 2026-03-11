@@ -16,7 +16,7 @@ mkdir -p "$DATA_DIR"
 
 python3 - "$JSON_INPUT" "$DATA_DIR" << 'PY'
 import sys, os, json
-from datetime import date, datetime
+from datetime import datetime, timezone
 
 json_input = sys.argv[1]
 data_dir = sys.argv[2]
@@ -49,8 +49,9 @@ def safe_write_json(path, payload):
     os.replace(tmp_path, path)
 
 # Save into daily records
-t = date.today().isoformat()
-time_str = datetime.now().strftime("%H:%M")
+now_utc = datetime.now(timezone.utc)
+t = now_utc.date().isoformat()
+time_str = now_utc.strftime("%H:%M")
 
 log_path = os.path.join(data_dir, "daily.json")
 if os.path.exists(log_path):

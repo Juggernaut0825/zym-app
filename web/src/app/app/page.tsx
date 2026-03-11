@@ -8,19 +8,32 @@ import {
   addFriend,
   addGroupMember,
   createGroup,
+  createPostComment,
   createPost,
+  createAbuseReport,
+  getAuthSessions,
+  getAbuseReports,
   getFeed,
   getFriendConnectCode,
   getFriendRequests,
   getFriends,
+  getHealthMomentum,
   getGroupMembers,
   getInbox,
   getLeaderboard,
+  getMentionNotifications,
+  getSecurityEvents,
   getMessages,
+  getPostComments,
   getPublicProfile,
   getProfile,
   getUserPublic,
+  logoutSession,
+  markMentionNotificationsRead,
+  markMessagesRead,
   openDM,
+  logoutAllSessions,
+  revokeAuthSession,
   reactToPost,
   removeGroupMember,
   resolveFriendConnectCode,
@@ -31,15 +44,25 @@ import {
   updateProfile,
   uploadFile,
 } from '@/lib/api';
+import { resolveApiAssetUrl } from '@/lib/config';
 import { clearAuth, getAuth, setCoach } from '@/lib/auth-storage';
 import { RealtimeClient } from '@/lib/realtime';
+import { ConversationTile } from '@/components/chat/ConversationTile';
+import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
+import { CoachRecordsPanel } from '@/components/profile/CoachRecordsPanel';
 import {
   AppSocketEvent,
   ChatMessage,
+  AuthSession,
+  AbuseReport,
+  FeedComment,
   FeedPost,
   Friend,
   GroupMember,
+  HealthMomentumResponse,
   LeaderboardEntry,
+  MentionNotification,
+  SecurityEvent,
   PublicProfileResponse,
   PublicUser,
   Profile,
@@ -58,6 +81,7 @@ type TabKey = (typeof tabs)[number]['key'];
 type TabIcon = (typeof tabs)[number]['icon'];
 
 type ConversationType = 'coach' | 'dm' | 'group';
+type ConversationFilter = 'all' | ConversationType;
 
 interface Conversation {
   topic: string;
@@ -65,6 +89,8 @@ interface Conversation {
   type: ConversationType;
   subtitle: string;
   preview?: string;
+  unreadCount?: number;
+  mentionCount?: number;
   avatarUrl?: string | null;
   userId?: number;
   groupId?: number;
@@ -80,6 +106,52 @@ interface ProfileViewerState {
   data?: PublicProfileResponse | null;
 }
 
+const MAX_MEDIA_ATTACHMENTS = 6;
+const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
+const MESSAGE_DRAFTS_STORAGE_KEY = 'zym.web.messageDrafts.v1';
+const POST_DRAFT_STORAGE_KEY = 'zym.web.postDraft.v1';
+
+function isSupportedMediaFile(file: File): boolean {
+  const mime = file.type.toLowerCase();
+  if (mime.startsWith('image/') || mime.startsWith('video/')) {
+    return true;
+  }
+  const lowerName = file.name.toLowerCase();
+  return mediaFallbackExtensions.some((ext) => lowerName.endsWith(ext));
+}
+
+function mergeMediaFiles(existing: File[], incoming: File[]): { files: File[]; errors: string[] } {
+  const next: File[] = [...existing];
+  const seen = new Set(existing.map((file) => `${file.name}::${file.size}::${file.lastModified}`));
+  const errors: string[] = [];
+
+  for (const file of incoming) {
+    const fingerprint = `${file.name}::${file.size}::${file.lastModified}`;
+    if (seen.has(fingerprint)) continue;
+
+    if (!isSupportedMediaFile(file)) {
+      errors.push(`Unsupported file format: ${file.name}`);
+      continue;
+    }
+
+    if (file.size > MAX_MEDIA_FILE_SIZE_BYTES) {
+      errors.push(`${file.name} is too large. Max size is 50MB.`);
+      continue;
+    }
+
+    if (next.length >= MAX_MEDIA_ATTACHMENTS) {
+      errors.push(`You can attach up to ${MAX_MEDIA_ATTACHMENTS} files at once.`);
+      break;
+    }
+
+    seen.add(fingerprint);
+    next.push(file);
+  }
+
+  return { files: next, errors };
+}
+
 function formatTime(iso?: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -90,6 +162,28 @@ function formatTime(iso?: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatSessionDate(iso?: string | null): string {
+  if (!iso) return '-';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function eventLabel(eventType: string): string {
+  const text = String(eventType || '').trim().toLowerCase();
+  if (!text) return 'Security event';
+  return text
+    .split(/[._-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function formatDayLabel(iso?: string | null): string {
@@ -122,6 +216,50 @@ function displayNameFromTopic(topic: string): string {
 function isVideoUrl(url: string): boolean {
   const lower = url.toLowerCase();
   return lower.includes('.mp4') || lower.includes('.mov') || lower.includes('.webm') || lower.includes('.m4v');
+}
+
+function loadMessageDrafts(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(MESSAGE_DRAFTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const next: Record<string, string> = {};
+    Object.entries(parsed).forEach(([topic, value]) => {
+      if (typeof value === 'string' && value.trim()) {
+        next[topic] = value.slice(0, 2000);
+      }
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function persistMessageDrafts(drafts: Record<string, string>) {
+  if (typeof window === 'undefined') return;
+  try {
+    const compact = Object.entries(drafts).reduce<Record<string, string>>((acc, [topic, value]) => {
+      const normalized = String(value || '').slice(0, 2000);
+      if (normalized.trim()) {
+        acc[topic] = normalized;
+      }
+      return acc;
+    }, {});
+    localStorage.setItem(MESSAGE_DRAFTS_STORAGE_KEY, JSON.stringify(compact));
+  } catch {
+    // Ignore storage failures in private mode.
+  }
+}
+
+function loadPostDraft(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(localStorage.getItem(POST_DRAFT_STORAGE_KEY) || '').slice(0, 6000);
+  } catch {
+    return '';
+  }
 }
 
 function buildP2PTopic(userA: number, userB: number): string {
@@ -250,15 +388,24 @@ export default function AppPage() {
   const realtimeRef = useRef<RealtimeClient | null>(null);
   const activeTopicRef = useRef<string>('');
   const authUserIdRef = useRef<number>(0);
+  const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatStreamRef = useRef<HTMLDivElement | null>(null);
+  const composerMenuRef = useRef<HTMLDivElement | null>(null);
+  const conversationSearchRef = useRef<HTMLInputElement | null>(null);
+  const messageDraftsRef = useRef<Record<string, string>>({});
+  const skipTypingPulseRef = useRef(false);
 
   const [ready, setReady] = useState(false);
   const [showAppIntro, setShowAppIntro] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
   const [authUserId, setAuthUserId] = useState<number>(0);
   const [authUsername, setAuthUsername] = useState('');
   const [selectedCoach, setSelectedCoach] = useState<'zj' | 'lc'>('zj');
 
   const [tab, setTab] = useState<TabKey>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationQuery, setConversationQuery] = useState('');
+  const [conversationFilter, setConversationFilter] = useState<ConversationFilter>('all');
   const [activeTopic, setActiveTopic] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, boolean>>({});
@@ -298,8 +445,16 @@ export default function AppPage() {
   const [postFilePreviews, setPostFilePreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
   const [postPending, setPostPending] = useState(false);
   const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
+  const [postCommentsById, setPostCommentsById] = useState<Record<number, FeedComment[]>>({});
+  const [expandedCommentPostIds, setExpandedCommentPostIds] = useState<number[]>([]);
+  const [commentDraftByPostId, setCommentDraftByPostId] = useState<Record<number, string>>({});
+  const [commentLoadingPostIds, setCommentLoadingPostIds] = useState<number[]>([]);
+  const [commentPendingPostId, setCommentPendingPostId] = useState<number | null>(null);
+  const [mentionNotifications, setMentionNotifications] = useState<MentionNotification[]>([]);
+  const [mentionsLoading, setMentionsLoading] = useState(false);
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [healthMomentum, setHealthMomentum] = useState<HealthMomentumResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [healthSync, setHealthSync] = useState({ steps: '0', calories: '0' });
   const [syncPending, setSyncPending] = useState(false);
@@ -309,6 +464,14 @@ export default function AppPage() {
   const [profilePending, setProfilePending] = useState(false);
   const [profileAvatarUploading, setProfileAvatarUploading] = useState(false);
   const [profileBackgroundUploading, setProfileBackgroundUploading] = useState(false);
+  const [authSessions, setAuthSessions] = useState<AuthSession[]>([]);
+  const [authSessionsLoading, setAuthSessionsLoading] = useState(false);
+  const [authSessionPendingId, setAuthSessionPendingId] = useState<string | null>(null);
+  const [logoutAllSessionsPending, setLogoutAllSessionsPending] = useState(false);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [securityEventsLoading, setSecurityEventsLoading] = useState(false);
+  const [abuseReports, setAbuseReports] = useState<AbuseReport[]>([]);
+  const [abuseReportsLoading, setAbuseReportsLoading] = useState(false);
   const [profileViewer, setProfileViewer] = useState<ProfileViewerState>({
     open: false,
     loading: false,
@@ -344,6 +507,42 @@ export default function AppPage() {
     [activeGroupMembers, authUserId],
   );
 
+  const conversationCounts = useMemo(
+    () => conversations.reduce(
+      (acc, conversation) => {
+        acc[conversation.type] += 1;
+        return acc;
+      },
+      { coach: 0, dm: 0, group: 0 },
+    ),
+    [conversations],
+  );
+
+  const filteredConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase();
+    return conversations.filter((conversation) => {
+      if (conversationFilter !== 'all' && conversation.type !== conversationFilter) return false;
+      if (!query) return true;
+
+      const haystack = [
+        conversation.name,
+        conversation.subtitle,
+        conversation.preview,
+        conversation.topic,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [conversationFilter, conversationQuery, conversations]);
+
+  const unreadMentionCount = useMemo(
+    () => mentionNotifications.filter((item) => !item.is_read).length,
+    [mentionNotifications],
+  );
+
   const typingLabel = useMemo(() => {
     const ids = Object.entries(typingUsers)
       .filter(([, value]) => value)
@@ -376,11 +575,101 @@ export default function AppPage() {
     return `Secure code rotates every minute · valid until ${formatTime(connectExpiresAt)}.`;
   }, [connectExpiresAt]);
 
+  const totalUnreadCount = useMemo(
+    () => conversations.reduce((sum, item) => sum + Number(item.unreadCount || 0) + Number(item.mentionCount || 0), 0),
+    [conversations],
+  );
+
+  const panelMomentum = useMemo(() => {
+    if (tab === 'messages') {
+      return {
+        kicker: 'Daily Momentum',
+        title: 'Keep your coaching loop active',
+        subtitle: 'Jump between DM, groups, and coach threads without context loss.',
+        stats: [
+          { label: 'Live chats', value: String(conversations.length) },
+          { label: 'Unread', value: String(totalUnreadCount) },
+          { label: 'Mentions', value: String(unreadMentionCount) },
+        ],
+      };
+    }
+
+    if (tab === 'feed') {
+      const totalLikes = feed.reduce((sum, post) => sum + Number(post.reaction_count || 0), 0);
+      const totalComments = feed.reduce((sum, post) => sum + Number(post.comment_count || 0), 0);
+      return {
+        kicker: 'Community Pulse',
+        title: 'Post progress, capture momentum',
+        subtitle: 'Share workouts and meals so your circle can react in real-time.',
+        stats: [
+          { label: 'Posts', value: String(feed.length) },
+          { label: 'Likes', value: String(totalLikes) },
+          { label: 'Comments', value: String(totalComments) },
+        ],
+      };
+    }
+
+    if (tab === 'friends') {
+      return {
+        kicker: 'Connection Graph',
+        title: 'Build your accountability network',
+        subtitle: 'Add friends, accept requests, and spin up focused groups fast.',
+        stats: [
+          { label: 'Friends', value: String(friends.length) },
+          { label: 'Requests', value: String(requests.length) },
+          { label: 'Groups', value: String(conversationCounts.group) },
+        ],
+      };
+    }
+
+    if (tab === 'leaderboard') {
+      const topName = leaderboard[0]?.username || '-';
+      const topScore = leaderboard[0] ? String((leaderboard[0].steps || 0) + (leaderboard[0].calories_burned || 0)) : '0';
+      return {
+        kicker: 'Performance Board',
+        title: 'Climb your weekly ranking',
+        subtitle: 'Sync daily movement and keep pressure on your training circle.',
+        stats: [
+          { label: 'Athletes', value: String(leaderboard.length) },
+          { label: '#1', value: topName },
+          { label: 'Top score', value: topScore },
+        ],
+      };
+    }
+
+    return {
+      kicker: 'Identity + Security',
+      title: 'Own your profile footprint',
+      subtitle: 'Tune coach style, profile presence, and active sessions in one place.',
+      stats: [
+        { label: 'Coach', value: selectedCoach.toUpperCase() },
+        { label: 'Sessions', value: String(authSessions.length) },
+        { label: 'Security', value: String(securityEvents.length) },
+      ],
+    };
+  }, [
+    tab,
+    conversations,
+    totalUnreadCount,
+    unreadMentionCount,
+    feed,
+    friends.length,
+    requests.length,
+    conversationCounts.group,
+    leaderboard,
+    selectedCoach,
+    authSessions.length,
+    securityEvents.length,
+    abuseReports.length,
+  ]);
+
   const openMediaLightbox = (url: string, label = 'Media') => {
+    const resolved = resolveApiAssetUrl(url);
+    if (!resolved) return;
     setMediaLightbox({
       open: true,
-      url,
-      isVideo: isVideoUrl(url),
+      url: resolved,
+      isVideo: isVideoUrl(resolved),
       label,
     });
   };
@@ -390,8 +679,14 @@ export default function AppPage() {
   };
 
   const showNotice = (message: string) => {
+    if (noticeTimeoutRef.current) {
+      clearTimeout(noticeTimeoutRef.current);
+    }
     setNotice(message);
-    setTimeout(() => setNotice(''), 2400);
+    noticeTimeoutRef.current = setTimeout(() => {
+      setNotice('');
+      noticeTimeoutRef.current = null;
+    }, 2400);
   };
 
   const forceReauth = (message = 'Session expired. Please sign in again.') => {
@@ -426,6 +721,14 @@ export default function AppPage() {
           if (prev.some((item) => item.id === message.id)) return prev;
           return [...prev, message];
         });
+
+        if (authUserIdRef.current > 0) {
+          void markMessagesRead({
+            userId: authUserIdRef.current,
+            topic,
+            messageId: Number(message.id),
+          }).catch(() => undefined);
+        }
       }
 
       if (topic === activeTopicRef.current && Number(message.from_user_id) === 0) {
@@ -433,6 +736,7 @@ export default function AppPage() {
       }
 
       loadInbox();
+      void loadMentions(authUserIdRef.current);
       return;
     }
 
@@ -474,6 +778,7 @@ export default function AppPage() {
     setSelectedCoach(auth.selectedCoach);
     const bootstrapCoachName = coachDisplayName(auth.selectedCoach);
     const defaultCoachTopic = `coach_${auth.userId}`;
+    messageDraftsRef.current = loadMessageDrafts();
     setConversations([
       {
         topic: defaultCoachTopic,
@@ -485,6 +790,8 @@ export default function AppPage() {
       },
     ]);
     setActiveTopic(defaultCoachTopic);
+    setComposer(messageDraftsRef.current[defaultCoachTopic] || '');
+    setPostText(loadPostDraft());
 
     const params = new URLSearchParams(window.location.search);
     const incomingTab = params.get('tab') as TabKey | null;
@@ -505,7 +812,11 @@ export default function AppPage() {
       loadFeed(auth.userId),
       loadLeaderboard(auth.userId),
       loadProfile(auth.userId),
+      loadAuthSessions(),
+      loadSecurityEvents(auth.userId),
+      loadAbuseReports(auth.userId),
       loadConnectInfo(auth.userId),
+      loadMentions(auth.userId),
     ]);
   };
 
@@ -527,11 +838,36 @@ export default function AppPage() {
   }, []);
 
   useEffect(() => {
+    const onAuthRefreshed = (event: Event) => {
+      const detail = (event as CustomEvent<{ token?: string }>).detail;
+      const token = String(detail?.token || '').trim();
+      if (!token) return;
+      realtimeRef.current?.updateToken(token);
+    };
+    window.addEventListener('zym-auth-refreshed', onAuthRefreshed as EventListener);
+    return () => window.removeEventListener('zym-auth-refreshed', onAuthRefreshed as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const syncOnline = () => setIsOnline(window.navigator.onLine);
+    syncOnline();
+    window.addEventListener('online', syncOnline);
+    window.addEventListener('offline', syncOnline);
+    return () => {
+      window.removeEventListener('online', syncOnline);
+      window.removeEventListener('offline', syncOnline);
+    };
+  }, []);
+
+  useEffect(() => {
     activeTopicRef.current = activeTopic;
     if (!activeTopic) return;
 
     void loadMessagesForTopic(activeTopic);
     setTypingUsers({});
+    setComposerActionsOpen(false);
+    skipTypingPulseRef.current = true;
+    setComposer(messageDraftsRef.current[activeTopic] || '');
     Object.values(typingTimeoutRef.current).forEach((timer) => clearTimeout(timer));
     typingTimeoutRef.current = {};
     setCoachReplyPending(false);
@@ -553,6 +889,10 @@ export default function AppPage() {
 
   useEffect(() => {
     if (!activeTopic) return;
+    if (skipTypingPulseRef.current) {
+      skipTypingPulseRef.current = false;
+      return;
+    }
     const shouldTyping = composer.trim().length > 0;
     realtimeRef.current?.typing(activeTopic, shouldTyping);
 
@@ -563,10 +903,19 @@ export default function AppPage() {
 
   useEffect(() => {
     return () => {
+      if (noticeTimeoutRef.current) {
+        clearTimeout(noticeTimeoutRef.current);
+      }
       Object.values(typingTimeoutRef.current).forEach((timer) => clearTimeout(timer));
       typingTimeoutRef.current = {};
     };
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(''), 5600);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   useEffect(() => {
     if (!ready) return;
@@ -584,6 +933,20 @@ export default function AppPage() {
   }, [ready, authUserId, tab]);
 
   useEffect(() => {
+    if (!ready || !authUserId || tab !== 'messages') return;
+    void loadMentions(authUserId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authUserId, tab]);
+
+  useEffect(() => {
+    if (!ready || !authUserId || tab !== 'profile') return;
+    void loadAuthSessions();
+    void loadSecurityEvents(authUserId);
+    void loadAbuseReports(authUserId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authUserId, tab]);
+
+  useEffect(() => {
     if (!mediaLightbox.open) return;
     const onEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -594,6 +957,43 @@ export default function AppPage() {
     return () => window.removeEventListener('keydown', onEscape);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaLightbox.open]);
+
+  useEffect(() => {
+    if (!composerActionsOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!composerMenuRef.current?.contains(target)) {
+        setComposerActionsOpen(false);
+      }
+    };
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setComposerActionsOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onEscape);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onEscape);
+    };
+  }, [composerActionsOpen]);
+
+  useEffect(() => {
+    const onHotkey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        if (tab !== 'messages') return;
+        event.preventDefault();
+        conversationSearchRef.current?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', onHotkey);
+    return () => window.removeEventListener('keydown', onHotkey);
+  }, [tab]);
 
   useEffect(() => {
     const previews = attachments.map((file) => ({
@@ -620,6 +1020,41 @@ export default function AppPage() {
       previews.forEach((preview) => URL.revokeObjectURL(preview.url));
     };
   }, [postFiles]);
+
+  useEffect(() => {
+    if (!activeTopic) return;
+    const next = { ...messageDraftsRef.current };
+    if (composer.trim()) {
+      next[activeTopic] = composer.slice(0, 2000);
+    } else {
+      delete next[activeTopic];
+    }
+    messageDraftsRef.current = next;
+    persistMessageDrafts(next);
+  }, [composer, activeTopic]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (postText.trim()) {
+        localStorage.setItem(POST_DRAFT_STORAGE_KEY, postText.slice(0, 6000));
+      } else {
+        localStorage.removeItem(POST_DRAFT_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures in private mode.
+    }
+  }, [postText]);
+
+  useEffect(() => {
+    const container = chatStreamRef.current;
+    if (!container || tab !== 'messages') return;
+
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
+    if (isNearBottom || messages.length < 16) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages.length, tab, activeTopic]);
 
   useEffect(() => {
     if (!friendQuery.trim()) {
@@ -716,6 +1151,8 @@ export default function AppPage() {
           type: 'dm' as const,
           subtitle: 'Friend',
           preview: 'Start chatting',
+          unreadCount: 0,
+          mentionCount: 0,
           avatarUrl: friend.avatar_url,
           userId: friend.id,
         }))
@@ -728,6 +1165,8 @@ export default function AppPage() {
           type: 'coach',
           subtitle: 'AI Coach',
           preview: inbox.coach.last_message_preview,
+          unreadCount: Number(inbox.coach.unread_count || 0),
+          mentionCount: Number(inbox.coach.mention_count || 0),
           avatarUrl: null,
           userId: 0,
         },
@@ -737,6 +1176,8 @@ export default function AppPage() {
           type: 'dm' as const,
           subtitle: 'Direct Message',
           preview: item.last_message_preview,
+          unreadCount: Number(item.unread_count || 0),
+          mentionCount: Number(item.mention_count || 0),
           avatarUrl: item.avatar_url,
           userId: Number(item.other_user_id),
         })),
@@ -747,6 +1188,8 @@ export default function AppPage() {
           type: 'group' as const,
           subtitle: `Group · ${item.coach_enabled === 'none' ? 'No AI' : 'Coach enabled'}`,
           preview: item.last_message_preview,
+          unreadCount: Number(item.unread_count || 0),
+          mentionCount: Number(item.mention_count || 0),
           avatarUrl: null,
           groupId: item.id,
           coachEnabled: item.coach_enabled,
@@ -769,6 +1212,11 @@ export default function AppPage() {
     try {
       const rows = await getMessages(topic);
       setMessages(rows);
+      const latestMessageId = rows.length > 0 ? rows[rows.length - 1]?.id : undefined;
+      if (authUserId > 0) {
+        await markMessagesRead({ userId: authUserId, topic, messageId: latestMessageId });
+      }
+      await loadInbox();
     } catch (err: any) {
       setError(err.message || 'Failed to load messages.');
     }
@@ -814,14 +1262,33 @@ export default function AppPage() {
     }
   }
 
+  async function loadMentions(userId = authUserId) {
+    if (!userId) return;
+
+    try {
+      setMentionsLoading(true);
+      const rows = await getMentionNotifications(userId);
+      setMentionNotifications(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load mentions.');
+    } finally {
+      setMentionsLoading(false);
+    }
+  }
+
   async function loadLeaderboard(userId = authUserId) {
     if (!userId) return;
 
     try {
       setLeaderboardLoading(true);
-      const result = await getLeaderboard(userId);
-      setLeaderboard(result.leaderboard);
+      const [leaderboardResult, momentumResult] = await Promise.all([
+        getLeaderboard(userId),
+        getHealthMomentum(userId),
+      ]);
+      setLeaderboard(leaderboardResult.leaderboard);
+      setHealthMomentum(momentumResult);
     } catch (err: any) {
+      setHealthMomentum(null);
       setError(err.message || 'Failed to load leaderboard.');
     } finally {
       setLeaderboardLoading(false);
@@ -843,6 +1310,44 @@ export default function AppPage() {
       });
     } catch (err: any) {
       setError(err.message || 'Failed to load profile.');
+    }
+  }
+
+  async function loadAuthSessions() {
+    try {
+      setAuthSessionsLoading(true);
+      const rows = await getAuthSessions();
+      setAuthSessions(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load sessions.');
+    } finally {
+      setAuthSessionsLoading(false);
+    }
+  }
+
+  async function loadSecurityEvents(userId = authUserId) {
+    if (!userId) return;
+    try {
+      setSecurityEventsLoading(true);
+      const rows = await getSecurityEvents(userId, 60);
+      setSecurityEvents(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load security timeline.');
+    } finally {
+      setSecurityEventsLoading(false);
+    }
+  }
+
+  async function loadAbuseReports(userId = authUserId) {
+    if (!userId) return;
+    try {
+      setAbuseReportsLoading(true);
+      const rows = await getAbuseReports(userId);
+      setAbuseReports(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load safety reports.');
+    } finally {
+      setAbuseReportsLoading(false);
     }
   }
 
@@ -874,7 +1379,13 @@ export default function AppPage() {
   }
 
   async function handleSendMessage() {
-    if (!activeTopic || (!composer.trim() && attachments.length === 0)) return;
+    if (!isOnline) {
+      setError('You are offline. Reconnect to send messages.');
+      return;
+    }
+    if (pendingSend || !activeTopic || (!composer.trim() && attachments.length === 0)) return;
+
+    const optimisticId = -Date.now();
 
     try {
       setPendingSend(true);
@@ -891,7 +1402,7 @@ export default function AppPage() {
       setComposerActionsOpen(false);
 
       const optimistic: ChatMessage = {
-        id: Date.now(),
+        id: optimisticId,
         topic: activeTopic,
         from_user_id: authUserId,
         content: text || null,
@@ -918,8 +1429,10 @@ export default function AppPage() {
       }
 
       showNotice('Message sent.');
+      await loadMessagesForTopic(activeTopic);
       await loadInbox();
     } catch (err: any) {
+      setMessages((prev) => prev.filter((item) => item.id !== optimisticId));
       setError(err.message || 'Failed to send message.');
     } finally {
       setPendingSend(false);
@@ -1099,6 +1612,10 @@ export default function AppPage() {
   }
 
   async function handleCreatePost() {
+    if (!isOnline) {
+      setError('You are offline. Reconnect to publish posts.');
+      return;
+    }
     if (!postText.trim() && postFiles.length === 0) return;
 
     try {
@@ -1132,11 +1649,96 @@ export default function AppPage() {
     }
   }
 
+  async function loadPostComments(postId: number) {
+    try {
+      setCommentLoadingPostIds((prev) => (prev.includes(postId) ? prev : [...prev, postId]));
+      const comments = await getPostComments(postId);
+      setPostCommentsById((prev) => ({ ...prev, [postId]: comments }));
+    } catch (err: any) {
+      setError(err.message || 'Failed to load comments.');
+    } finally {
+      setCommentLoadingPostIds((prev) => prev.filter((id) => id !== postId));
+    }
+  }
+
+  async function togglePostComments(postId: number) {
+    const nextExpanded = !expandedCommentPostIds.includes(postId);
+    setExpandedCommentPostIds((prev) => (
+      prev.includes(postId) ? prev.filter((id) => id !== postId) : [...prev, postId]
+    ));
+    if (nextExpanded && !postCommentsById[postId]) {
+      await loadPostComments(postId);
+    }
+  }
+
+  async function handleCreatePostComment(postId: number) {
+    const content = String(commentDraftByPostId[postId] || '').trim();
+    if (!content) return;
+
+    try {
+      setCommentPendingPostId(postId);
+      await createPostComment({ postId, userId: authUserId, content });
+      setCommentDraftByPostId((prev) => ({ ...prev, [postId]: '' }));
+      await Promise.all([
+        loadPostComments(postId),
+        loadFeed(),
+        loadMentions(),
+      ]);
+      showNotice('Comment posted.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create comment.');
+    } finally {
+      setCommentPendingPostId(null);
+    }
+  }
+
+  async function handleOpenMention(notification: MentionNotification) {
+    try {
+      await markMentionNotificationsRead({ userId: authUserId, ids: [notification.id] });
+      setMentionNotifications((prev) => prev.map((item) => (
+        item.id === notification.id ? { ...item, is_read: true } : item
+      )));
+    } catch {
+      // Best effort; navigation should still continue.
+    }
+
+    const topic = String(notification.topic || '').trim();
+    if (!topic) return;
+
+    if (topic.startsWith('post_')) {
+      const postId = Number(topic.replace('post_', ''));
+      if (Number.isInteger(postId) && postId > 0) {
+        setTab('feed');
+        if (!expandedCommentPostIds.includes(postId)) {
+          setExpandedCommentPostIds((prev) => [...prev, postId]);
+        }
+        await loadPostComments(postId);
+      }
+      return;
+    }
+
+    setTab('messages');
+    setActiveTopic(topic);
+  }
+
+  async function handleMarkAllMentionsRead() {
+    try {
+      await markMentionNotificationsRead({ userId: authUserId });
+      setMentionNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+    } catch (err: any) {
+      setError(err.message || 'Failed to mark mentions as read.');
+    }
+  }
+
   function togglePostExpanded(postId: number) {
     setExpandedPostIds((prev) => (prev.includes(postId) ? prev.filter((id) => id !== postId) : [...prev, postId]));
   }
 
   async function handleSyncHealth() {
+    if (!isOnline) {
+      setError('You are offline. Reconnect to sync health data.');
+      return;
+    }
     try {
       setSyncPending(true);
       await syncHealth({
@@ -1255,7 +1857,66 @@ export default function AppPage() {
     }
   }
 
-  function handleLogout() {
+  async function handleRevokeSession(sessionId: string) {
+    if (!sessionId) return;
+    try {
+      setAuthSessionPendingId(sessionId);
+      await revokeAuthSession(sessionId);
+      setAuthSessions((prev) => prev.filter((session) => session.sessionId !== sessionId));
+      showNotice('Session revoked.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to revoke session.');
+    } finally {
+      setAuthSessionPendingId(null);
+    }
+  }
+
+  async function handleLogoutAllSessions() {
+    try {
+      setLogoutAllSessionsPending(true);
+      await logoutAllSessions();
+      await loadAuthSessions();
+      showNotice('Other sessions have been logged out.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to logout other sessions.');
+    } finally {
+      setLogoutAllSessionsPending(false);
+    }
+  }
+
+  async function submitAbuseReport(
+    targetType: 'user' | 'post' | 'message' | 'group',
+    targetId: number,
+    defaultReason: string,
+    details = '',
+  ) {
+    const reasonInput = window.prompt('Reason for report', defaultReason);
+    if (reasonInput === null) return;
+    const normalized = reasonInput.trim();
+    const reason = (normalized || defaultReason).slice(0, 80);
+    if (!reason) return;
+
+    try {
+      await createAbuseReport({
+        userId: authUserId,
+        targetType,
+        targetId,
+        reason,
+        details: details.slice(0, 1200),
+      });
+      showNotice('Report submitted. Thank you for helping keep the community safe.');
+      await loadAbuseReports();
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit report.');
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logoutSession();
+    } catch {
+      // Ignore logout API errors; always clear local auth.
+    }
     clearAuth();
     realtimeRef.current?.disconnect();
     router.replace('/login');
@@ -1265,10 +1926,14 @@ export default function AppPage() {
     setter((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   }
 
-  function onFileSelect(setter: Dispatch<SetStateAction<File[]>>) {
+  function onFileSelect(existingFiles: File[], setter: Dispatch<SetStateAction<File[]>>) {
     return (event: ChangeEvent<HTMLInputElement>) => {
       const list = event.target.files ? Array.from(event.target.files) : [];
-      setter((prev) => [...prev, ...list].slice(0, 6));
+      const merged = mergeMediaFiles(existingFiles, list);
+      setter(merged.files);
+      if (merged.errors.length > 0) {
+        setError(merged.errors[0]);
+      }
       event.target.value = '';
     };
   }
@@ -1287,10 +1952,18 @@ export default function AppPage() {
   }
 
   return (
-    <main className="app-shell app-shell-refined">
+    <main className={`app-shell app-shell-refined ${isOnline ? '' : 'app-shell-offline'}`}>
+      {!isOnline ? (
+        <div className="offline-banner">
+          Offline mode: browsing is available, but sending messages/posts is temporarily disabled.
+        </div>
+      ) : null}
+
       <aside className="surface-card app-rail zym-enter zym-delay-1">
         <div className="rail-brand zym-pulse-soft">
-          Z
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="ZYM logo" width={28} height={28} />
+          <span>ZYM</span>
         </div>
 
         {tabs.map((item) => (
@@ -1304,6 +1977,9 @@ export default function AppPage() {
               <TabGlyph icon={item.icon} active={tab === item.key} />
             </span>
             <span className="rail-nav-label">{item.label}</span>
+            {item.key === 'messages' && unreadMentionCount > 0 ? (
+              <span className="rail-nav-badge">{Math.min(unreadMentionCount, 99)}</span>
+            ) : null}
           </button>
         ))}
       </aside>
@@ -1313,44 +1989,134 @@ export default function AppPage() {
           <h2 style={{ fontSize: 24 }}>{tab === 'messages' ? 'Conversations' : tabs.find((item) => item.key === tab)?.label}</h2>
           <p style={{ marginTop: 4, color: 'var(--ink-500)', fontSize: 13 }}>
             {tab === 'messages'
-              ? `Coach: ${selectedCoach.toUpperCase()} · ${conversations.length} chats`
+              ? `Coach: ${selectedCoach.toUpperCase()} · ${filteredConversations.length}/${conversations.length} chats`
               : 'Build your lifestyle with AI + community'}
           </p>
+          {tab === 'messages' ? (
+            <div className="conversation-tools">
+              <input
+                ref={conversationSearchRef}
+                className="input-shell conversation-search"
+                value={conversationQuery}
+                onChange={(event) => setConversationQuery(event.target.value)}
+                placeholder="Search chats, people, or groups..."
+                aria-label="Search conversations"
+              />
+              <div className="conversation-filter-row">
+                {([
+                  { key: 'all', label: 'All', count: conversations.length },
+                  { key: 'coach', label: 'Coach', count: conversationCounts.coach },
+                  { key: 'dm', label: 'DM', count: conversationCounts.dm },
+                  { key: 'group', label: 'Group', count: conversationCounts.group },
+                ] as const).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`conversation-filter-pill ${conversationFilter === item.key ? 'active' : ''}`}
+                    onClick={() => setConversationFilter(item.key)}
+                    aria-pressed={conversationFilter === item.key}
+                  >
+                    <span>{item.label}</span>
+                    <strong>{item.count}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </header>
 
-        {tab === 'messages' ? (
-          <div className="conversation-stack">
-            {conversations.map((conversation) => (
-              <button
-                key={conversation.topic}
-                type="button"
-                onClick={() => setActiveTopic(conversation.topic)}
-                className={`conversation-tile ${activeTopic === conversation.topic ? 'active' : ''}`}
-              >
-                <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr auto', alignItems: 'center', gap: 10 }}>
-                  {conversation.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={conversation.avatarUrl}
-                      alt={conversation.name}
-                      style={{ width: 36, height: 36, borderRadius: 12, objectFit: 'cover', border: '1px solid var(--line)' }}
-                    />
-                  ) : (
-                    <div className={`conversation-avatar ${conversation.type}`}>
-                      {avatarInitial(conversation.name || displayNameFromTopic(conversation.topic))}
-                    </div>
-                  )}
-                  <strong style={{ fontFamily: 'var(--font-display)' }}>{conversation.name || displayNameFromTopic(conversation.topic)}</strong>
-                  <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>{conversation.type.toUpperCase()}</span>
-                </div>
-                <p style={{ marginTop: 4, color: 'var(--ink-500)', fontSize: 12 }}>{conversation.subtitle}</p>
-                {conversation.preview && (
-                  <p style={{ marginTop: 4, color: 'var(--ink-700)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {conversation.preview}
-                  </p>
-                )}
-              </button>
+        <section className={`panel-momentum panel-momentum-${tab}`}>
+          <div className="panel-momentum-copy">
+            <span className="panel-momentum-kicker">{panelMomentum.kicker}</span>
+            <h3>{panelMomentum.title}</h3>
+            <p>{panelMomentum.subtitle}</p>
+          </div>
+          <div className="panel-momentum-stats">
+            {panelMomentum.stats.map((item) => (
+              <article key={item.label} className="panel-momentum-stat">
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </article>
             ))}
+          </div>
+        </section>
+
+        {tab === 'messages' ? (
+          <div className="conversation-stack-wrap">
+            <section className="mention-panel">
+              <div className="mention-panel-head">
+                <h3 style={{ fontSize: 14 }}>Mentions</h3>
+                {unreadMentionCount > 0 ? (
+                  <button className="btn btn-ghost" style={{ padding: '5px 9px' }} type="button" onClick={() => void handleMarkAllMentionsRead()}>
+                    Mark all read
+                  </button>
+                ) : null}
+              </div>
+              {mentionsLoading ? (
+                <p className="entity-sub">Loading mentions...</p>
+              ) : null}
+              {!mentionsLoading && mentionNotifications.length === 0 ? (
+                <p className="entity-sub">No mentions yet.</p>
+              ) : null}
+              {!mentionsLoading ? (
+                <div className="mention-list">
+                  {mentionNotifications.slice(0, 4).map((notification) => (
+                    <button
+                      key={notification.id}
+                      type="button"
+                      className={`mention-item ${notification.is_read ? '' : 'unread'}`}
+                      onClick={() => void handleOpenMention(notification)}
+                    >
+                      <div className="mention-item-head">
+                        <strong>{notification.actor_username || 'Someone'}</strong>
+                        <span>{formatTime(notification.created_at)}</span>
+                      </div>
+                      <p>{notification.snippet || 'Mentioned you'}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <div className="conversation-overview-strip">
+              <div className="conversation-overview-item">
+                <span>Coach</span>
+                <strong>{conversationCounts.coach}</strong>
+              </div>
+              <div className="conversation-overview-item">
+                <span>DM</span>
+                <strong>{conversationCounts.dm}</strong>
+              </div>
+              <div className="conversation-overview-item">
+                <span>Groups</span>
+                <strong>{conversationCounts.group}</strong>
+              </div>
+              <div className="conversation-overview-item">
+                <span>Mentions</span>
+                <strong>{unreadMentionCount}</strong>
+              </div>
+            </div>
+
+            <div className="conversation-stack">
+              {filteredConversations.length === 0 ? (
+                <div className="conversation-empty">
+                  <strong>No conversations found</strong>
+                  <p>Try another keyword or switch filter.</p>
+                </div>
+              ) : null}
+
+              {filteredConversations.map((conversation) => (
+                <ConversationTile
+                  key={conversation.topic}
+                  item={conversation}
+                  active={activeTopic === conversation.topic}
+                  onSelect={setActiveTopic}
+                  resolveAssetUrl={resolveApiAssetUrl}
+                  displayNameFromTopic={displayNameFromTopic}
+                  avatarInitial={avatarInitial}
+                />
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -1527,7 +2293,7 @@ export default function AppPage() {
               <div className="feed-composer-toolbar">
                 <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
                   Add media
-                  <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(setPostFiles)} />
+                  <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
                 </label>
                 <span className="entity-sub">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
                 {postFiles.length > 0 ? (
@@ -1537,40 +2303,14 @@ export default function AppPage() {
                 ) : null}
               </div>
 
-              {postFiles.length > 0 ? (
-                <div className="media-grid-preview">
-                  {postFilePreviews.map((preview, index) => {
-                    return (
-                      <div key={`${preview.name}-${index}`} className="media-thumb">
-                        {preview.isVideo ? (
-                          <video
-                            src={preview.url}
-                            controls
-                            preload="metadata"
-                            style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }}
-                          />
-                        ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={preview.url}
-                            alt={preview.name}
-                            style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }}
-                          />
-                        )}
-                        <button
-                          className="btn media-thumb-remove"
-                          type="button"
-                          onClick={() => removeAttachmentAt(index, setPostFiles)}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
+              <MediaPreviewGrid
+                items={postFilePreviews}
+                onRemove={(index) => removeAttachmentAt(index, setPostFiles)}
+                wrapperClassName="media-grid-preview"
+                itemClassName="media-thumb"
+              />
 
-              <button className="btn btn-primary" style={{ marginTop: 10, width: 'fit-content' }} disabled={postPending} onClick={() => void handleCreatePost()}>
+              <button className="btn btn-primary" style={{ marginTop: 10, width: 'fit-content' }} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
                 {postPending ? 'Posting...' : 'Publish'}
               </button>
             </section>
@@ -1609,21 +2349,25 @@ export default function AppPage() {
 
                 {post.media_urls?.length > 0 ? (
                   <div className="post-media-grid">
-                    {post.media_urls.map((url) => (
-                      <button
-                        key={url}
-                        type="button"
-                        className="post-media-item"
-                        onClick={() => openMediaLightbox(url, `${post.username}'s post media`)}
-                      >
-                        {isVideoUrl(url) ? (
-                          <video src={url} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
-                        ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={url} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
-                        )}
-                      </button>
-                    ))}
+                    {post.media_urls.map((url) => {
+                      const mediaUrl = resolveApiAssetUrl(url);
+                      if (!mediaUrl) return null;
+                      return (
+                        <button
+                          key={mediaUrl}
+                          type="button"
+                          className="post-media-item"
+                          onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
+                        >
+                          {isVideoUrl(mediaUrl) ? (
+                            <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : null}
 
@@ -1631,10 +2375,64 @@ export default function AppPage() {
                   <button className="btn btn-ghost" onClick={() => void handleReact(post.id)}>
                     Like {post.reaction_count || 0}
                   </button>
+                  <button className="btn btn-ghost" onClick={() => void togglePostComments(post.id)}>
+                    Comments {post.comment_count || 0}
+                  </button>
                   <button className="btn btn-ghost" onClick={() => togglePostExpanded(post.id)}>
                     {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
                   </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => void submitAbuseReport('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
+                  >
+                    Report
+                  </button>
                 </div>
+
+                {expandedCommentPostIds.includes(post.id) ? (
+                  <section className="feed-comment-panel">
+                    <div className="feed-comment-list">
+                      {commentLoadingPostIds.includes(post.id) ? (
+                        <p className="entity-sub">Loading comments...</p>
+                      ) : null}
+                      {(postCommentsById[post.id] || []).map((comment) => (
+                        <article key={comment.id} className="feed-comment-item">
+                          <div className="feed-comment-head">
+                            <strong>{comment.username}</strong>
+                            <span>{formatTime(comment.created_at)}</span>
+                          </div>
+                          <p>{comment.content}</p>
+                        </article>
+                      ))}
+                      {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
+                        <p className="entity-sub">No comments yet. Start the conversation.</p>
+                      ) : null}
+                    </div>
+
+                    <div className="feed-comment-composer">
+                      <input
+                        className="input-shell"
+                        placeholder="Write a comment..."
+                        value={commentDraftByPostId[post.id] || ''}
+                        onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void handleCreatePostComment(post.id);
+                          }
+                        }}
+                      />
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        disabled={commentPendingPostId === post.id}
+                        onClick={() => void handleCreatePostComment(post.id)}
+                      >
+                        {commentPendingPostId === post.id ? 'Posting...' : 'Reply'}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
               </article>
             ))}
           </div>
@@ -1651,9 +2449,63 @@ export default function AppPage() {
                 <input className="input-shell" value={healthSync.steps} onChange={(event) => setHealthSync((prev) => ({ ...prev, steps: event.target.value }))} placeholder="Steps" />
                 <input className="input-shell" value={healthSync.calories} onChange={(event) => setHealthSync((prev) => ({ ...prev, calories: event.target.value }))} placeholder="Calories" />
               </div>
-              <button className="btn btn-primary" disabled={syncPending} onClick={() => void handleSyncHealth()}>
+              <button className="btn btn-primary" disabled={syncPending || !isOnline} onClick={() => void handleSyncHealth()}>
                 {syncPending ? 'Syncing...' : 'Sync'}
               </button>
+            </section>
+
+            <section className="flow-card">
+              <div className="flow-card-head">
+                <h3 style={{ fontSize: 18 }}>Momentum (7 days)</h3>
+                <p>Track consistency, trend, and best day from your recent health syncs.</p>
+              </div>
+
+              <div className="health-momentum-grid">
+                <article className="health-momentum-stat">
+                  <span>Current streak</span>
+                  <strong>{healthMomentum?.streakDays ?? 0}d</strong>
+                </article>
+                <article className="health-momentum-stat">
+                  <span>Active days</span>
+                  <strong>{healthMomentum?.activityDays ?? 0}/7</strong>
+                </article>
+                <article className="health-momentum-stat">
+                  <span>Avg steps</span>
+                  <strong>{healthMomentum?.averages.steps ?? 0}</strong>
+                </article>
+                <article className="health-momentum-stat">
+                  <span>Trend</span>
+                  <strong>
+                    {healthMomentum?.trend.direction === 'up' ? 'Up' : healthMomentum?.trend.direction === 'down' ? 'Down' : 'Flat'}
+                  </strong>
+                </article>
+              </div>
+
+              <div className="health-momentum-chart">
+                {(() => {
+                  const rows = healthMomentum?.last7Days || [];
+                  const maxScore = Math.max(...rows.map((item) => item.score), 1);
+                  return rows.map((day) => {
+                    const ratio = Math.max(0.1, day.score / maxScore);
+                    return (
+                      <div key={day.date} className="health-momentum-bar-wrap">
+                        <div className="health-momentum-bar-track">
+                          <div className="health-momentum-bar-fill" style={{ height: `${Math.round(ratio * 100)}%` }} />
+                        </div>
+                        <span>{formatDayLabel(day.date).slice(0, 3)}</span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              {healthMomentum?.bestDay ? (
+                <p className="entity-sub" style={{ marginTop: 8 }}>
+                  Best day: {formatDayLabel(healthMomentum.bestDay.date)} · {healthMomentum.bestDay.steps} steps · {healthMomentum.bestDay.calories_burned} cal
+                </p>
+              ) : (
+                <p className="entity-sub" style={{ marginTop: 8 }}>No synced health momentum yet.</p>
+              )}
             </section>
 
             {leaderboardLoading ? (
@@ -1689,7 +2541,7 @@ export default function AppPage() {
                 {profileDraft.background_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={profileDraft.background_url}
+                    src={resolveApiAssetUrl(profileDraft.background_url)}
                     alt="Profile cover"
                     className="profile-cover-media"
                   />
@@ -1700,7 +2552,7 @@ export default function AppPage() {
                   {profileDraft.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={profileDraft.avatar_url}
+                      src={resolveApiAssetUrl(profileDraft.avatar_url)}
                       alt="Profile avatar"
                       className="profile-avatar-media"
                     />
@@ -1766,6 +2618,13 @@ export default function AppPage() {
               </div>
             </section>
 
+            <CoachRecordsPanel
+              userId={authUserId}
+              active={ready && tab === 'profile' && authUserId > 0}
+              onNotice={showNotice}
+              onError={setError}
+            />
+
             <section className="flow-card form-grid">
               <div className="flow-card-head">
                 <h3 style={{ fontSize: 18 }}>Edit profile</h3>
@@ -1806,7 +2665,116 @@ export default function AppPage() {
               </button>
             </section>
 
-            <button className="btn btn-danger-soft" onClick={handleLogout}>
+            <section className="flow-card form-grid">
+              <div className="flow-card-head">
+                <h3 style={{ fontSize: 18 }}>Device sessions</h3>
+                <p>Manage where your account is signed in.</p>
+              </div>
+
+              <div className="profile-session-actions">
+                <button className="btn btn-ghost" onClick={() => void loadAuthSessions()} disabled={authSessionsLoading}>
+                  {authSessionsLoading ? 'Refreshing...' : 'Refresh sessions'}
+                </button>
+                <button
+                  className="btn btn-danger-soft"
+                  onClick={() => void handleLogoutAllSessions()}
+                  disabled={logoutAllSessionsPending}
+                >
+                  {logoutAllSessionsPending ? 'Processing...' : 'Logout other devices'}
+                </button>
+              </div>
+
+              {authSessionsLoading && authSessions.length === 0 ? (
+                <p className="entity-sub">Loading sessions...</p>
+              ) : null}
+
+              {authSessions.map((session) => (
+                <article key={session.sessionId} className="profile-session-item">
+                  <div>
+                    <strong>{session.deviceName || 'Unknown device'}</strong>
+                    <p className="entity-sub">
+                      {session.ipAddress || 'IP unavailable'} · Last seen {formatSessionDate(session.lastSeenAt)}
+                    </p>
+                    <p className="entity-sub">
+                      Created {formatSessionDate(session.createdAt)} · Expires {formatSessionDate(session.expiresAt)}
+                    </p>
+                  </div>
+                  <div className="profile-session-item-actions">
+                    {session.current ? <span className="profile-session-current">Current</span> : null}
+                    {!session.current ? (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => void handleRevokeSession(session.sessionId)}
+                        disabled={authSessionPendingId === session.sessionId || Boolean(session.revokedAt)}
+                      >
+                        {authSessionPendingId === session.sessionId ? 'Revoking...' : (session.revokedAt ? 'Revoked' : 'Revoke')}
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </section>
+
+            <section className="flow-card form-grid">
+              <div className="flow-card-head">
+                <h3 style={{ fontSize: 18 }}>Security timeline</h3>
+                <p>Recent auth and risk-control events for your account.</p>
+              </div>
+
+              <button className="btn btn-ghost" onClick={() => void loadSecurityEvents()} disabled={securityEventsLoading}>
+                {securityEventsLoading ? 'Refreshing...' : 'Refresh timeline'}
+              </button>
+
+              {securityEventsLoading && securityEvents.length === 0 ? (
+                <p className="entity-sub">Loading security timeline...</p>
+              ) : null}
+
+              {!securityEventsLoading && securityEvents.length === 0 ? (
+                <p className="entity-sub">No security events yet.</p>
+              ) : null}
+
+              {securityEvents.slice(0, 10).map((event) => (
+                <article key={event.id} className={`profile-session-item security-event-item severity-${event.severity}`}>
+                  <div>
+                    <strong>{eventLabel(event.event_type)}</strong>
+                    <p className="entity-sub">
+                      {(event.ip_address || 'IP unavailable')} · {(event.user_agent || 'Unknown client').slice(0, 64)}
+                    </p>
+                    <p className="entity-sub">{formatSessionDate(event.created_at)}</p>
+                  </div>
+                  <div className="profile-session-item-actions">
+                    <span className={`security-event-severity ${event.severity}`}>{event.severity.toUpperCase()}</span>
+                  </div>
+                </article>
+              ))}
+            </section>
+
+            <section className="flow-card form-grid">
+              <div className="flow-card-head">
+                <h3 style={{ fontSize: 18 }}>Safety center</h3>
+                <p>Your latest moderation reports.</p>
+              </div>
+
+              <button className="btn btn-ghost" onClick={() => void loadAbuseReports()} disabled={abuseReportsLoading}>
+                {abuseReportsLoading ? 'Refreshing...' : 'Refresh reports'}
+              </button>
+
+              {abuseReports.length === 0 ? (
+                <p className="entity-sub">No reports submitted yet.</p>
+              ) : null}
+
+              {abuseReports.slice(0, 8).map((report) => (
+                <article key={report.id} className="profile-session-item">
+                  <div>
+                    <strong>{report.target_type} #{report.target_id}</strong>
+                    <p className="entity-sub">{report.reason}</p>
+                    <p className="entity-sub">{formatSessionDate(report.created_at)} · {report.status}</p>
+                  </div>
+                </article>
+              ))}
+            </section>
+
+            <button className="btn btn-danger-soft" onClick={() => void handleLogout()}>
               Logout
             </button>
           </div>
@@ -1828,7 +2796,7 @@ export default function AppPage() {
                   {activeConversation?.avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={activeConversation.avatarUrl}
+                      src={resolveApiAssetUrl(activeConversation.avatarUrl)}
                       alt={activeConversation.name}
                       style={{ width: 52, height: 52, borderRadius: 16, objectFit: 'cover' }}
                     />
@@ -1911,7 +2879,7 @@ export default function AppPage() {
               </section>
             ) : null}
 
-            <div className="chat-stream chat-stream-layered">
+            <div ref={chatStreamRef} className="chat-stream chat-stream-layered">
               {messages.map((message, index) => {
                 const mine = message.from_user_id === authUserId;
                 const previous = index > 0 ? messages[index - 1] : null;
@@ -1952,21 +2920,25 @@ export default function AppPage() {
 
                         {message.media_urls?.length > 0 ? (
                           <div className="chat-attachment-grid">
-                            {message.media_urls.map((url) => (
-                              <button
-                                key={url}
-                                type="button"
-                                className={`chat-attachment-item ${mine ? 'mine' : ''}`}
-                                onClick={() => openMediaLightbox(url, `${senderLabel} attachment`)}
-                              >
-                                {isVideoUrl(url) ? (
-                                  <video src={url} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 140 }} />
-                                ) : (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={url} alt="attachment" style={{ width: '100%', maxHeight: 170, objectFit: 'cover' }} />
-                                )}
-                              </button>
-                            ))}
+                            {message.media_urls.map((url) => {
+                              const mediaUrl = resolveApiAssetUrl(url);
+                              if (!mediaUrl) return null;
+                              return (
+                                <button
+                                  key={mediaUrl}
+                                  type="button"
+                                  className={`chat-attachment-item ${mine ? 'mine' : ''}`}
+                                  onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
+                                >
+                                  {isVideoUrl(mediaUrl) ? (
+                                    <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 140 }} />
+                                  ) : (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={mediaUrl} alt="attachment" style={{ width: '100%', maxHeight: 170, objectFit: 'cover' }} />
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         ) : null}
                       </article>
@@ -2003,44 +2975,21 @@ export default function AppPage() {
             </div>
 
             <footer className="chat-composer chat-composer-elevated">
-              {attachmentPreviews.length > 0 ? (
-                <div className="chat-preview-grid">
-                  {attachmentPreviews.map((preview, index) => (
-                    <div key={`${preview.name}-${index}`} className="chat-preview-item">
-                      {preview.isVideo ? (
-                        <video
-                          src={preview.url}
-                          controls
-                          preload="metadata"
-                          style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }}
-                        />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={preview.url}
-                          alt={preview.name}
-                          style={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }}
-                        />
-                      )}
-                      <button
-                        className="btn media-thumb-remove"
-                        type="button"
-                        onClick={() => removeAttachmentAt(index, setAttachments)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              <MediaPreviewGrid
+                items={attachmentPreviews}
+                onRemove={(index) => removeAttachmentAt(index, setAttachments)}
+                wrapperClassName="chat-preview-grid"
+                itemClassName="chat-preview-item"
+              />
 
               <div className="composer-row composer-row-elevated">
-                <div className="composer-trigger-wrap">
+                <div ref={composerMenuRef} className="composer-trigger-wrap">
                   <button
                     className="btn btn-ghost"
                     type="button"
                     style={{ minWidth: 42, display: 'grid', placeItems: 'center' }}
                     onClick={() => setComposerActionsOpen((prev) => !prev)}
+                    aria-label="Open attachment actions"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
                       <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -2059,7 +3008,7 @@ export default function AppPage() {
                           multiple
                           accept="image/*,video/*"
                           onChange={(event) => {
-                            onFileSelect(setAttachments)(event);
+                            onFileSelect(attachments, setAttachments)(event);
                             setComposerActionsOpen(false);
                           }}
                         />
@@ -2106,14 +3055,21 @@ export default function AppPage() {
                     @coach
                   </button>
                 ) : null}
-                <button className="btn btn-primary composer-send-btn" disabled={pendingSend} onClick={() => void handleSendMessage()}>
+                <button className="btn btn-primary composer-send-btn" disabled={pendingSend || !isOnline} onClick={() => void handleSendMessage()}>
                   {pendingSend ? 'Sending...' : 'Send'}
                 </button>
               </div>
 
               <p className="composer-hint">
-                {attachments.length > 0 ? `${attachments.length} file(s) ready` : 'Supports images and videos'}
+                {attachments.length > 0
+                  ? `${attachments.length}/${MAX_MEDIA_ATTACHMENTS} file(s) ready`
+                  : 'Supports images and videos up to 50MB each'}
               </p>
+              {!isOnline ? (
+                <p className="composer-hint" style={{ marginTop: 4, color: 'var(--danger)' }}>
+                  Reconnect to send messages and media.
+                </p>
+              ) : null}
               {activeConversation?.type === 'group' ? (
                 <p className="composer-hint" style={{ marginTop: 4 }}>
                   {activeConversation.coachEnabled === 'none'
@@ -2235,7 +3191,7 @@ export default function AppPage() {
                 <div className="profile-viewer-hero">
                   {profileViewer.data.profile.background_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={profileViewer.data.profile.background_url} alt="background" style={{ width: '100%', height: 170, objectFit: 'cover' }} />
+                    <img src={resolveApiAssetUrl(profileViewer.data.profile.background_url)} alt="background" style={{ width: '100%', height: 170, objectFit: 'cover' }} />
                   ) : (
                     <div style={{ width: '100%', height: 170, background: 'linear-gradient(120deg, #dce9df, #edf5ef)' }} />
                   )}
@@ -2245,7 +3201,7 @@ export default function AppPage() {
                   {profileViewer.data.profile.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={profileViewer.data.profile.avatar_url}
+                      src={resolveApiAssetUrl(profileViewer.data.profile.avatar_url)}
                       alt={profileViewer.data.profile.username}
                       style={{ width: 66, height: 66, borderRadius: 18, objectFit: 'cover', border: '1px solid var(--line)' }}
                     />
@@ -2275,6 +3231,26 @@ export default function AppPage() {
                   </div>
                 </div>
 
+                {profileViewer.data.profile.id !== authUserId ? (
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => {
+                      const targetId = profileViewer.data?.profile.id;
+                      const username = profileViewer.data?.profile.username || 'user';
+                      if (!targetId) return;
+                      void submitAbuseReport(
+                        'user',
+                        targetId,
+                        'inappropriate_behavior',
+                        `Reported user ${username} from profile viewer`,
+                      );
+                    }}
+                  >
+                    Report user
+                  </button>
+                ) : null}
+
                 <div className="flow-card flow-card-soft form-grid">
                   <p><strong>Bio:</strong> {profileViewer.data.profile.bio || 'No bio yet.'}</p>
                   <p><strong>Goal:</strong> {profileViewer.data.profile.fitness_goal || 'Not set'}</p>
@@ -2302,21 +3278,25 @@ export default function AppPage() {
                         {post.content ? <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{post.content}</p> : null}
                         {post.media_urls.length > 0 ? (
                           <div className="post-media-grid" style={{ marginTop: 8 }}>
-                            {post.media_urls.map((url) => (
-                              <button
-                                key={url}
-                                type="button"
-                                className="post-media-item"
-                                onClick={() => openMediaLightbox(url, `${profileViewer.data?.profile.username}'s post media`)}
-                              >
-                                {isVideoUrl(url) ? (
-                                  <video src={url} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
-                                ) : (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={url} alt="post media" style={{ width: '100%', maxHeight: 180, objectFit: 'cover' }} />
-                                )}
-                              </button>
-                            ))}
+                            {post.media_urls.map((url) => {
+                              const mediaUrl = resolveApiAssetUrl(url);
+                              if (!mediaUrl) return null;
+                              return (
+                                <button
+                                  key={mediaUrl}
+                                  type="button"
+                                  className="post-media-item"
+                                  onClick={() => openMediaLightbox(mediaUrl, `${profileViewer.data?.profile.username}'s post media`)}
+                                >
+                                  {isVideoUrl(mediaUrl) ? (
+                                    <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
+                                  ) : (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={mediaUrl} alt="post media" style={{ width: '100%', maxHeight: 180, objectFit: 'cover' }} />
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         ) : null}
                         <p className="entity-sub" style={{ marginTop: 6 }}>

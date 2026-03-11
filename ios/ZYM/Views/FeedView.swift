@@ -72,7 +72,7 @@ struct FeedView: View {
               let url = apiURL("/community/feed/\(userId)") else { return }
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             guard let data = data,
                   let response = try? JSONDecoder().decode(FeedResponse.self, from: data) else { return }
             DispatchQueue.main.async {
@@ -99,7 +99,7 @@ struct FeedView: View {
         let body = ["postId": postId, "userId": userId, "reactionType": "like"] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {
                 reactingIds.remove(postId)
                 loadFeed()
@@ -165,7 +165,7 @@ struct PostCard: View {
                     .buttonStyle(ZYMGhostButton())
                     .disabled(isReacting)
 
-                    Text("Open details")
+                    Text("Comments \(post.comment_count ?? 0) · Open details")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -181,6 +181,11 @@ struct FeedPostDetailSheet: View {
     let isReacting: Bool
     let onReact: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
+    @State private var comments: [FeedComment] = []
+    @State private var commentDraft = ""
+    @State private var commentsLoading = false
+    @State private var commentPending = false
 
     var body: some View {
         NavigationView {
@@ -217,18 +222,116 @@ struct FeedPostDetailSheet: View {
                         }
                         .buttonStyle(ZYMPrimaryButton())
                         .disabled(isReacting)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Comments")
+                                    .font(.custom("Syne", size: 18))
+                                    .foregroundColor(Color.zymText)
+                                Spacer()
+                                if commentsLoading {
+                                    ProgressView()
+                                }
+                            }
+
+                            if comments.isEmpty, !commentsLoading {
+                                Text("No comments yet.")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+
+                            ForEach(comments) { comment in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(comment.username)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(Color.zymText)
+                                        Spacer()
+                                        Text(String(comment.created_at.prefix(16)))
+                                            .font(.system(size: 11))
+                                            .foregroundColor(Color.zymSubtext)
+                                    }
+                                    Text(comment.content)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Color.zymText)
+                                }
+                                .zymCard()
+                            }
+
+                            HStack(spacing: 8) {
+                                TextField("Write a comment...", text: $commentDraft)
+                                    .padding(10)
+                                    .background(Color.zymSurface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.zymLine, lineWidth: 1)
+                                    )
+                                    .cornerRadius(10)
+                                Button(action: addComment) {
+                                    Text(commentPending ? "..." : "Send")
+                                }
+                                .buttonStyle(ZYMPrimaryButton())
+                                .disabled(commentPending || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        }
                     }
                     .padding(16)
                 }
             }
             .navigationTitle("Post")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear(perform: loadComments)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
         }
+    }
+
+    private func loadComments() {
+        guard let url = apiURL("/community/post/\(post.id)/comments") else { return }
+        commentsLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            defer {
+                DispatchQueue.main.async {
+                    commentsLoading = false
+                }
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(FeedCommentsResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                comments = response.comments
+            }
+        }.resume()
+    }
+
+    private func addComment() {
+        guard let userId = appState.userId,
+              let url = apiURL("/community/comment") else { return }
+        let content = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if content.isEmpty || commentPending { return }
+
+        commentPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "postId": post.id,
+            "content": content
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
+            DispatchQueue.main.async {
+                commentPending = false
+                commentDraft = ""
+                loadComments()
+            }
+        }.resume()
     }
 }
 
@@ -238,7 +341,7 @@ struct FeedMediaPreviewGrid: View {
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
             ForEach(mediaUrls, id: \.self) { mediaUrl in
-                if let url = URL(string: mediaUrl) {
+                if let url = resolveRemoteURL(mediaUrl) {
                     ZStack {
                         if isVideoURL(mediaUrl) {
                             VideoPlayer(player: AVPlayer(url: url))
@@ -290,10 +393,25 @@ struct Post: Identifiable, Codable {
     let username: String?
     let avatar_url: String?
     var reaction_count: Int?
+    let comment_count: Int?
     let media_urls: [String]?
     let created_at: String?
 }
 
 struct FeedResponse: Codable {
     let feed: [Post]
+}
+
+struct FeedComment: Codable, Identifiable {
+    let id: Int
+    let post_id: Int
+    let user_id: Int
+    let username: String
+    let avatar_url: String?
+    let content: String
+    let created_at: String
+}
+
+struct FeedCommentsResponse: Codable {
+    let comments: [FeedComment]
 }

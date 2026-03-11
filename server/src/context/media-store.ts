@@ -14,6 +14,14 @@ export interface IncomingMediaAttachment {
   sourceMessageId?: string;
 }
 
+export interface LocalMediaAttachment {
+  absolutePath: string;
+  contentType: string;
+  name: string;
+  platform: string;
+  sourceMessageId?: string;
+}
+
 const HEIC_TYPES = new Set(['image/heic', 'image/heif']);
 
 function nowIso(): string {
@@ -100,6 +108,30 @@ export class MediaStore {
     return refs;
   }
 
+  async ingestLocalFiles(userId: string, files: LocalMediaAttachment[]): Promise<MediaRef[]> {
+    if (files.length === 0) {
+      return [];
+    }
+
+    const createdAt = nowIso();
+    const dateFolder = createdAt.slice(0, 10);
+    const userDir = this.getUserDataDir(userId);
+    const mediaDir = path.join(userDir, 'media', dateFolder);
+    await ensureDir(mediaDir);
+
+    const index = await this.loadIndex(userId);
+    const refs: MediaRef[] = [];
+
+    for (const file of files) {
+      const mediaRef = await this.ingestLocalFile(userId, file, createdAt, mediaDir);
+      index.items.push(mediaRef);
+      refs.push(mediaRef);
+    }
+
+    await this.saveIndex(userId, index);
+    return refs;
+  }
+
   async loadIndex(userId: string): Promise<MediaIndex> {
     const filePath = this.getMediaIndexFile(userId);
     await ensureDir(path.dirname(filePath));
@@ -147,6 +179,69 @@ export class MediaStore {
   async pruneExpiredMediaIds(userId: string, mediaIds: string[]): Promise<string[]> {
     const active = await this.getMediaByIds(userId, mediaIds);
     return active.map(item => item.id);
+  }
+
+  async cleanupExpiredForUser(userId: string): Promise<{ userId: string; removedCount: number }> {
+    const index = await this.loadIndex(userId);
+    if (index.items.length === 0) {
+      return { userId, removedCount: 0 };
+    }
+
+    const nowMs = Date.now();
+    const kept: MediaRef[] = [];
+    const expired: MediaRef[] = [];
+
+    for (const item of index.items) {
+      const expiresMs = new Date(item.expiresAt).getTime();
+      const isExpired = item.status !== 'ready' || !Number.isFinite(expiresMs) || expiresMs <= nowMs;
+      if (isExpired) {
+        expired.push(item);
+      } else {
+        kept.push(item);
+      }
+    }
+
+    if (expired.length === 0) {
+      return { userId, removedCount: 0 };
+    }
+
+    await Promise.all(expired.map(async (item) => {
+      await this.removeStoredMediaFile(item);
+      await this.removeAnalysisArtifacts(userId, item.id);
+    }));
+
+    await this.saveIndex(userId, {
+      schemaVersion: 1,
+      items: kept,
+    });
+
+    return { userId, removedCount: expired.length };
+  }
+
+  async cleanupExpiredForAllUsers(): Promise<{ userCount: number; removedCount: number }> {
+    const rootDataDir = path.join(this.skillRoot, 'data');
+    let entries: import('fs').Dirent[] = [];
+    try {
+      entries = await fs.readdir(rootDataDir, { withFileTypes: true });
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') {
+        return { userCount: 0, removedCount: 0 };
+      }
+      throw error;
+    }
+
+    let userCount = 0;
+    let removedCount = 0;
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const userId = sanitizeUserId(entry.name);
+      userCount += 1;
+      const result = await this.cleanupExpiredForUser(userId);
+      removedCount += result.removedCount;
+    }
+
+    return { userCount, removedCount };
   }
 
   private async ingestAttachment(
@@ -204,7 +299,96 @@ export class MediaStore {
     };
   }
 
+  private async ingestLocalFile(
+    userId: string,
+    file: LocalMediaAttachment,
+    createdAt: string,
+    mediaDir: string,
+  ): Promise<MediaRef> {
+    const absolutePath = path.resolve(String(file.absolutePath || ''));
+    const stat = await fs.stat(absolutePath);
+    if (!stat.isFile()) {
+      throw new Error(`Invalid media file path: ${absolutePath}`);
+    }
+
+    let buffer: Buffer<ArrayBufferLike> = Buffer.from(await fs.readFile(absolutePath));
+    let mimeType = String(file.contentType || '').trim().toLowerCase();
+    let storedName = sanitizeFilename(file.name);
+
+    if (HEIC_TYPES.has(mimeType) || /\.(heic|heif)$/i.test(storedName)) {
+      const nonSharedBuffer = Buffer.from(buffer);
+      const jpegBuffer = await heicConvert({
+        buffer: nonSharedBuffer,
+        format: 'JPEG',
+        quality: 0.9,
+      });
+      buffer = toBuffer(jpegBuffer);
+      mimeType = 'image/jpeg';
+      const parsed = path.parse(storedName);
+      storedName = `${parsed.name || 'upload'}.jpg`;
+    }
+
+    const date = new Date(createdAt);
+    const mediaId = buildMediaId(date);
+    const finalName = `${mediaId}_${storedName}`;
+    const finalAbsolutePath = path.join(mediaDir, finalName);
+    await fs.writeFile(finalAbsolutePath, buffer);
+
+    const relativePath = path.join(
+      'data',
+      sanitizeUserId(userId),
+      'media',
+      createdAt.slice(0, 10),
+      finalName,
+    );
+
+    return {
+      id: mediaId,
+      userId,
+      platform: file.platform,
+      discordMessageId: file.sourceMessageId,
+      kind: inferKind(mimeType || 'application/octet-stream'),
+      mimeType: mimeType || 'application/octet-stream',
+      originalFilename: file.name,
+      storedPath: relativePath,
+      createdAt,
+      expiresAt: addDays(createdAt, this.retentionDays),
+      sizeBytes: buffer.length,
+      sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      status: 'ready',
+      analysisIds: [],
+    };
+  }
+
   private isExpired(media: MediaRef): boolean {
     return media.status !== 'ready' || new Date(media.expiresAt).getTime() <= Date.now();
+  }
+
+  private async removeStoredMediaFile(media: MediaRef): Promise<void> {
+    const absolutePath = path.resolve(this.skillRoot, media.storedPath);
+    const allowedRoot = path.resolve(path.join(this.skillRoot, 'data')) + path.sep;
+    if (!absolutePath.startsWith(allowedRoot)) {
+      return;
+    }
+
+    try {
+      await fs.unlink(absolutePath);
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        console.warn(`[media-cleanup] failed to remove file ${absolutePath}:`, error?.message || error);
+      }
+    }
+  }
+
+  private async removeAnalysisArtifacts(userId: string, mediaId: string): Promise<void> {
+    const userDir = this.getUserDataDir(userId);
+    const analysesDir = path.join(userDir, 'analyses', mediaId);
+    try {
+      await fs.rm(analysesDir, { recursive: true, force: true });
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        console.warn(`[media-cleanup] failed to remove analyses for ${mediaId}:`, error?.message || error);
+      }
+    }
   }
 }

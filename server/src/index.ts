@@ -5,6 +5,8 @@ import { WSServer } from './websocket/ws-server.js';
 import { startAPI } from './api/server.js';
 import { initDB } from './database/sqlite-db.js';
 import { knowledgeService } from './services/knowledge-service.js';
+import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
+import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
 
 dotenv.config();
 
@@ -22,3 +24,15 @@ const apiPort = parseInt(process.env.API_PORT || '3001', 10);
 
 new WSServer(wsPort);
 startAPI(apiPort);
+
+const mediaCleanup = new MediaCleanupScheduler();
+mediaCleanup.start();
+const sessionCleanup = new SessionCleanupScheduler();
+sessionCleanup.start();
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    mediaCleanup.stop();
+    sessionCleanup.stop();
+  });
+}

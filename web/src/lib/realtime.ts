@@ -1,5 +1,6 @@
 import { WS_URL } from './config';
 import { AppSocketEvent } from './types';
+import { clearAuth } from './auth-storage';
 
 type EventHandler = (event: AppSocketEvent | { type: string; [key: string]: unknown }) => void;
 
@@ -32,7 +33,11 @@ export class RealtimeClient {
         } else if (payload.type === 'auth_failed') {
           this.connected = false;
           this.authToken = '';
+          clearAuth();
           this.socket?.close();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('zym-auth-expired', { detail: { path: '/ws' } }));
+          }
         }
         this.handlers.forEach(handler => handler(payload));
       } catch {
@@ -46,6 +51,17 @@ export class RealtimeClient {
         if (this.authToken) this.connect(this.authToken);
       }, 1200);
     };
+  }
+
+  updateToken(token: string) {
+    if (!token) return;
+    this.authToken = token;
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.send({ type: 'auth', token: this.authToken });
+      for (const topic of this.topics) {
+        this.send({ type: 'subscribe', topic });
+      }
+    }
   }
 
   disconnect() {

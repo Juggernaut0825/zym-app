@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   bio TEXT,
   fitness_goal VARCHAR(100),
   hobbies TEXT,
+  timezone VARCHAR(80),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -3,6 +3,7 @@ import HealthKit
 
 struct LeaderboardView: View {
     @State private var leaderboard: [LeaderboardEntry] = []
+    @State private var momentum: HealthMomentumResponse?
     @StateObject private var healthKitManager = LocalHealthKitManager()
     @State private var syncStatus = ""
     @State private var isSyncing = false
@@ -34,6 +35,59 @@ struct LeaderboardView: View {
                                 .foregroundColor(Color.zymSubtext)
                         }
                         .zymCard()
+
+                        if let momentum {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("Momentum (7 days)")
+                                        .font(.custom("Syne", size: 17))
+                                        .foregroundColor(Color.zymText)
+                                    Spacer()
+                                    Text(momentum.trend.direction.uppercased())
+                                        .font(.system(size: 11, weight: .bold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.zymSurfaceSoft)
+                                        .cornerRadius(999)
+                                }
+
+                                HStack(spacing: 8) {
+                                    MomentumStatPill(title: "Streak", value: "\(momentum.streakDays)d")
+                                    MomentumStatPill(title: "Active", value: "\(momentum.activityDays)/7")
+                                    MomentumStatPill(title: "Avg Steps", value: "\(momentum.averages.steps)")
+                                }
+
+                                let maxScore = max(momentum.last7Days.map { $0.score }.max() ?? 1, 1)
+                                HStack(alignment: .bottom, spacing: 8) {
+                                    ForEach(momentum.last7Days) { day in
+                                        VStack(spacing: 6) {
+                                            ZStack(alignment: .bottom) {
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .fill(Color.zymSurfaceSoft)
+                                                    .frame(height: 70)
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .fill(Color.zymPrimary)
+                                                    .frame(height: max(10, CGFloat(day.score) / CGFloat(maxScore) * 66))
+                                            }
+                                            Text(day.shortLabel)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(Color.zymSubtext)
+                                        }
+                                    }
+                                }
+
+                                if let bestDay = momentum.bestDay {
+                                    Text("Best day: \(bestDay.shortLabel) · \(bestDay.steps) steps · \(bestDay.calories_burned) cal")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                } else {
+                                    Text("No synced health momentum yet.")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                }
+                            }
+                            .zymCard()
+                        }
 
                         ForEach(Array(leaderboard.enumerated()), id: \.element.id) { index, entry in
                             HStack(spacing: 10) {
@@ -78,16 +132,39 @@ struct LeaderboardView: View {
 
     func loadLeaderboard() {
         guard let userId = appState.userId,
-              let url = apiURL("/health/leaderboard/\(userId)") else { return }
-        var request = URLRequest(url: url)
-        applyAuthorizationHeader(&request, token: appState.token)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+              let leaderboardURL = apiURL("/health/leaderboard/\(userId)"),
+              let momentumURL = apiURL("/health/momentum/\(userId)") else { return }
+
+        let group = DispatchGroup()
+        var nextLeaderboard: [LeaderboardEntry]?
+        var nextMomentum: HealthMomentumResponse?
+
+        group.enter()
+        var leaderboardRequest = URLRequest(url: leaderboardURL)
+        applyAuthorizationHeader(&leaderboardRequest, token: appState.token)
+        authorizedDataTask(appState: appState, request: leaderboardRequest) { data, _, _ in
+            defer { group.leave() }
             guard let data = data,
                   let response = try? JSONDecoder().decode(LeaderboardResponse.self, from: data) else { return }
-            DispatchQueue.main.async {
-                leaderboard = response.leaderboard
-            }
+            nextLeaderboard = response.leaderboard
         }.resume()
+
+        group.enter()
+        var momentumRequest = URLRequest(url: momentumURL)
+        applyAuthorizationHeader(&momentumRequest, token: appState.token)
+        authorizedDataTask(appState: appState, request: momentumRequest) { data, _, _ in
+            defer { group.leave() }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(HealthMomentumResponse.self, from: data) else { return }
+            nextMomentum = response
+        }.resume()
+
+        group.notify(queue: .main) {
+            if let nextLeaderboard {
+                leaderboard = nextLeaderboard
+            }
+            momentum = nextMomentum
+        }
     }
 
     func syncFromHealthKit(auto: Bool) {
@@ -137,7 +214,7 @@ struct LeaderboardView: View {
             "calories": calories
         ])
 
-        URLSession.shared.dataTask(with: request) { _, _, error in
+        authorizedDataTask(appState: appState, request: request) { _, _, error in
             DispatchQueue.main.async {
                 isSyncing = false
                 if error == nil {
@@ -151,6 +228,27 @@ struct LeaderboardView: View {
     }
 }
 
+private struct MomentumStatPill: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(Color.zymSubtext)
+            Text(value)
+                .font(.custom("Syne", size: 16))
+                .foregroundColor(Color.zymText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(Color.zymSurfaceSoft)
+        .cornerRadius(12)
+    }
+}
+
 struct LeaderboardEntry: Codable, Identifiable {
     let id: Int
     let username: String
@@ -160,6 +258,46 @@ struct LeaderboardEntry: Codable, Identifiable {
 
 struct LeaderboardResponse: Codable {
     let leaderboard: [LeaderboardEntry]
+}
+
+struct HealthMomentumPoint: Codable, Identifiable {
+    let date: String
+    let steps: Int
+    let calories_burned: Int
+    let active_minutes: Int
+    let score: Int
+
+    var id: String { date }
+
+    var shortLabel: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        guard let dateValue = formatter.date(from: date) else { return String(date.prefix(3)) }
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: dateValue)
+    }
+}
+
+struct HealthMomentumAverages: Codable {
+    let steps: Int
+    let calories_burned: Int
+    let active_minutes: Int
+}
+
+struct HealthMomentumTrend: Codable {
+    let direction: String
+    let delta: Int
+}
+
+struct HealthMomentumResponse: Codable {
+    let today: HealthMomentumPoint?
+    let last7Days: [HealthMomentumPoint]
+    let averages: HealthMomentumAverages
+    let activityDays: Int
+    let streakDays: Int
+    let trend: HealthMomentumTrend
+    let bestDay: HealthMomentumPoint?
 }
 
 final class LocalHealthKitManager: ObservableObject {

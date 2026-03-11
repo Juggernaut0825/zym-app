@@ -122,7 +122,7 @@ struct CoachSelectView: View {
         let body = ["userId": userId, "coach": localCoach] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             DispatchQueue.main.async {
                 isSubmitting = false

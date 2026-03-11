@@ -180,7 +180,7 @@ struct CreatePostView: View {
                 "mediaUrls": mediaUrls
             ] as [String : Any]
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            URLSession.shared.dataTask(with: request) { _, _, _ in
+            authorizedDataTask(appState: appState, request: request) { _, _, _ in
                 DispatchQueue.main.async {
                     isPosting = false
                     clearDraftAttachments()
@@ -213,13 +213,13 @@ struct CreatePostView: View {
 
         request.httpBody = body
 
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             guard let data = data,
                   let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
                 completion(nil)
                 return
             }
-            completion(response.url ?? response.path)
+            completion(response.path.isEmpty ? (response.url ?? response.path) : response.path)
         }.resume()
     }
 

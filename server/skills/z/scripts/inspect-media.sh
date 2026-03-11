@@ -39,7 +39,12 @@ def parse_args(argv):
     parser.add_argument("--media-id", required=True)
     parser.add_argument("--question", default="")
     parser.add_argument("--domain", default="generic", choices=["training", "food", "chart", "generic"])
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.media_id = str(args.media_id).strip()
+    if not args.media_id.startswith("med_"):
+        raise ValueError("media-id must start with med_")
+    args.question = " ".join(str(args.question or "").split())[:500]
+    return args
 
 
 def encode_file(path: Path) -> str:

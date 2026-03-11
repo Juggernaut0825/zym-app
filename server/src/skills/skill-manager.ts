@@ -1,7 +1,58 @@
-import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+const SCRIPT_BY_SKILL: Record<string, string> = {
+  log_workout: 'log-workout.sh',
+  log_meal: 'log-meal.sh',
+  get_profile: 'get-profile.sh',
+};
+
+function sanitizeUserId(userId: unknown): string {
+  const normalized = String(userId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(normalized)) {
+    throw new Error('Invalid userId');
+  }
+  return normalized;
+}
+
+function resolveAllowedScript(skillName: string): string {
+  const scriptName = SCRIPT_BY_SKILL[skillName];
+  if (!scriptName) {
+    throw new Error(`No script configured for skill: ${skillName}`);
+  }
+
+  const scriptsDir = path.resolve(process.cwd(), 'scripts');
+  const realScriptsDir = fs.realpathSync(scriptsDir);
+  const candidate = path.join(scriptsDir, scriptName);
+
+  if (!fs.existsSync(candidate)) {
+    throw new Error(`Script not found: ${scriptName}`);
+  }
+
+  const realCandidate = fs.realpathSync(candidate);
+  if (!realCandidate.startsWith(`${realScriptsDir}${path.sep}`)) {
+    throw new Error('Script path escapes allowed scripts directory');
+  }
+
+  return realCandidate;
+}
+
+async function runSkillScript(skillName: string, userId: unknown, payload: unknown): Promise<string> {
+  const scriptPath = resolveAllowedScript(skillName);
+  const safeUserId = sanitizeUserId(userId);
+  const serializedPayload = JSON.stringify(payload ?? {});
+  const { stdout } = await execFileAsync('bash', [scriptPath, safeUserId, serializedPayload], {
+    cwd: process.cwd(),
+    maxBuffer: 4 * 1024 * 1024,
+    timeout: 60_000,
+    encoding: 'utf8',
+  });
+  return String(stdout || '');
+}
 
 export interface Skill {
   name: string;
@@ -33,9 +84,7 @@ export class SkillManager {
         required: ['userId', 'exercise']
       },
       execute: async (params) => {
-        const data = JSON.stringify(params);
-        const { stdout } = await execAsync(`./scripts/log-workout.sh "${params.userId}" '${data}'`);
-        return stdout;
+        return runSkillScript('log_workout', params?.userId, params);
       }
     });
 
@@ -55,9 +104,7 @@ export class SkillManager {
         required: ['userId', 'meal']
       },
       execute: async (params) => {
-        const data = JSON.stringify(params);
-        const { stdout } = await execAsync(`./scripts/log-meal.sh "${params.userId}" '${data}'`);
-        return stdout;
+        return runSkillScript('log_meal', params?.userId, params);
       }
     });
 
@@ -72,8 +119,7 @@ export class SkillManager {
         required: ['userId']
       },
       execute: async (params) => {
-        const { stdout } = await execAsync(`./scripts/get-profile.sh "${params.userId}"`);
-        return stdout;
+        return runSkillScript('get_profile', params?.userId, params);
       }
     });
   }

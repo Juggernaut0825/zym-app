@@ -38,6 +38,7 @@ struct ConversationView: View {
     @State private var showProfileSheet = false
     @State private var profileLoading = false
     @State private var viewedProfile: ConversationPublicProfileResponse?
+    @State private var profileReportPending = false
 
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
@@ -184,7 +185,7 @@ struct ConversationView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: openProfileSheet) {
                     HStack(spacing: 8) {
-                        if let avatar = conversation.avatarUrl, let url = URL(string: avatar) {
+                        if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
                             AsyncImage(url: url) { phase in
                                 switch phase {
                                 case .success(let image):
@@ -232,7 +233,10 @@ struct ConversationView: View {
                 conversation: conversation,
                 appCoach: appState.selectedCoach ?? "zj",
                 profile: viewedProfile,
-                loading: profileLoading
+                loading: profileLoading,
+                canReportUser: !conversation.isCoach && !conversation.isGroup && (conversation.otherUserId != nil),
+                reportPending: profileReportPending,
+                onReportUser: reportConversationUser
             )
         }
         .onAppear {
@@ -262,6 +266,11 @@ struct ConversationView: View {
                 lastTypingSent = shouldTyping
             }
         }
+        .onChange(of: appState.token) { _, token in
+            guard let token, !token.isEmpty else { return }
+            wsManager.connect(token: token)
+            wsManager.subscribe(topic: conversation.id)
+        }
         .sheet(isPresented: $showGroupSheet) {
             GroupMembersSheet(
                 members: groupMembers,
@@ -282,6 +291,9 @@ struct ConversationView: View {
             switch event {
             case .authSuccess:
                 wsManager.subscribe(topic: conversation.id)
+            case .authFailed:
+                infoNotice = "Session expired. Please sign in again."
+                appState.logout()
             case .messageCreated(let topic, let incomingMessage):
                 guard topic == conversation.id else { return }
 
@@ -300,6 +312,10 @@ struct ConversationView: View {
                     withAnimation(.zymSpring) {
                         messages.append(mapped)
                     }
+                }
+
+                if mapped.from_user_id != (appState.userId ?? 0) {
+                    markConversationRead(messageId: mapped.id)
                 }
 
                 if mapped.from_user_id == 0 {
@@ -326,13 +342,14 @@ struct ConversationView: View {
         guard let url = apiURL("/messages/\(conversation.id)") else { return }
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             guard let data = data,
                   let response = try? JSONDecoder().decode(MessagesResponse.self, from: data) else { return }
             DispatchQueue.main.async {
                 withAnimation(.zymSoft) {
                     messages = response.messages
                 }
+                markConversationRead(messageId: response.messages.last?.id)
             }
         }.resume()
     }
@@ -397,7 +414,7 @@ struct ConversationView: View {
             uploadMedia(attachment) { response in
                 if let response = response {
                     lock.lock()
-                    mediaUrls.append(response.url ?? response.path)
+                    mediaUrls.append(response.path.isEmpty ? (response.url ?? response.path) : response.path)
                     if let mediaId = response.mediaId, !mediaId.isEmpty {
                         mediaIds.append(mediaId)
                     }
@@ -435,7 +452,7 @@ struct ConversationView: View {
 
         request.httpBody = body
 
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             guard let data = data,
                   let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
                 completion(nil)
@@ -478,7 +495,7 @@ struct ConversationView: View {
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {
                 newMessage = ""
                 isSending = false
@@ -487,6 +504,26 @@ struct ConversationView: View {
                 loadMessages()
             }
         }.resume()
+    }
+
+    private func markConversationRead(messageId: Int?) {
+        guard let userId = appState.userId,
+              let url = apiURL("/messages/read") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+
+        var body: [String: Any] = [
+            "userId": userId,
+            "topic": conversation.id
+        ]
+        if let messageId {
+            body["messageId"] = messageId
+        }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        authorizedDataTask(appState: appState, request: request).resume()
     }
 
     private func openProfileSheet() {
@@ -511,7 +548,7 @@ struct ConversationView: View {
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
 
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             defer {
                 DispatchQueue.main.async {
                     profileLoading = false
@@ -525,6 +562,45 @@ struct ConversationView: View {
 
             DispatchQueue.main.async {
                 viewedProfile = response
+            }
+        }.resume()
+    }
+
+    private func reportConversationUser() {
+        guard !profileReportPending,
+              let reporterUserId = appState.userId,
+              let targetUserId = viewedProfile?.profile.id ?? conversation.otherUserId,
+              let url = apiURL("/moderation/report") else { return }
+
+        profileReportPending = true
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": reporterUserId,
+            "targetType": "user",
+            "targetId": targetUserId,
+            "reason": "inappropriate_behavior",
+            "details": "Reported from iOS conversation profile (\(conversation.id))"
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileReportPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if statusCode >= 200 && statusCode < 300 {
+                    infoNotice = "Report submitted. Our team will review it."
+                    return
+                }
+                if let data = data,
+                   let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let message = payload["error"] as? String {
+                    infoNotice = message
+                } else {
+                    infoNotice = "Failed to submit report."
+                }
             }
         }.resume()
     }
@@ -559,7 +635,7 @@ struct ConversationView: View {
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
 
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
             defer {
                 DispatchQueue.main.async {
                     groupActionPending = false
@@ -594,7 +670,7 @@ struct ConversationView: View {
             "username": username
         ])
 
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
             defer {
                 DispatchQueue.main.async {
                     groupActionPending = false
@@ -635,7 +711,7 @@ struct ConversationView: View {
             "userId": member.id
         ])
 
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
             defer {
                 DispatchQueue.main.async {
                     groupActionPending = false
@@ -712,7 +788,7 @@ struct RemoteMediaGrid: View {
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
             ForEach(mediaUrls, id: \.self) { mediaUrl in
-                if let url = URL(string: mediaUrl) {
+                if let url = resolveRemoteURL(mediaUrl) {
                     ZStack {
                         if isVideoURL(mediaUrl) {
                             VideoPlayer(player: AVPlayer(url: url))
@@ -971,6 +1047,9 @@ private struct ConversationProfileSheet: View {
     let appCoach: String
     let profile: ConversationPublicProfileResponse?
     let loading: Bool
+    let canReportUser: Bool
+    let reportPending: Bool
+    let onReportUser: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     private var coachName: String {
@@ -1001,7 +1080,7 @@ private struct ConversationProfileSheet: View {
                             ProgressView("Loading profile...")
                                 .padding(.top, 18)
                         } else if let profile {
-                            if let coverURL = profile.profile.background_url, let url = URL(string: coverURL) {
+                            if let coverURL = profile.profile.background_url, let url = resolveRemoteURL(coverURL) {
                                 AsyncImage(url: url) { phase in
                                     switch phase {
                                     case .success(let image):
@@ -1015,7 +1094,7 @@ private struct ConversationProfileSheet: View {
                             }
 
                             HStack(spacing: 12) {
-                                if let avatarURL = profile.profile.avatar_url, let url = URL(string: avatarURL) {
+                                if let avatarURL = profile.profile.avatar_url, let url = resolveRemoteURL(avatarURL) {
                                     AsyncImage(url: url) { phase in
                                         switch phase {
                                         case .success(let image):
@@ -1048,6 +1127,15 @@ private struct ConversationProfileSheet: View {
                                 Spacer()
                             }
                             .zymCard()
+
+                            if canReportUser {
+                                Button(action: onReportUser) {
+                                    Text(reportPending ? "Reporting..." : "Report User")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(ZYMGhostButton())
+                                .disabled(reportPending)
+                            }
 
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Bio: \(profile.profile.bio ?? "Not set")")

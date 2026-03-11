@@ -56,7 +56,7 @@ struct CoachSelectionView: View {
         applyAuthorizationHeader(&request, token: appState.token)
         let body = ["userId": userId, "coach": coach] as [String: Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {
                 appState.selectedCoach = coach
             }
