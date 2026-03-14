@@ -8,7 +8,7 @@ struct RegisterView: View {
 
     var body: some View {
         ZStack {
-            Color.zymBackground.ignoresSafeArea()
+            ZYMBackgroundLayer().ignoresSafeArea()
 
             VStack(spacing: 18) {
                 Text("Create Account")

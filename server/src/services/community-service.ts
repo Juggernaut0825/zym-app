@@ -11,10 +11,17 @@ function parseMediaUrls(mediaUrls: unknown): string[] {
 }
 
 export class CommunityService {
-  static createPost(userId: number, type: string, content: string, mediaUrls: string[] = []) {
-    const result = getDB().prepare('INSERT INTO posts (user_id, type, content, media_urls) VALUES (?, ?, ?, ?)').run(
+  static createPost(
+    userId: number,
+    type: string,
+    content: string,
+    mediaUrls: string[] = [],
+    visibility: 'private' | 'friends' | 'public' = 'friends',
+  ) {
+    const result = getDB().prepare('INSERT INTO posts (user_id, type, visibility, content, media_urls) VALUES (?, ?, ?, ?, ?)').run(
       userId,
       type,
+      visibility,
       content,
       mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
     );
@@ -28,12 +35,16 @@ export class CommunityService {
         (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count
       FROM posts p
       JOIN users u ON p.user_id = u.id
-      WHERE p.user_id = ?
-        OR p.user_id IN (
-          SELECT friend_id FROM friendships WHERE user_id = ? AND status = 'accepted'
-          UNION
-          SELECT user_id FROM friendships WHERE friend_id = ? AND status = 'accepted'
-        )
+      WHERE p.visibility = 'public'
+         OR p.user_id = ?
+         OR (
+           p.visibility = 'friends'
+           AND p.user_id IN (
+             SELECT friend_id FROM friendships WHERE user_id = ? AND status = 'accepted'
+             UNION
+             SELECT user_id FROM friendships WHERE friend_id = ? AND status = 'accepted'
+           )
+         )
       ORDER BY p.created_at DESC
       LIMIT 60
     `).all(userId, userId, userId) as any[];
@@ -82,11 +93,16 @@ export class CommunityService {
 
   static canAccessPost(viewerUserId: number, postId: number): boolean {
     const post = getDB()
-      .prepare('SELECT user_id FROM posts WHERE id = ?')
-      .get(postId) as { user_id?: number } | undefined;
+      .prepare('SELECT user_id, visibility FROM posts WHERE id = ?')
+      .get(postId) as { user_id?: number; visibility?: string } | undefined;
     if (!post?.user_id) return false;
 
+    const visibility = post.visibility === 'public' || post.visibility === 'private' ? post.visibility : 'friends';
+
+    if (visibility === 'public') return true;
+
     if (Number(post.user_id) === viewerUserId) return true;
+    if (visibility === 'private') return false;
 
     const relation = getDB()
       .prepare(`

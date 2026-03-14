@@ -18,7 +18,7 @@ struct ProfileView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 12) {
@@ -105,14 +105,14 @@ struct ProfileView: View {
                                         Text(coachPending ? "Switching..." : "ZJ")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(ZYMPrimaryButton())
+                                    .buttonStyle(ZYMCoachButtonStyle(coach: "zj", selected: true))
                                     .disabled(coachPending)
                                 } else {
                                     Button(action: { switchCoach(to: "zj") }) {
                                         Text("ZJ")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(ZYMGhostButton())
+                                    .buttonStyle(ZYMCoachButtonStyle(coach: "zj", selected: false))
                                     .disabled(coachPending)
                                 }
 
@@ -121,14 +121,14 @@ struct ProfileView: View {
                                         Text(coachPending ? "Switching..." : "LC")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(ZYMPrimaryButton())
+                                    .buttonStyle(ZYMCoachButtonStyle(coach: "lc", selected: true))
                                     .disabled(coachPending)
                                 } else {
                                     Button(action: { switchCoach(to: "lc") }) {
                                         Text("LC")
                                             .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(ZYMGhostButton())
+                                    .buttonStyle(ZYMCoachButtonStyle(coach: "lc", selected: false))
                                     .disabled(coachPending)
                                 }
                             }
@@ -474,7 +474,9 @@ private struct ProfileEditSheet: View {
             "fitness_goal": fitnessGoal,
             "hobbies": hobbies,
             "avatar_url": avatarURL,
-            "background_url": backgroundURL
+            "avatar_visibility": "public",
+            "background_url": backgroundURL,
+            "background_visibility": "friends"
         ])
 
         authorizedDataTask(appState: appState, request: request) { data, response, _ in
@@ -519,7 +521,7 @@ private struct CoachRecordsDetailsSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 12) {
@@ -1383,7 +1385,7 @@ private struct SessionsManagementSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 10) {

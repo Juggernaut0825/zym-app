@@ -9,6 +9,8 @@ enum PostAttachmentKind {
     case unknown
 }
 
+private let defaultCommunityPostVisibility = "friends"
+
 struct PostDraftAttachment: Identifiable {
     let id = UUID()
     let data: Data
@@ -30,7 +32,7 @@ struct CreatePostView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 VStack(spacing: 14) {
                     TextField("What's on your mind?", text: $content, axis: .vertical)
@@ -111,8 +113,9 @@ struct CreatePostView: View {
     }
 
     func loadMedia() {
-        clearDraftAttachments()
-        for item in selectedMedia {
+        let items = selectedMedia
+        clearDraftAttachments(resetSelection: false)
+        for item in items {
             let detectedType = item.supportedContentTypes.first(where: { type in
                 type.conforms(to: .movie) || type.conforms(to: .audiovisualContent) || type.conforms(to: .video)
             }) ?? item.supportedContentTypes.first(where: { type in
@@ -152,46 +155,156 @@ struct CreatePostView: View {
         isPosting = true
 
         var mediaUrls: [String] = []
+        var mediaIds: [String] = []
         let group = DispatchGroup()
 
         for attachment in draftAttachments {
             group.enter()
-            uploadMedia(attachment) { url in
-                if let url = url {
-                    mediaUrls.append(url)
+            uploadMedia(attachment) { response in
+                DispatchQueue.main.async {
+                    if let response {
+                        let resolvedURL = response.path.isEmpty ? (response.url ?? response.path) : response.path
+                        if !resolvedURL.isEmpty {
+                            mediaUrls.append(resolvedURL)
+                        }
+                        if let mediaId = response.mediaId, !mediaId.isEmpty {
+                            mediaIds.append(mediaId)
+                        } else if let assetId = response.assetId, !assetId.isEmpty {
+                            mediaIds.append(assetId)
+                        }
+                    }
+                    group.leave()
                 }
-                group.leave()
             }
         }
 
         group.notify(queue: .main) {
+            let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if mediaUrls.isEmpty && mediaIds.isEmpty && trimmedContent.isEmpty && !draftAttachments.isEmpty {
+                self.isPosting = false
+                return
+            }
             guard let url = apiURL("/community/post") else {
-                isPosting = false
+                self.isPosting = false
                 return
             }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            applyAuthorizationHeader(&request, token: appState.token)
+            applyAuthorizationHeader(&request, token: self.appState.token)
             let body = [
                 "userId": userId,
                 "type": mediaUrls.isEmpty ? "text" : "media",
-                "content": content.trimmingCharacters(in: .whitespacesAndNewlines),
-                "mediaUrls": mediaUrls
+                "content": trimmedContent,
+                "mediaUrls": mediaUrls,
+                "mediaIds": mediaIds,
+                "visibility": defaultCommunityPostVisibility,
             ] as [String : Any]
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            authorizedDataTask(appState: appState, request: request) { _, _, _ in
+            authorizedDataTask(appState: self.appState, request: request) { _, _, _ in
                 DispatchQueue.main.async {
-                    isPosting = false
-                    clearDraftAttachments()
-                    onPost()
-                    dismiss()
+                    self.isPosting = false
+                    self.clearDraftAttachments()
+                    self.onPost()
+                    self.dismiss()
                 }
             }.resume()
         }
     }
 
-    func uploadMedia(_ attachment: PostDraftAttachment, completion: @escaping (String?) -> Void) {
+    func uploadMedia(_ attachment: PostDraftAttachment, completion: @escaping (UploadResponse?) -> Void) {
+        requestUploadIntent(for: attachment) { intent in
+            guard let intent = intent,
+                  intent.strategy != "legacy_multipart",
+                  let assetId = intent.assetId,
+                  let upload = intent.upload,
+                  let uploadURL = URL(string: upload.url) else {
+                uploadMediaLegacy(attachment, completion: completion)
+                return
+            }
+
+            var uploadRequest = URLRequest(url: uploadURL)
+            uploadRequest.httpMethod = upload.method.isEmpty ? "PUT" : upload.method
+            uploadRequest.httpBody = attachment.data
+            for (header, value) in upload.headers ?? [:] {
+                uploadRequest.setValue(value, forHTTPHeaderField: header)
+            }
+            if uploadRequest.value(forHTTPHeaderField: "Content-Type") == nil {
+                uploadRequest.setValue(attachment.contentType, forHTTPHeaderField: "Content-Type")
+            }
+            if shouldAuthorizeUploadTarget(uploadURL) {
+                applyAuthorizationHeader(&uploadRequest, token: appState.token)
+            }
+
+            authorizedDataTask(appState: appState, request: uploadRequest) { _, response, _ in
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    uploadMediaLegacy(attachment, completion: completion)
+                    return
+                }
+                finalizeUploadedMedia(assetId: assetId, completion: completion)
+            }.resume()
+        }
+    }
+
+    func requestUploadIntent(for attachment: PostDraftAttachment, completion: @escaping (UploadIntentResponse?) -> Void) {
+        guard let url = apiURL("/media/upload-url") else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "fileName": attachment.filename,
+            "contentType": attachment.contentType,
+            "sizeBytes": attachment.data.count,
+            "source": "ios_community_post",
+            "visibility": defaultCommunityPostVisibility,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadIntentResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(response)
+        }.resume()
+    }
+
+    func finalizeUploadedMedia(assetId: String, completion: @escaping (UploadResponse?) -> Void) {
+        guard let url = apiURL("/media/finalize") else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "assetId": assetId
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(response)
+        }.resume()
+    }
+
+    func shouldAuthorizeUploadTarget(_ url: URL) -> Bool {
+        guard let apiBase = apiURL("/") else { return false }
+        return url.host == apiBase.host && url.port == apiBase.port
+    }
+
+    func uploadMediaLegacy(_ attachment: PostDraftAttachment, completion: @escaping (UploadResponse?) -> Void) {
         guard let url = apiURL("/media/upload") else {
             completion(nil)
             return
@@ -206,6 +319,12 @@ struct CreatePostView: View {
 
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"source\"\r\n\r\n".data(using: .utf8)!)
+        body.append("ios_community_post\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"visibility\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(defaultCommunityPostVisibility)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(attachment.filename)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: \(attachment.contentType)\r\n\r\n".data(using: .utf8)!)
         body.append(attachment.data)
@@ -219,18 +338,20 @@ struct CreatePostView: View {
                 completion(nil)
                 return
             }
-            completion(response.path.isEmpty ? (response.url ?? response.path) : response.path)
+            completion(response)
         }.resume()
     }
 
-    func clearDraftAttachments() {
+    func clearDraftAttachments(resetSelection: Bool = true) {
         for attachment in draftAttachments {
             if let previewURL = attachment.previewURL {
                 try? FileManager.default.removeItem(at: previewURL)
             }
         }
         draftAttachments = []
-        selectedMedia = []
+        if resetSelection {
+            selectedMedia = []
+        }
     }
 
     func makeTempPreviewURL(for data: Data, fileExtension: String) -> URL? {

@@ -108,6 +108,7 @@ export interface FeedPost {
   id: number;
   user_id: number;
   type: string;
+  visibility?: 'private' | 'friends' | 'public';
   content: string | null;
   username: string;
   avatar_url: string | null;
@@ -225,6 +226,7 @@ export interface PublicProfilePost {
   id: number;
   user_id: number;
   type: string;
+  visibility?: 'private' | 'friends' | 'public';
   content: string | null;
   media_urls: string[];
   reaction_count: number;
@@ -327,8 +329,17 @@ export interface TypingSocketEvent {
   isTyping: boolean;
 }
 
+export interface CoachStatusSocketEvent {
+  type: 'coach_status';
+  topic: string;
+  phase: string;
+  label: string;
+  active: boolean;
+  tool?: string;
+}
+
 export interface InboxUpdateSocketEvent {
   type: 'inbox_updated';
 }
 
-export type AppSocketEvent = MessageSocketEvent | TypingSocketEvent | InboxUpdateSocketEvent;
+export type AppSocketEvent = MessageSocketEvent | TypingSocketEvent | CoachStatusSocketEvent | InboxUpdateSocketEvent;

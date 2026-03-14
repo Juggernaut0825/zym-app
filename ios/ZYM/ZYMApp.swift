@@ -44,15 +44,11 @@ private struct ZYMLaunchSplashView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.zymBackground, Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            ZYMBackgroundLayer()
+                .ignoresSafeArea()
 
             Circle()
-                .fill(Color.zymPrimary.opacity(0.16))
+                .fill(Color.zymSecondary.opacity(0.14))
                 .frame(width: 180, height: 180)
                 .blur(radius: 8)
                 .offset(x: animate ? -40 : 40, y: animate ? -120 : -90)
@@ -68,13 +64,13 @@ private struct ZYMLaunchSplashView: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Color.zymPrimary, Color.zymPrimaryDark],
+                                colors: [Color.zymSecondary, Color.zymPrimaryDark],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
                         .frame(width: 86, height: 86)
-                        .shadow(color: Color.zymPrimary.opacity(0.3), radius: 18, x: 0, y: 10)
+                        .shadow(color: Color.zymSecondary.opacity(0.28), radius: 18, x: 0, y: 10)
                     Text("Z")
                         .font(.custom("Syne", size: 42))
                         .fontWeight(.bold)

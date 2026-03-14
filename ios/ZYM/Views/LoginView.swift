@@ -11,30 +11,38 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.zymBackground, Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.16))
-                .frame(width: 170, height: 170)
-                .blur(radius: 8)
-                .offset(x: -130, y: -280)
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.10))
-                .frame(width: 110, height: 110)
-                .blur(radius: 7)
-                .offset(x: 150, y: 300)
+            ZYMBackgroundLayer()
+                .ignoresSafeArea()
 
             VStack(spacing: 22) {
                 VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.zymPrimary)
+                            .frame(width: 9, height: 9)
+                        Text("Lifestyle Fitness Community")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundColor(Color.zymSubtext)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.72))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.zymLine, lineWidth: 1)
+                    )
+                    .clipShape(Capsule())
+
                     Text("ZYM")
                         .font(.custom("Syne", size: 52))
-                        .foregroundColor(Color.zymPrimary)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.zymSecondaryDark, Color.zymPrimaryDark],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                     Text("AI coach + community")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
@@ -77,7 +85,7 @@ struct LoginView: View {
                 .disabled(pending)
 
                 NavigationLink("Create account", destination: RegisterView())
-                    .foregroundColor(Color.zymPrimary)
+                    .foregroundColor(Color.zymPrimaryDark)
                     .font(.system(size: 14, weight: .semibold))
             }
             .padding(24)

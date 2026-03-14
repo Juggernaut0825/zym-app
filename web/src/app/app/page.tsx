@@ -70,19 +70,17 @@ import {
 } from '@/lib/types';
 
 const tabs = [
-  { key: 'messages', label: 'Chats', icon: 'messages' },
-  { key: 'feed', label: 'Feed', icon: 'feed' },
-  { key: 'friends', label: 'Friends', icon: 'friends' },
-  { key: 'leaderboard', label: 'Rank', icon: 'leaderboard' },
-  { key: 'profile', label: 'Profile', icon: 'profile' },
+  { key: 'messages', label: 'Message', icon: 'chat_bubble' },
+  { key: 'community', label: 'Community', icon: 'groups' },
+  { key: 'leaderboard', label: 'Leaderboard', icon: 'emoji_events' },
+  { key: 'profile', label: 'Profile', icon: 'person' },
 ] as const;
 
-type TabKey = (typeof tabs)[number]['key'];
+type VisibleTabKey = (typeof tabs)[number]['key'];
+type TabKey = VisibleTabKey | 'friends';
 type TabIcon = (typeof tabs)[number]['icon'];
 
 type ConversationType = 'coach' | 'dm' | 'group';
-type ConversationFilter = 'all' | ConversationType;
-
 interface Conversation {
   topic: string;
   name: string;
@@ -108,9 +106,10 @@ interface ProfileViewerState {
 
 const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const COMMUNITY_POST_VISIBILITY = 'friends' as const;
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
-const MESSAGE_DRAFTS_STORAGE_KEY = 'zym.web.messageDrafts.v1';
-const POST_DRAFT_STORAGE_KEY = 'zym.web.postDraft.v1';
+const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
+const POST_DRAFT_STORAGE_KEY_PREFIX = 'zym.web.postDraft.v2.user';
 
 function isSupportedMediaFile(file: File): boolean {
   const mime = file.type.toLowerCase();
@@ -153,25 +152,23 @@ function mergeMediaFiles(existing: File[], incoming: File[]): { files: File[]; e
 }
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
+  const date = parseDisplayDate(iso);
+  if (!date) return '';
   return new Intl.DateTimeFormat('en-US', {
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
   }).format(date);
 }
 
 function formatSessionDate(iso?: string | null): string {
-  if (!iso) return '-';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '-';
+  const date = parseDisplayDate(iso);
+  if (!date) return '-';
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
   }).format(date);
 }
@@ -187,9 +184,8 @@ function eventLabel(eventType: string): string {
 }
 
 function formatDayLabel(iso?: string | null): string {
-  if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
+  const date = parseDisplayDate(iso);
+  if (!date) return '';
 
   const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const today = new Date();
@@ -218,10 +214,19 @@ function isVideoUrl(url: string): boolean {
   return lower.includes('.mp4') || lower.includes('.mov') || lower.includes('.webm') || lower.includes('.m4v');
 }
 
-function loadMessageDrafts(): Record<string, string> {
+function messageDraftsStorageKey(userId: number): string {
+  return `${MESSAGE_DRAFTS_STORAGE_KEY_PREFIX}.${userId}`;
+}
+
+function postDraftStorageKey(userId: number): string {
+  return `${POST_DRAFT_STORAGE_KEY_PREFIX}.${userId}`;
+}
+
+function loadMessageDrafts(userId: number): Record<string, string> {
   if (typeof window === 'undefined') return {};
+  if (!Number.isInteger(userId) || userId <= 0) return {};
   try {
-    const raw = localStorage.getItem(MESSAGE_DRAFTS_STORAGE_KEY);
+    const raw = localStorage.getItem(messageDraftsStorageKey(userId));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object') return {};
@@ -237,8 +242,9 @@ function loadMessageDrafts(): Record<string, string> {
   }
 }
 
-function persistMessageDrafts(drafts: Record<string, string>) {
+function persistMessageDrafts(userId: number, drafts: Record<string, string>) {
   if (typeof window === 'undefined') return;
+  if (!Number.isInteger(userId) || userId <= 0) return;
   try {
     const compact = Object.entries(drafts).reduce<Record<string, string>>((acc, [topic, value]) => {
       const normalized = String(value || '').slice(0, 2000);
@@ -247,18 +253,40 @@ function persistMessageDrafts(drafts: Record<string, string>) {
       }
       return acc;
     }, {});
-    localStorage.setItem(MESSAGE_DRAFTS_STORAGE_KEY, JSON.stringify(compact));
+    const key = messageDraftsStorageKey(userId);
+    if (Object.keys(compact).length === 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(compact));
   } catch {
     // Ignore storage failures in private mode.
   }
 }
 
-function loadPostDraft(): string {
+function loadPostDraft(userId: number): string {
   if (typeof window === 'undefined') return '';
+  if (!Number.isInteger(userId) || userId <= 0) return '';
   try {
-    return String(localStorage.getItem(POST_DRAFT_STORAGE_KEY) || '').slice(0, 6000);
+    return String(localStorage.getItem(postDraftStorageKey(userId)) || '').slice(0, 6000);
   } catch {
     return '';
+  }
+}
+
+function persistPostDraft(userId: number, value: string) {
+  if (typeof window === 'undefined') return;
+  if (!Number.isInteger(userId) || userId <= 0) return;
+  try {
+    const normalized = String(value || '').slice(0, 6000);
+    const key = postDraftStorageKey(userId);
+    if (normalized.trim()) {
+      localStorage.setItem(key, normalized);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage failures in private mode.
   }
 }
 
@@ -314,73 +342,84 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? 'LC Coach' : 'ZJ Coach';
 }
 
+function coachTheme(coach: 'zj' | 'lc') {
+  if (coach === 'lc') {
+    return {
+      toneClass: 'coach-lc',
+      gradient: 'linear-gradient(135deg, var(--coach-lc), var(--coach-lc-strong))',
+      softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(242,138,58,0.10))',
+      borderColor: 'rgba(242,138,58,0.18)',
+      ink: 'var(--coach-lc-ink)',
+      description: 'Strict coaching style with direct accountability. Best for users who want hard feedback and action-first guidance.',
+    };
+  }
+
+  return {
+    toneClass: 'coach-zj',
+    gradient: 'linear-gradient(135deg, var(--coach-zj), var(--coach-zj-strong))',
+    softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(108,124,246,0.10))',
+    borderColor: 'rgba(108,124,246,0.16)',
+    ink: 'var(--coach-zj-ink)',
+    description: 'Encouraging coaching style focused on consistency, progressive habits, and sustainable fitness routines.',
+  };
+}
+
 function avatarInitial(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return 'Z';
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('lc coach') || lower === 'lc') return 'LC';
+  if (lower.includes('zj coach') || lower === 'zj') return 'ZJ';
   return trimmed.charAt(0).toUpperCase();
 }
 
+function splitReplySegments(content?: string | null): string[] {
+  const text = String(content || '').trim();
+  if (!text) return [];
+  const parts = text
+    .split(/\n{2,}/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [text];
+}
+
+function parseDisplayDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(raw)
+      ? `${raw}Z`
+      : raw;
+
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function TabGlyph({ icon, active }: { icon: TabIcon; active: boolean }) {
-  const color = active ? '#ffffff' : 'currentColor';
-  const common = {
-    stroke: color,
-    strokeWidth: 1.9,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    fill: 'none',
-  };
-
-  if (icon === 'messages') {
-    return (
-      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <path {...common} d="M20 11.5c0 4.2-3.7 7.5-8.3 7.5H8l-4 3v-5C2.8 15.8 2 13.8 2 11.5 2 7.3 5.7 4 10.3 4h1.4C16.3 4 20 7.3 20 11.5z" />
-        <path {...common} d="M8.5 11.5h6" />
-        <path {...common} d="M8.5 8.5h4.5" />
-      </svg>
-    );
-  }
-
-  if (icon === 'feed') {
-    return (
-      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <path {...common} d="M4 18h16" />
-        <path {...common} d="M6.5 14.5 10 10l3 2.5 4.5-5" />
-        <circle cx="6.5" cy="14.5" r="1.2" fill={color} />
-        <circle cx="10" cy="10" r="1.2" fill={color} />
-        <circle cx="13" cy="12.5" r="1.2" fill={color} />
-        <circle cx="17.5" cy="7.5" r="1.2" fill={color} />
-      </svg>
-    );
-  }
-
-  if (icon === 'friends') {
-    return (
-      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <circle {...common} cx="8" cy="9" r="3" />
-        <circle {...common} cx="16.5" cy="10" r="2.5" />
-        <path {...common} d="M3.5 18c.8-2.7 2.8-4 5.9-4s5.1 1.3 5.9 4" />
-        <path {...common} d="M13.5 17.8c.5-1.7 1.8-2.7 3.7-2.7 1.8 0 3 .8 3.8 2.4" />
-      </svg>
-    );
-  }
-
-  if (icon === 'leaderboard') {
-    return (
-      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <path {...common} d="M6 19V9.5h4V19" />
-        <path {...common} d="M14 19V5h4v14" />
-        <path {...common} d="M3 19h18" />
-        <path {...common} d="m14 5 2 2 2-2" />
-      </svg>
-    );
-  }
-
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <circle {...common} cx="12" cy="8" r="3.5" />
-      <path {...common} d="M5 20c.8-3.1 3.1-4.8 7-4.8s6.2 1.7 7 4.8" />
-    </svg>
+    <span
+      className="material-symbols-outlined"
+      aria-hidden="true"
+      style={{
+        fontSize: 24,
+        fontVariationSettings: `'FILL' ${active ? 1 : 0}, 'wght' 500, 'GRAD' 0, 'opsz' 24`,
+      }}
+    >
+      {icon}
+    </span>
   );
+}
+
+function normalizeTabKey(value: string | null): TabKey {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'message' || raw === 'messages' || raw === 'chat') return 'messages';
+  if (raw === 'community' || raw === 'feed' || raw === 'friends') return 'community';
+  if (raw === 'leaderboard') return 'leaderboard';
+  if (raw === 'profile') return 'profile';
+  return 'messages';
 }
 
 export default function AppPage() {
@@ -393,6 +432,10 @@ export default function AppPage() {
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
   const conversationSearchRef = useRef<HTMLInputElement | null>(null);
   const messageDraftsRef = useRef<Record<string, string>>({});
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const coachReplyRevealTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>[]>>({});
+  const coachReplyRevealQueuesRef = useRef<Record<string, ChatMessage[]>>({});
+  const coachReplyRevealActiveMessageRef = useRef<Record<string, string | null>>({});
   const skipTypingPulseRef = useRef(false);
 
   const [ready, setReady] = useState(false);
@@ -405,9 +448,9 @@ export default function AppPage() {
   const [tab, setTab] = useState<TabKey>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationQuery, setConversationQuery] = useState('');
-  const [conversationFilter, setConversationFilter] = useState<ConversationFilter>('all');
   const [activeTopic, setActiveTopic] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [animatedCoachReplies, setAnimatedCoachReplies] = useState<Record<string, number>>({});
   const [typingUsers, setTypingUsers] = useState<Record<string, boolean>>({});
   const [composer, setComposer] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -440,6 +483,7 @@ export default function AppPage() {
 
   const [feed, setFeed] = useState<FeedPost[]>([]);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [communityQuery, setCommunityQuery] = useState('');
   const [postText, setPostText] = useState('');
   const [postFiles, setPostFiles] = useState<File[]>([]);
   const [postFilePreviews, setPostFilePreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
@@ -456,6 +500,8 @@ export default function AppPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [healthMomentum, setHealthMomentum] = useState<HealthMomentumResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardQuery, setLeaderboardQuery] = useState('');
+  const [leaderboardMetric, setLeaderboardMetric] = useState<'steps' | 'calories'>('steps');
   const [healthSync, setHealthSync] = useState({ steps: '0', calories: '0' });
   const [syncPending, setSyncPending] = useState(false);
 
@@ -521,7 +567,6 @@ export default function AppPage() {
   const filteredConversations = useMemo(() => {
     const query = conversationQuery.trim().toLowerCase();
     return conversations.filter((conversation) => {
-      if (conversationFilter !== 'all' && conversation.type !== conversationFilter) return false;
       if (!query) return true;
 
       const haystack = [
@@ -536,25 +581,51 @@ export default function AppPage() {
 
       return haystack.includes(query);
     });
-  }, [conversationFilter, conversationQuery, conversations]);
+  }, [conversationQuery, conversations]);
 
   const unreadMentionCount = useMemo(
     () => mentionNotifications.filter((item) => !item.is_read).length,
     [mentionNotifications],
   );
 
+  const filteredFeed = useMemo(() => {
+    const query = communityQuery.trim().toLowerCase();
+    if (!query) return feed;
+    return feed.filter((post) => {
+      const haystack = [post.username, post.type, post.content].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [communityQuery, feed]);
+
+  const filteredLeaderboard = useMemo(() => {
+    const query = leaderboardQuery.trim().toLowerCase();
+    if (!query) return leaderboard;
+    return leaderboard.filter((entry) => entry.username.toLowerCase().includes(query));
+  }, [leaderboard, leaderboardQuery]);
+
+  const hasInlineCoachReveal = useMemo(
+    () => Object.keys(animatedCoachReplies).length > 0,
+    [animatedCoachReplies],
+  );
+
   const typingLabel = useMemo(() => {
     const ids = Object.entries(typingUsers)
       .filter(([, value]) => value)
       .map(([userId]) => userId)
-      .filter((userId) => userId !== String(authUserId));
+      .filter((userId) => userId !== String(authUserId))
+      .filter((userId) => !hasInlineCoachReveal || (userId !== 'coach' && userId !== '0'));
 
     if (ids.length === 0) return '';
 
     const names = Array.from(
       new Set(
         ids.map((userId) => {
-          if (userId === 'coach' || userId === '0') return activeConversation?.name || 'Coach';
+          if (userId === 'coach' || userId === '0') {
+            if (activeConversation?.type === 'coach') {
+              return activeConversation.name.toLowerCase().includes('lc') ? 'LC' : 'ZJ';
+            }
+            return selectedCoach.toUpperCase();
+          }
           const numericId = Number(userId);
           if (!Number.isFinite(numericId)) return 'Someone';
           const groupName = activeGroupMembers.find((member) => member.id === numericId)?.username;
@@ -568,7 +639,7 @@ export default function AppPage() {
     if (names.length === 1) return `${names[0]} is typing...`;
     if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
     return `${names[0]} and ${names.length - 1} others are typing...`;
-  }, [typingUsers, authUserId, activeConversation, activeGroupMembers, messages]);
+  }, [typingUsers, authUserId, activeConversation, activeGroupMembers, messages, selectedCoach, hasInlineCoachReveal]);
 
   const connectCodeMeta = useMemo(() => {
     if (!connectExpiresAt) return 'Secure code rotates every minute.';
@@ -594,7 +665,7 @@ export default function AppPage() {
       };
     }
 
-    if (tab === 'feed') {
+    if (tab === 'community') {
       const totalLikes = feed.reduce((sum, post) => sum + Number(post.reaction_count || 0), 0);
       const totalComments = feed.reduce((sum, post) => sum + Number(post.comment_count || 0), 0);
       return {
@@ -693,9 +764,177 @@ export default function AppPage() {
     if (reauthTriggeredRef.current) return;
     reauthTriggeredRef.current = true;
     setError(message);
+    clearCoachReplyRevealQueue();
+    setAnimatedCoachReplies({});
     clearAuth();
     realtimeRef.current?.disconnect();
     router.replace('/login');
+  };
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const container = chatStreamRef.current;
+        if (!container) return;
+        container.scrollTo({ top: container.scrollHeight, behavior });
+      });
+    });
+  };
+
+  const coachRevealQueueKeyFor = (topic: string, ownerUserId: number) => {
+    if (!topic || !Number.isInteger(ownerUserId) || ownerUserId <= 0) return '';
+    return `${ownerUserId}:${topic}`;
+  };
+
+  const activeCoachRevealQueueKey = () => coachRevealQueueKeyFor(activeTopicRef.current, authUserIdRef.current);
+
+  const clearCoachReplyRevealQueue = (queueKey?: string) => {
+    const keys = queueKey
+      ? [queueKey]
+      : Array.from(new Set([
+        ...Object.keys(coachReplyRevealTimersRef.current),
+        ...Object.keys(coachReplyRevealQueuesRef.current),
+        ...Object.keys(coachReplyRevealActiveMessageRef.current),
+      ]));
+
+    keys.forEach((key) => {
+      coachReplyRevealTimersRef.current[key]?.forEach((timer) => clearTimeout(timer));
+      delete coachReplyRevealTimersRef.current[key];
+      delete coachReplyRevealQueuesRef.current[key];
+      delete coachReplyRevealActiveMessageRef.current[key];
+    });
+
+    if (!queueKey || queueKey === activeCoachRevealQueueKey()) {
+      setTypingUsers((prev) => ({
+        ...prev,
+        coach: false,
+        '0': false,
+      }));
+    }
+  };
+
+  const segmentRevealDelay = (segment: string, segmentIndex: number) => {
+    const characterCount = segment.replace(/\s+/g, ' ').trim().length;
+    const baseDelay = segmentIndex === 0 ? 680 : 900;
+    return Math.min(3200, Math.max(baseDelay, baseDelay + characterCount * 18));
+  };
+
+  const runCoachReplyRevealQueue = (queueKey: string) => {
+    if (!queueKey || coachReplyRevealActiveMessageRef.current[queueKey]) return;
+
+    const queue = coachReplyRevealQueuesRef.current[queueKey] || [];
+    const message = queue[0];
+    if (!message) {
+      clearCoachReplyRevealQueue(queueKey);
+      return;
+    }
+
+    const messageId = String(message.id);
+    const segments = splitReplySegments(message.content);
+    if (segments.length === 0) {
+      coachReplyRevealQueuesRef.current[queueKey] = queue.slice(1);
+      setAnimatedCoachReplies((prev) => {
+        if (!(messageId in prev)) return prev;
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+      if (coachReplyRevealQueuesRef.current[queueKey]?.length) {
+        runCoachReplyRevealQueue(queueKey);
+      } else {
+        clearCoachReplyRevealQueue(queueKey);
+      }
+      return;
+    }
+
+    coachReplyRevealActiveMessageRef.current[queueKey] = messageId;
+    setAnimatedCoachReplies((prev) => ({ ...prev, [messageId]: 0 }));
+    if (queueKey === activeCoachRevealQueueKey()) {
+      setTypingUsers((prev) => ({
+        ...prev,
+        coach: true,
+        '0': true,
+      }));
+      scrollChatToBottom('smooth');
+    }
+
+    const revealSegment = (segmentIndex: number) => {
+      const timer = setTimeout(() => {
+        const isCurrentQueue = queueKey === coachRevealQueueKeyFor(message.topic, authUserIdRef.current);
+        const activeMessageId = coachReplyRevealActiveMessageRef.current[queueKey];
+        if (!isCurrentQueue || activeMessageId !== messageId) {
+          clearCoachReplyRevealQueue(queueKey);
+          setAnimatedCoachReplies((prev) => {
+            if (!(messageId in prev)) return prev;
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          });
+          return;
+        }
+
+        setAnimatedCoachReplies((prev) => ({ ...prev, [messageId]: segmentIndex + 1 }));
+        if (queueKey === activeCoachRevealQueueKey()) {
+          scrollChatToBottom('smooth');
+        }
+
+        if (segmentIndex + 1 < segments.length) {
+          revealSegment(segmentIndex + 1);
+          return;
+        }
+
+        const settleTimer = setTimeout(() => {
+          setAnimatedCoachReplies((prev) => {
+            if (!(messageId in prev)) return prev;
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          });
+          coachReplyRevealQueuesRef.current[queueKey] = (coachReplyRevealQueuesRef.current[queueKey] || [])
+            .filter((item) => String(item.id) !== messageId);
+          delete coachReplyRevealActiveMessageRef.current[queueKey];
+          coachReplyRevealTimersRef.current[queueKey]?.forEach((queuedTimer) => clearTimeout(queuedTimer));
+          delete coachReplyRevealTimersRef.current[queueKey];
+
+          if ((coachReplyRevealQueuesRef.current[queueKey] || []).length > 0) {
+            runCoachReplyRevealQueue(queueKey);
+            return;
+          }
+
+          clearCoachReplyRevealQueue(queueKey);
+        }, 260);
+
+        coachReplyRevealTimersRef.current[queueKey] = [
+          ...(coachReplyRevealTimersRef.current[queueKey] || []),
+          settleTimer,
+        ];
+      }, segmentRevealDelay(segments[segmentIndex], segmentIndex));
+
+      coachReplyRevealTimersRef.current[queueKey] = [
+        ...(coachReplyRevealTimersRef.current[queueKey] || []),
+        timer,
+      ];
+    };
+
+    revealSegment(0);
+  };
+
+  const enqueueCoachReplyReveal = (message: ChatMessage) => {
+    if (!message.is_coach) return;
+
+    const queueKey = coachRevealQueueKeyFor(message.topic, authUserIdRef.current);
+    if (!queueKey) return;
+
+    const messageId = String(message.id);
+    const activeMessageId = coachReplyRevealActiveMessageRef.current[queueKey];
+    const queuedMessages = coachReplyRevealQueuesRef.current[queueKey] || [];
+    if (activeMessageId === messageId || queuedMessages.some((item) => String(item.id) === messageId)) {
+      return;
+    }
+
+    coachReplyRevealQueuesRef.current[queueKey] = [...queuedMessages, message];
+    runCoachReplyRevealQueue(queueKey);
   };
 
   const handleSocketEvent = (event: AppSocketEvent | { type: string; [key: string]: unknown }) => {
@@ -715,12 +954,13 @@ export default function AppPage() {
     if (event.type === 'message_created') {
       const topic = String(event.topic);
       const message = event.message as ChatMessage;
+      const isActiveTopic = topic === activeTopicRef.current;
+      const isCoachMessage = Number(message.from_user_id) === 0;
 
-      if (topic === activeTopicRef.current) {
-        setMessages((prev) => {
-          if (prev.some((item) => item.id === message.id)) return prev;
-          return [...prev, message];
-        });
+      if (isActiveTopic && !messagesRef.current.some((item) => item.id === message.id)) {
+        const nextMessages = [...messagesRef.current, message];
+        messagesRef.current = nextMessages;
+        setMessages(nextMessages);
 
         if (authUserIdRef.current > 0) {
           void markMessagesRead({
@@ -729,9 +969,15 @@ export default function AppPage() {
             messageId: Number(message.id),
           }).catch(() => undefined);
         }
+
+        if (isCoachMessage) {
+          enqueueCoachReplyReveal(message);
+        } else {
+          scrollChatToBottom('smooth');
+        }
       }
 
-      if (topic === activeTopicRef.current && Number(message.from_user_id) === 0) {
+      if (isActiveTopic && isCoachMessage) {
         setCoachReplyPending(false);
       }
 
@@ -747,12 +993,15 @@ export default function AppPage() {
       const userId = String(event.userId || '');
       if (userId === String(authUserIdRef.current)) return;
       const isTyping = Boolean(event.isTyping);
+      if (!isTyping && (userId === 'coach' || userId === '0') && Object.keys(coachReplyRevealTimersRef.current).length > 0) {
+        return;
+      }
       setTypingUsers((prev) => ({ ...prev, [userId]: isTyping }));
       if (typingTimeoutRef.current[userId]) {
         clearTimeout(typingTimeoutRef.current[userId]);
         delete typingTimeoutRef.current[userId];
       }
-      if (isTyping) {
+      if (isTyping && userId !== 'coach' && userId !== '0') {
         typingTimeoutRef.current[userId] = setTimeout(() => {
           setTypingUsers((prev) => ({ ...prev, [userId]: false }));
           delete typingTimeoutRef.current[userId];
@@ -778,7 +1027,7 @@ export default function AppPage() {
     setSelectedCoach(auth.selectedCoach);
     const bootstrapCoachName = coachDisplayName(auth.selectedCoach);
     const defaultCoachTopic = `coach_${auth.userId}`;
-    messageDraftsRef.current = loadMessageDrafts();
+    messageDraftsRef.current = loadMessageDrafts(auth.userId);
     setConversations([
       {
         topic: defaultCoachTopic,
@@ -791,13 +1040,10 @@ export default function AppPage() {
     ]);
     setActiveTopic(defaultCoachTopic);
     setComposer(messageDraftsRef.current[defaultCoachTopic] || '');
-    setPostText(loadPostDraft());
+    setPostText(loadPostDraft(auth.userId));
 
     const params = new URLSearchParams(window.location.search);
-    const incomingTab = params.get('tab') as TabKey | null;
-    if (incomingTab && tabs.some((item) => item.key === incomingTab)) {
-      setTab(incomingTab);
-    }
+    setTab(normalizeTabKey(params.get('tab')));
 
     const client = new RealtimeClient();
     client.connect(auth.token);
@@ -861,6 +1107,8 @@ export default function AppPage() {
 
   useEffect(() => {
     activeTopicRef.current = activeTopic;
+    clearCoachReplyRevealQueue();
+    setAnimatedCoachReplies({});
     if (!activeTopic) return;
 
     void loadMessagesForTopic(activeTopic);
@@ -876,7 +1124,24 @@ export default function AppPage() {
 
   useEffect(() => {
     authUserIdRef.current = authUserId;
+    clearCoachReplyRevealQueue();
+    setAnimatedCoachReplies({});
+    setTypingUsers({});
+    setCoachReplyPending(false);
+    messagesRef.current = [];
+    setMessages([]);
+    const scopedDrafts = loadMessageDrafts(authUserId);
+    messageDraftsRef.current = scopedDrafts;
+    setPostText(loadPostDraft(authUserId));
+    if (activeTopicRef.current) {
+      skipTypingPulseRef.current = true;
+      setComposer(scopedDrafts[activeTopicRef.current] || '');
+    }
   }, [authUserId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (!activeConversation || activeConversation.type !== 'group' || !activeConversation.groupId) {
@@ -906,6 +1171,7 @@ export default function AppPage() {
       if (noticeTimeoutRef.current) {
         clearTimeout(noticeTimeoutRef.current);
       }
+      clearCoachReplyRevealQueue();
       Object.values(typingTimeoutRef.current).forEach((timer) => clearTimeout(timer));
       typingTimeoutRef.current = {};
     };
@@ -922,6 +1188,14 @@ export default function AppPage() {
     const timer = setTimeout(() => setShowAppIntro(false), 900);
     return () => clearTimeout(timer);
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready || typeof window === 'undefined') return;
+    const normalizedTab = tab === 'friends' ? 'community' : tab;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', normalizedTab);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [ready, tab]);
 
   useEffect(() => {
     if (!ready || !authUserId || tab !== 'friends') return;
@@ -1030,31 +1304,12 @@ export default function AppPage() {
       delete next[activeTopic];
     }
     messageDraftsRef.current = next;
-    persistMessageDrafts(next);
-  }, [composer, activeTopic]);
+    persistMessageDrafts(authUserId, next);
+  }, [composer, activeTopic, authUserId]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (postText.trim()) {
-        localStorage.setItem(POST_DRAFT_STORAGE_KEY, postText.slice(0, 6000));
-      } else {
-        localStorage.removeItem(POST_DRAFT_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore storage failures in private mode.
-    }
-  }, [postText]);
-
-  useEffect(() => {
-    const container = chatStreamRef.current;
-    if (!container || tab !== 'messages') return;
-
-    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 220;
-    if (isNearBottom || messages.length < 16) {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    }
-  }, [messages.length, tab, activeTopic]);
+    persistPostDraft(authUserId, postText);
+  }, [postText, authUserId]);
 
   useEffect(() => {
     if (!friendQuery.trim()) {
@@ -1211,7 +1466,12 @@ export default function AppPage() {
   async function loadMessagesForTopic(topic: string) {
     try {
       const rows = await getMessages(topic);
+      if (activeTopicRef.current !== topic) return;
+      clearCoachReplyRevealQueue();
+      setAnimatedCoachReplies({});
+      messagesRef.current = rows;
       setMessages(rows);
+      scrollChatToBottom('auto');
       const latestMessageId = rows.length > 0 ? rows[rows.length - 1]?.id : undefined;
       if (authUserId > 0) {
         await markMessagesRead({ userId: authUserId, topic, messageId: latestMessageId });
@@ -1389,7 +1649,12 @@ export default function AppPage() {
 
     try {
       setPendingSend(true);
-      const uploadedMedia = attachments.length > 0 ? await Promise.all(attachments.map((file) => uploadFile(file))) : [];
+      const uploadedMedia = attachments.length > 0
+        ? await Promise.all(attachments.map((file) => uploadFile(file, {
+            source: 'web_message',
+            visibility: 'private',
+          })))
+        : [];
       const uploadedUrls = uploadedMedia.map((item) => item.url);
       const uploadedMediaIds = uploadedMedia
         .map((item) => item.mediaId)
@@ -1414,7 +1679,10 @@ export default function AppPage() {
         avatar_url: null,
         is_coach: false,
       };
-      setMessages((prev) => [...prev, optimistic]);
+      const nextMessages = [...messagesRef.current, optimistic];
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+      scrollChatToBottom('smooth');
 
       await sendMessage({
         fromUserId: authUserId,
@@ -1426,13 +1694,16 @@ export default function AppPage() {
 
       if (hasCoachMention) {
         setCoachReplyPending(true);
+        scrollChatToBottom('smooth');
       }
 
       showNotice('Message sent.');
       await loadMessagesForTopic(activeTopic);
       await loadInbox();
     } catch (err: any) {
-      setMessages((prev) => prev.filter((item) => item.id !== optimisticId));
+      const nextMessages = messagesRef.current.filter((item) => item.id !== optimisticId);
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
       setError(err.message || 'Failed to send message.');
     } finally {
       setPendingSend(false);
@@ -1620,13 +1891,23 @@ export default function AppPage() {
 
     try {
       setPostPending(true);
-      const uploadedMedia = postFiles.length > 0 ? await Promise.all(postFiles.map((file) => uploadFile(file))) : [];
+      const uploadedMedia = postFiles.length > 0
+        ? await Promise.all(postFiles.map((file) => uploadFile(file, {
+            source: 'web_community_post',
+            visibility: COMMUNITY_POST_VISIBILITY,
+          })))
+        : [];
       const mediaUrls = uploadedMedia.map((item) => item.url);
+      const mediaIds = uploadedMedia
+        .map((item) => item.mediaId)
+        .filter((item): item is string => Boolean(item));
       await createPost({
         userId: authUserId,
         type: mediaUrls.length > 0 ? 'media' : 'text',
         content: postText.trim(),
         mediaUrls,
+        mediaIds,
+        visibility: COMMUNITY_POST_VISIBILITY,
       });
 
       setPostText('');
@@ -1708,7 +1989,7 @@ export default function AppPage() {
     if (topic.startsWith('post_')) {
       const postId = Number(topic.replace('post_', ''));
       if (Number.isInteger(postId) && postId > 0) {
-        setTab('feed');
+        setTab('community');
         if (!expandedCommentPostIds.includes(postId)) {
           setExpandedCommentPostIds((prev) => [...prev, postId]);
         }
@@ -1766,7 +2047,9 @@ export default function AppPage() {
         fitness_goal: profileDraft.fitness_goal,
         hobbies: profileDraft.hobbies,
         avatar_url: profileDraft.avatar_url,
+        avatar_visibility: 'public',
         background_url: profileDraft.background_url,
+        background_visibility: 'friends',
       });
 
       await loadProfile();
@@ -1782,7 +2065,10 @@ export default function AppPage() {
     try {
       if (kind === 'avatar') setProfileAvatarUploading(true);
       if (kind === 'background') setProfileBackgroundUploading(true);
-      const uploaded = await uploadFile(file);
+      const uploaded = await uploadFile(file, {
+        source: kind === 'avatar' ? 'web_profile_avatar' : 'web_profile_background',
+        visibility: kind === 'avatar' ? 'public' : 'friends',
+      });
       if (!uploaded.url) {
         throw new Error('Upload did not return a file URL.');
       }
@@ -1938,1109 +2224,462 @@ export default function AppPage() {
     };
   }
 
-  if (!ready) {
-    return (
-      <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <div className="surface-card zym-enter" style={{ padding: 26, minWidth: 260, textAlign: 'center' }}>
-          <div className="zym-shimmer" style={{ width: 72, height: 72, margin: '0 auto', borderRadius: 20, display: 'grid', placeItems: 'center' }}>
-            <strong style={{ color: 'var(--sage-600)', fontSize: 24, fontFamily: 'var(--font-display)' }}>Z</strong>
-          </div>
-          <p style={{ marginTop: 14, color: 'var(--ink-500)', fontWeight: 600 }}>Preparing your community...</p>
-        </div>
-      </main>
-    );
-  }
+  const activeTab = tab === 'friends' ? 'community' : tab;
+  const activeConversationCoach = activeConversation?.type === 'coach'
+    ? (activeConversation.name.toLowerCase().includes('lc') ? 'lc' : 'zj')
+    : selectedCoach;
+  const activeConversationTheme = coachTheme(activeConversationCoach);
+  const selectedTabLabel = tabs.find((item) => item.key === activeTab)?.label || 'Message';
+  const topLeaderboardMetric = Math.max(
+    ...filteredLeaderboard.map((entry) => (
+      leaderboardMetric === 'steps'
+        ? Number(entry.steps || 0)
+        : Number(entry.calories_burned || 0)
+    )),
+    1,
+  );
+  const suggestedCommunities = [
+    { icon: 'bolt', name: 'Daily Push', meta: 'Training accountability room' },
+    { icon: 'nutrition', name: 'Macro Circle', meta: 'Meals, prep, and protein check-ins' },
+    { icon: 'favorite', name: 'Recovery Crew', meta: 'Sleep, stress, and habit momentum' },
+  ];
+  const trendingTopics = ['#hybridtraining', '#mealprep', '#coachcheckin', '#habitstack', '#accountability'];
 
-  return (
-    <main className={`app-shell app-shell-refined ${isOnline ? '' : 'app-shell-offline'}`}>
-      {!isOnline ? (
-        <div className="offline-banner">
-          Offline mode: browsing is available, but sending messages/posts is temporarily disabled.
-        </div>
-      ) : null}
-
-      <aside className="surface-card app-rail zym-enter zym-delay-1">
-        <div className="rail-brand zym-pulse-soft">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="ZYM logo" width={28} height={28} />
-          <span>ZYM</span>
-        </div>
-
-        {tabs.map((item) => (
+  const renderAppHeader = (
+    title: string,
+    subtitle: string,
+    searchValue: string,
+    onSearchChange: (value: string) => void,
+    searchPlaceholder: string,
+    searchRef?: { current: HTMLInputElement | null },
+    trailing?: JSX.Element,
+  ) => (
+    <header className="flex flex-col gap-5 border-b border-slate-200/50 bg-white/20 px-5 py-5 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
+        <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <label className="relative block min-w-[240px] md:min-w-[280px]">
+          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+          <input
+            ref={searchRef}
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={searchPlaceholder}
+          />
+        </label>
+        <div className="flex items-center gap-2">
           <button
-            key={item.key}
             type="button"
-            onClick={() => setTab(item.key)}
-            className={`rail-nav-btn ${tab === item.key ? 'active' : ''}`}
+            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            onClick={() => void loadMentions(authUserId)}
+            title="Refresh notifications"
           >
-            <span className="rail-nav-icon">
-              <TabGlyph icon={item.icon} active={tab === item.key} />
-            </span>
-            <span className="rail-nav-label">{item.label}</span>
-            {item.key === 'messages' && unreadMentionCount > 0 ? (
-              <span className="rail-nav-badge">{Math.min(unreadMentionCount, 99)}</span>
-            ) : null}
+            <span className="material-symbols-outlined">notifications</span>
           </button>
-        ))}
-      </aside>
+          <button
+            type="button"
+            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            onClick={() => setTab('profile')}
+            title="Open profile"
+          >
+            <span className="material-symbols-outlined">tune</span>
+          </button>
+          {trailing}
+        </div>
+      </div>
+    </header>
+  );
 
-      <section className="surface-card app-panel app-panel-list zym-enter zym-delay-2">
-        <header className="panel-header">
-          <h2 style={{ fontSize: 24 }}>{tab === 'messages' ? 'Conversations' : tabs.find((item) => item.key === tab)?.label}</h2>
-          <p style={{ marginTop: 4, color: 'var(--ink-500)', fontSize: 13 }}>
-            {tab === 'messages'
-              ? `Coach: ${selectedCoach.toUpperCase()} · ${filteredConversations.length}/${conversations.length} chats`
-              : 'Build your lifestyle with AI + community'}
-          </p>
-          {tab === 'messages' ? (
-            <div className="conversation-tools">
-              <input
-                ref={conversationSearchRef}
-                className="input-shell conversation-search"
-                value={conversationQuery}
-                onChange={(event) => setConversationQuery(event.target.value)}
-                placeholder="Search chats, people, or groups..."
-                aria-label="Search conversations"
-              />
-              <div className="conversation-filter-row">
-                {([
-                  { key: 'all', label: 'All', count: conversations.length },
-                  { key: 'coach', label: 'Coach', count: conversationCounts.coach },
-                  { key: 'dm', label: 'DM', count: conversationCounts.dm },
-                  { key: 'group', label: 'Group', count: conversationCounts.group },
-                ] as const).map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={`conversation-filter-pill ${conversationFilter === item.key ? 'active' : ''}`}
-                    onClick={() => setConversationFilter(item.key)}
-                    aria-pressed={conversationFilter === item.key}
-                  >
-                    <span>{item.label}</span>
-                    <strong>{item.count}</strong>
-                  </button>
-                ))}
+  const renderMessagePage = () => (
+    <div className="flex h-full flex-col">
+      <header className="flex items-center justify-between gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-4 backdrop-blur-sm md:px-8">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Message</h1>
+        <label className="relative block w-full max-w-[320px]">
+          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+          <input
+            ref={conversationSearchRef}
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+            value={conversationQuery}
+            onChange={(event) => setConversationQuery(event.target.value)}
+            placeholder="Search conversation..."
+          />
+        </label>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-6 p-4 md:p-6 xl:flex-row">
+        <section className="flex w-full flex-col gap-3 xl:w-[320px]">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            {filteredConversations.length === 0 ? (
+              <div className="rounded-[28px] border border-dashed border-slate-300/80 bg-white/25 p-5 text-sm text-slate-500">
+                No conversations matched this search.
               </div>
-            </div>
-          ) : null}
-        </header>
-
-        <section className={`panel-momentum panel-momentum-${tab}`}>
-          <div className="panel-momentum-copy">
-            <span className="panel-momentum-kicker">{panelMomentum.kicker}</span>
-            <h3>{panelMomentum.title}</h3>
-            <p>{panelMomentum.subtitle}</p>
-          </div>
-          <div className="panel-momentum-stats">
-            {panelMomentum.stats.map((item) => (
-              <article key={item.label} className="panel-momentum-stat">
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-              </article>
+            ) : null}
+            {filteredConversations.map((conversation) => (
+              <ConversationTile
+                key={conversation.topic}
+                item={conversation}
+                active={activeTopic === conversation.topic}
+                onSelect={setActiveTopic}
+                resolveAssetUrl={resolveApiAssetUrl}
+                displayNameFromTopic={displayNameFromTopic}
+                avatarInitial={avatarInitial}
+              />
             ))}
           </div>
         </section>
 
-        {tab === 'messages' ? (
-          <div className="conversation-stack-wrap">
-            <section className="mention-panel">
-              <div className="mention-panel-head">
-                <h3 style={{ fontSize: 14 }}>Mentions</h3>
-                {unreadMentionCount > 0 ? (
-                  <button className="btn btn-ghost" style={{ padding: '5px 9px' }} type="button" onClick={() => void handleMarkAllMentionsRead()}>
-                    Mark all read
-                  </button>
-                ) : null}
-              </div>
-              {mentionsLoading ? (
-                <p className="entity-sub">Loading mentions...</p>
-              ) : null}
-              {!mentionsLoading && mentionNotifications.length === 0 ? (
-                <p className="entity-sub">No mentions yet.</p>
-              ) : null}
-              {!mentionsLoading ? (
-                <div className="mention-list">
-                  {mentionNotifications.slice(0, 4).map((notification) => (
-                    <button
-                      key={notification.id}
-                      type="button"
-                      className={`mention-item ${notification.is_read ? '' : 'unread'}`}
-                      onClick={() => void handleOpenMention(notification)}
-                    >
-                      <div className="mention-item-head">
-                        <strong>{notification.actor_username || 'Someone'}</strong>
-                        <span>{formatTime(notification.created_at)}</span>
-                      </div>
-                      <p>{notification.snippet || 'Mentioned you'}</p>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-
-            <div className="conversation-overview-strip">
-              <div className="conversation-overview-item">
-                <span>Coach</span>
-                <strong>{conversationCounts.coach}</strong>
-              </div>
-              <div className="conversation-overview-item">
-                <span>DM</span>
-                <strong>{conversationCounts.dm}</strong>
-              </div>
-              <div className="conversation-overview-item">
-                <span>Groups</span>
-                <strong>{conversationCounts.group}</strong>
-              </div>
-              <div className="conversation-overview-item">
-                <span>Mentions</span>
-                <strong>{unreadMentionCount}</strong>
-              </div>
-            </div>
-
-            <div className="conversation-stack">
-              {filteredConversations.length === 0 ? (
-                <div className="conversation-empty">
-                  <strong>No conversations found</strong>
-                  <p>Try another keyword or switch filter.</p>
-                </div>
-              ) : null}
-
-              {filteredConversations.map((conversation) => (
-                <ConversationTile
-                  key={conversation.topic}
-                  item={conversation}
-                  active={activeTopic === conversation.topic}
-                  onSelect={setActiveTopic}
-                  resolveAssetUrl={resolveApiAssetUrl}
-                  displayNameFromTopic={displayNameFromTopic}
-                  avatarInitial={avatarInitial}
-                />
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {tab === 'friends' ? (
-          <div className="tab-content tab-content-friends zym-fade">
-            <section className="flow-card flow-card-highlight">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 20 }}>Connect friends</h3>
-                <p>Your connect ID: <strong>{connectId || '------'}</strong></p>
-                <p>{connectCodeMeta}</p>
-              </div>
-
-              <div className="split-input-row" style={{ marginTop: 12 }}>
-                <input
-                  className="input-shell"
-                  value={friendIdInput}
-                  onChange={(event) => setFriendIdInput(event.target.value)}
-                  placeholder="Enter user ID, 6-digit connect ID, or paste connect code"
-                />
-                <button className="btn btn-primary" type="button" onClick={() => void handleAddById()} disabled={friendByIdPending}>
-                  {friendByIdPending ? 'Adding...' : 'Add'}
-                </button>
-              </div>
-
-              {friendByIdError ? <p className="flow-error">{friendByIdError}</p> : null}
-              {friendByIdPreview ? (
-                <div className="entity-row" style={{ marginTop: 10 }}>
-                  <div className="entity-main">
-                    <strong>{friendByIdPreview.username}</strong>
-                    <span className="entity-sub">ID: {friendByIdPreview.id} · {friendByIdPreview.friendship_status}</span>
-                  </div>
-                  <button className="btn btn-ghost" type="button" onClick={() => setFriendIdInput(String(friendByIdPreview.id))}>
-                    Use
-                  </button>
-                </div>
-              ) : null}
-
-              <div className="connect-layout" style={{ marginTop: 12 }}>
-                {connectQrDataUrl ? (
-                  <button
-                    type="button"
-                    className="qr-image-button"
-                    onClick={() => openMediaLightbox(connectQrDataUrl, 'Connect QR')}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      className="qr-image"
-                      src={connectQrDataUrl}
-                      alt="Your connect QR code"
-                    />
-                  </button>
-                ) : (
-                  <div className="qr-image qr-image-empty">QR unavailable</div>
-                )}
-
-                <div className="connect-actions">
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => {
-                      if (!connectCode) return;
-                      void navigator.clipboard.writeText(connectCode);
-                      showNotice('Connect code copied.');
-                    }}
-                  >
-                    Copy connect code
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => void loadConnectInfo()}
-                  >
-                    Refresh now
-                  </button>
-                  <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
-                    Scan QR image
-                    <input hidden type="file" accept="image/*" onChange={handleScanFriendQr} />
-                  </label>
-                </div>
-              </div>
-              {connectScanError ? <span className="flow-error">{connectScanError}</span> : null}
-            </section>
-
-            <section className="flow-card">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Find users</h3>
-                <p>Search by username and send request instantly.</p>
-              </div>
-              <input className="input-shell" style={{ marginTop: 10 }} value={friendQuery} onChange={(event) => setFriendQuery(event.target.value)} placeholder="Search by username" />
-              <div className="entity-list" style={{ marginTop: 10 }}>
-                {friendSearchResult.map((user) => (
-                  <div key={user.id} className="entity-row">
-                    <div className="entity-main">
-                      <strong>{user.username}</strong>
-                      <span className="entity-sub">ID: {user.id}</span>
-                    </div>
-                    <button className="btn btn-primary" onClick={() => void handleAddFriend(user)}>
-                      Add
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="flow-card">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Pending requests</h3>
-                <p>Accept to unlock DM and profile sharing.</p>
-              </div>
-              <div className="entity-list" style={{ marginTop: 10 }}>
-                {requests.length === 0 ? <span className="entity-sub">No pending requests</span> : null}
-                {requests.map((friend) => (
-                  <div key={friend.id} className="entity-row">
-                    <strong>{friend.username}</strong>
-                    <button className="btn btn-primary" onClick={() => void handleAcceptFriend(friend.id)}>
-                      Accept
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="flow-card">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Friends</h3>
-                <p>Jump into direct chat or open profile.</p>
-              </div>
-              <div className="entity-list" style={{ marginTop: 10 }}>
-                {friends.length === 0 ? <span className="entity-sub">No friends yet</span> : null}
-                {friends.map((friend) => (
-                  <div key={friend.id} className="entity-row">
-                    <strong>{friend.username}</strong>
-                    <button className="btn btn-ghost" onClick={() => void handleOpenDM(friend.id)}>
-                      DM
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <form onSubmit={handleCreateGroup} className="flow-card flow-card-soft form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Create group</h3>
-                <p>Invite members now, manage roles in group chat.</p>
-              </div>
-              <input className="input-shell" placeholder="Group name" value={groupName} onChange={(event) => setGroupName(event.target.value)} />
-              <select className="input-shell" value={groupCoachEnabled} onChange={(event) => setGroupCoachEnabled(event.target.value as 'none' | 'zj' | 'lc')}>
-                <option value="zj">Coach in group: ZJ</option>
-                <option value="lc">Coach in group: LC</option>
-                <option value="none">No coach in group</option>
-              </select>
-              <input className="input-shell" placeholder="Invite usernames (comma separated)" value={groupMembers} onChange={(event) => setGroupMembers(event.target.value)} />
-              <button className="btn btn-primary" type="submit">
-                Create Group
-              </button>
-            </form>
-          </div>
-        ) : null}
-
-        {tab === 'feed' ? (
-          <div className="tab-content tab-content-feed zym-fade">
-            <section className="flow-card feed-composer-card">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 20 }}>Create a post</h3>
-                <p>Share training, meals, recovery, and progress updates.</p>
-              </div>
-              <textarea
-                className="input-shell feed-composer-input"
-                value={postText}
-                placeholder="Share your training, meals, or progress..."
-                onChange={(event) => setPostText(event.target.value)}
-              />
-
-              <div className="feed-composer-toolbar">
-                <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
-                  Add media
-                  <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
-                </label>
-                <span className="entity-sub">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
-                {postFiles.length > 0 ? (
-                  <button className="btn btn-ghost" style={{ padding: '6px 10px' }} type="button" onClick={() => setPostFiles([])}>
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-
-              <MediaPreviewGrid
-                items={postFilePreviews}
-                onRemove={(index) => removeAttachmentAt(index, setPostFiles)}
-                wrapperClassName="media-grid-preview"
-                itemClassName="media-thumb"
-              />
-
-              <button className="btn btn-primary" style={{ marginTop: 10, width: 'fit-content' }} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
-                {postPending ? 'Posting...' : 'Publish'}
-              </button>
-            </section>
-
-            {feedLoading ? (
-              <section className="flow-card">
-                <div className="feed-skeleton" />
-                <div className="feed-skeleton" />
-              </section>
-            ) : null}
-
-            {feed.map((post) => (
-              <article key={post.id} className="feed-post-card zym-enter-fast">
-                <header className="feed-post-head">
-                  <div>
-                    <strong>{post.username}</strong>
-                    <p className="entity-sub" style={{ marginTop: 2 }}>{formatTime(post.created_at)}</p>
-                  </div>
-                  <span className="feed-post-tag">{post.type}</span>
-                </header>
-
-                {post.content ? (
-                  <>
-                    <p className="feed-post-content">
-                      {expandedPostIds.includes(post.id) || post.content.length <= 180
-                        ? post.content
-                        : `${post.content.slice(0, 180)}...`}
-                    </p>
-                    {post.content.length > 180 ? (
-                      <button className="btn btn-ghost feed-post-link" onClick={() => togglePostExpanded(post.id)}>
-                        {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {post.media_urls?.length > 0 ? (
-                  <div className="post-media-grid">
-                    {post.media_urls.map((url) => {
-                      const mediaUrl = resolveApiAssetUrl(url);
-                      if (!mediaUrl) return null;
-                      return (
-                        <button
-                          key={mediaUrl}
-                          type="button"
-                          className="post-media-item"
-                          onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
-                        >
-                          {isVideoUrl(mediaUrl) ? (
-                            <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                <div className="feed-post-actions">
-                  <button className="btn btn-ghost" onClick={() => void handleReact(post.id)}>
-                    Like {post.reaction_count || 0}
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => void togglePostComments(post.id)}>
-                    Comments {post.comment_count || 0}
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => togglePostExpanded(post.id)}>
-                    {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => void submitAbuseReport('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
-                  >
-                    Report
-                  </button>
-                </div>
-
-                {expandedCommentPostIds.includes(post.id) ? (
-                  <section className="feed-comment-panel">
-                    <div className="feed-comment-list">
-                      {commentLoadingPostIds.includes(post.id) ? (
-                        <p className="entity-sub">Loading comments...</p>
-                      ) : null}
-                      {(postCommentsById[post.id] || []).map((comment) => (
-                        <article key={comment.id} className="feed-comment-item">
-                          <div className="feed-comment-head">
-                            <strong>{comment.username}</strong>
-                            <span>{formatTime(comment.created_at)}</span>
-                          </div>
-                          <p>{comment.content}</p>
-                        </article>
-                      ))}
-                      {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
-                        <p className="entity-sub">No comments yet. Start the conversation.</p>
-                      ) : null}
-                    </div>
-
-                    <div className="feed-comment-composer">
-                      <input
-                        className="input-shell"
-                        placeholder="Write a comment..."
-                        value={commentDraftByPostId[post.id] || ''}
-                        onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            void handleCreatePostComment(post.id);
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-primary"
-                        type="button"
-                        disabled={commentPendingPostId === post.id}
-                        onClick={() => void handleCreatePostComment(post.id)}
-                      >
-                        {commentPendingPostId === post.id ? 'Posting...' : 'Reply'}
-                      </button>
-                    </div>
-                  </section>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        ) : null}
-
-        {tab === 'leaderboard' ? (
-          <div className="tab-content tab-content-leaderboard zym-fade">
-            <section className="flow-card flow-card-highlight form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 20 }}>Weekly leaderboard</h3>
-                <p>Sync your latest steps and calories to update ranking.</p>
-              </div>
-              <div className="leaderboard-sync-grid">
-                <input className="input-shell" value={healthSync.steps} onChange={(event) => setHealthSync((prev) => ({ ...prev, steps: event.target.value }))} placeholder="Steps" />
-                <input className="input-shell" value={healthSync.calories} onChange={(event) => setHealthSync((prev) => ({ ...prev, calories: event.target.value }))} placeholder="Calories" />
-              </div>
-              <button className="btn btn-primary" disabled={syncPending || !isOnline} onClick={() => void handleSyncHealth()}>
-                {syncPending ? 'Syncing...' : 'Sync'}
-              </button>
-            </section>
-
-            <section className="flow-card">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Momentum (7 days)</h3>
-                <p>Track consistency, trend, and best day from your recent health syncs.</p>
-              </div>
-
-              <div className="health-momentum-grid">
-                <article className="health-momentum-stat">
-                  <span>Current streak</span>
-                  <strong>{healthMomentum?.streakDays ?? 0}d</strong>
-                </article>
-                <article className="health-momentum-stat">
-                  <span>Active days</span>
-                  <strong>{healthMomentum?.activityDays ?? 0}/7</strong>
-                </article>
-                <article className="health-momentum-stat">
-                  <span>Avg steps</span>
-                  <strong>{healthMomentum?.averages.steps ?? 0}</strong>
-                </article>
-                <article className="health-momentum-stat">
-                  <span>Trend</span>
-                  <strong>
-                    {healthMomentum?.trend.direction === 'up' ? 'Up' : healthMomentum?.trend.direction === 'down' ? 'Down' : 'Flat'}
-                  </strong>
-                </article>
-              </div>
-
-              <div className="health-momentum-chart">
-                {(() => {
-                  const rows = healthMomentum?.last7Days || [];
-                  const maxScore = Math.max(...rows.map((item) => item.score), 1);
-                  return rows.map((day) => {
-                    const ratio = Math.max(0.1, day.score / maxScore);
-                    return (
-                      <div key={day.date} className="health-momentum-bar-wrap">
-                        <div className="health-momentum-bar-track">
-                          <div className="health-momentum-bar-fill" style={{ height: `${Math.round(ratio * 100)}%` }} />
-                        </div>
-                        <span>{formatDayLabel(day.date).slice(0, 3)}</span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-
-              {healthMomentum?.bestDay ? (
-                <p className="entity-sub" style={{ marginTop: 8 }}>
-                  Best day: {formatDayLabel(healthMomentum.bestDay.date)} · {healthMomentum.bestDay.steps} steps · {healthMomentum.bestDay.calories_burned} cal
-                </p>
-              ) : (
-                <p className="entity-sub" style={{ marginTop: 8 }}>No synced health momentum yet.</p>
-              )}
-            </section>
-
-            {leaderboardLoading ? (
-              <section className="flow-card">
-                <div className="feed-skeleton" />
-              </section>
-            ) : null}
-
-            <section className="flow-card">
-              {leaderboard.length === 0 ? (
-                <p className="entity-sub">No ranking data yet. Sync health to create your first leaderboard.</p>
-              ) : null}
-            {leaderboard.map((entry, index) => (
-              <div key={entry.id} className="leaderboard-row">
-                <div className={`leaderboard-rank ${index < 3 ? 'top' : ''}`}>
-                  {index + 1}
-                </div>
-                <div>
-                  <strong>{entry.username}</strong>
-                  <p className="entity-sub" style={{ marginTop: 3 }}>{entry.steps || 0} steps · {entry.calories_burned || 0} cal</p>
-                </div>
-                <div className="leaderboard-score-pill">{(entry.steps || 0) + (entry.calories_burned || 0)}</div>
-              </div>
-            ))}
-            </section>
-          </div>
-        ) : null}
-
-        {tab === 'profile' ? (
-          <div className="tab-content tab-content-profile zym-fade">
-            <section className="flow-card flow-card-highlight">
-              <div className="profile-hero">
-                {profileDraft.background_url ? (
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[32px] border border-white/60 bg-white/35 backdrop-blur-xl">
+          <header className="flex items-center gap-3 border-b border-slate-200/50 bg-white/35 px-5 py-3 md:px-6">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                className="flex size-10 items-center justify-center rounded-[14px]"
+                style={{
+                  background: activeConversation?.type === 'coach'
+                    ? activeConversationCoach === 'lc'
+                      ? 'rgba(242,138,58,0.14)'
+                      : 'rgba(105,121,247,0.14)'
+                    : 'rgba(255,255,255,0.75)',
+                  color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
+                }}
+                onClick={() => void openConversationProfile()}
+                disabled={!activeConversation || activeConversation.type === 'group'}
+                title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
+              >
+                {activeConversation?.avatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={resolveApiAssetUrl(profileDraft.background_url)}
-                    alt="Profile cover"
-                    className="profile-cover-media"
+                    src={resolveApiAssetUrl(activeConversation.avatarUrl)}
+                    alt={activeConversation.name}
+                    style={{ width: 40, height: 40, borderRadius: 14, objectFit: 'cover' }}
                   />
                 ) : (
-                  <div className="profile-cover-fallback" />
+                  <span className="text-base font-semibold">{avatarInitial(activeConversation?.name || 'Chat')}</span>
                 )}
-                <div className="profile-hero-overlay">
-                  {profileDraft.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={resolveApiAssetUrl(profileDraft.avatar_url)}
-                      alt="Profile avatar"
-                      className="profile-avatar-media"
-                    />
-                  ) : (
-                    <div className="profile-avatar-fallback">
-                      {avatarInitial(authUsername || profile?.username || 'User')}
-                    </div>
-                  )}
-                  <div>
-                    <h3 style={{ fontSize: 20 }}>{authUsername || profile?.username || 'User'}</h3>
-                    <p className="entity-sub" style={{ marginTop: 4 }}>ID: {authUserId}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="profile-hero-actions">
-                <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
-                  {profileAvatarUploading ? 'Uploading avatar...' : 'Upload avatar'}
-                  <input
-                    hidden
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        void handleUploadProfileAsset(file, 'avatar');
-                      }
-                      event.target.value = '';
-                    }}
-                  />
-                </label>
-                <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
-                  {profileBackgroundUploading ? 'Uploading cover...' : 'Upload cover'}
-                  <input
-                    hidden
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        void handleUploadProfileAsset(file, 'background');
-                      }
-                      event.target.value = '';
-                    }}
-                  />
-                </label>
-                <button className="btn btn-ghost" type="button" onClick={() => setProfileDraft((prev) => ({ ...prev, avatar_url: '', background_url: '' }))}>
-                  Clear media
-                </button>
-              </div>
-
-              <p className="entity-sub" style={{ marginTop: 8 }}>
-                Profile details are visible to your accepted friends in chat.
-              </p>
-
-              <div className="profile-coach-switch">
-                <button className={`btn ${selectedCoach === 'zj' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => void handleSwitchCoach('zj')}>
-                  ZJ coach
-                </button>
-                <button className={`btn ${selectedCoach === 'lc' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => void handleSwitchCoach('lc')}>
-                  LC coach
-                </button>
-              </div>
-            </section>
-
-            <CoachRecordsPanel
-              userId={authUserId}
-              active={ready && tab === 'profile' && authUserId > 0}
-              onNotice={showNotice}
-              onError={setError}
-            />
-
-            <section className="flow-card form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Edit profile</h3>
-                <p>Changes sync to iOS and web for the same account.</p>
-              </div>
-              <textarea
-                className="input-shell profile-bio-input"
-                placeholder="Bio"
-                value={profileDraft.bio}
-                onChange={(event) => setProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
-              />
-              <input
-                className="input-shell"
-                placeholder="Avatar URL (optional)"
-                value={profileDraft.avatar_url}
-                onChange={(event) => setProfileDraft((prev) => ({ ...prev, avatar_url: event.target.value }))}
-              />
-              <input
-                className="input-shell"
-                placeholder="Background URL (optional)"
-                value={profileDraft.background_url}
-                onChange={(event) => setProfileDraft((prev) => ({ ...prev, background_url: event.target.value }))}
-              />
-              <input
-                className="input-shell"
-                placeholder="Fitness goal"
-                value={profileDraft.fitness_goal}
-                onChange={(event) => setProfileDraft((prev) => ({ ...prev, fitness_goal: event.target.value }))}
-              />
-              <input
-                className="input-shell"
-                placeholder="Hobbies"
-                value={profileDraft.hobbies}
-                onChange={(event) => setProfileDraft((prev) => ({ ...prev, hobbies: event.target.value }))}
-              />
-              <button className="btn btn-primary" disabled={profilePending} onClick={() => void handleSaveProfile()}>
-                {profilePending ? 'Saving...' : 'Save'}
               </button>
-            </section>
-
-            <section className="flow-card form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Device sessions</h3>
-                <p>Manage where your account is signed in.</p>
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-bold text-slate-900">{activeConversation?.name || 'Select a chat'}</h2>
               </div>
-
-              <div className="profile-session-actions">
-                <button className="btn btn-ghost" onClick={() => void loadAuthSessions()} disabled={authSessionsLoading}>
-                  {authSessionsLoading ? 'Refreshing...' : 'Refresh sessions'}
-                </button>
-                <button
-                  className="btn btn-danger-soft"
-                  onClick={() => void handleLogoutAllSessions()}
-                  disabled={logoutAllSessionsPending}
-                >
-                  {logoutAllSessionsPending ? 'Processing...' : 'Logout other devices'}
-                </button>
-              </div>
-
-              {authSessionsLoading && authSessions.length === 0 ? (
-                <p className="entity-sub">Loading sessions...</p>
-              ) : null}
-
-              {authSessions.map((session) => (
-                <article key={session.sessionId} className="profile-session-item">
-                  <div>
-                    <strong>{session.deviceName || 'Unknown device'}</strong>
-                    <p className="entity-sub">
-                      {session.ipAddress || 'IP unavailable'} · Last seen {formatSessionDate(session.lastSeenAt)}
-                    </p>
-                    <p className="entity-sub">
-                      Created {formatSessionDate(session.createdAt)} · Expires {formatSessionDate(session.expiresAt)}
-                    </p>
-                  </div>
-                  <div className="profile-session-item-actions">
-                    {session.current ? <span className="profile-session-current">Current</span> : null}
-                    {!session.current ? (
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => void handleRevokeSession(session.sessionId)}
-                        disabled={authSessionPendingId === session.sessionId || Boolean(session.revokedAt)}
-                      >
-                        {authSessionPendingId === session.sessionId ? 'Revoking...' : (session.revokedAt ? 'Revoked' : 'Revoke')}
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </section>
-
-            <section className="flow-card form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Security timeline</h3>
-                <p>Recent auth and risk-control events for your account.</p>
-              </div>
-
-              <button className="btn btn-ghost" onClick={() => void loadSecurityEvents()} disabled={securityEventsLoading}>
-                {securityEventsLoading ? 'Refreshing...' : 'Refresh timeline'}
-              </button>
-
-              {securityEventsLoading && securityEvents.length === 0 ? (
-                <p className="entity-sub">Loading security timeline...</p>
-              ) : null}
-
-              {!securityEventsLoading && securityEvents.length === 0 ? (
-                <p className="entity-sub">No security events yet.</p>
-              ) : null}
-
-              {securityEvents.slice(0, 10).map((event) => (
-                <article key={event.id} className={`profile-session-item security-event-item severity-${event.severity}`}>
-                  <div>
-                    <strong>{eventLabel(event.event_type)}</strong>
-                    <p className="entity-sub">
-                      {(event.ip_address || 'IP unavailable')} · {(event.user_agent || 'Unknown client').slice(0, 64)}
-                    </p>
-                    <p className="entity-sub">{formatSessionDate(event.created_at)}</p>
-                  </div>
-                  <div className="profile-session-item-actions">
-                    <span className={`security-event-severity ${event.severity}`}>{event.severity.toUpperCase()}</span>
-                  </div>
-                </article>
-              ))}
-            </section>
-
-            <section className="flow-card form-grid">
-              <div className="flow-card-head">
-                <h3 style={{ fontSize: 18 }}>Safety center</h3>
-                <p>Your latest moderation reports.</p>
-              </div>
-
-              <button className="btn btn-ghost" onClick={() => void loadAbuseReports()} disabled={abuseReportsLoading}>
-                {abuseReportsLoading ? 'Refreshing...' : 'Refresh reports'}
-              </button>
-
-              {abuseReports.length === 0 ? (
-                <p className="entity-sub">No reports submitted yet.</p>
-              ) : null}
-
-              {abuseReports.slice(0, 8).map((report) => (
-                <article key={report.id} className="profile-session-item">
-                  <div>
-                    <strong>{report.target_type} #{report.target_id}</strong>
-                    <p className="entity-sub">{report.reason}</p>
-                    <p className="entity-sub">{formatSessionDate(report.created_at)} · {report.status}</p>
-                  </div>
-                </article>
-              ))}
-            </section>
-
-            <button className="btn btn-danger-soft" onClick={() => void handleLogout()}>
-              Logout
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="surface-card app-panel app-panel-chat zym-enter zym-delay-3">
-        {tab === 'messages' ? (
-          <>
-            <header className="chat-header chat-header-elevated">
-              <div className="chat-title-wrap">
-                <button
-                  type="button"
-                  className="chat-profile-btn"
-                  onClick={() => void openConversationProfile()}
-                  disabled={!activeConversation || activeConversation.type === 'group'}
-                  title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
-                >
-                  {activeConversation?.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={resolveApiAssetUrl(activeConversation.avatarUrl)}
-                      alt={activeConversation.name}
-                      style={{ width: 52, height: 52, borderRadius: 16, objectFit: 'cover' }}
-                    />
-                  ) : (
-                    <div className={`chat-profile-fallback ${activeConversation?.type === 'coach' ? 'coach' : 'user'}`}>
-                      {avatarInitial(activeConversation?.name || 'Chat')}
-                    </div>
-                  )}
-                </button>
-                <div style={{ minWidth: 0 }}>
-                  <h2 style={{ fontSize: 28 }}>{activeConversation?.name || 'Select a chat'}</h2>
-                  <p style={{ marginTop: 6, color: 'var(--ink-500)', fontSize: 13 }}>
-                    {activeConversation?.subtitle || 'Conversation'}
-                  </p>
-                  <div className="chat-meta-badges">
-                    <span className="chat-meta-badge">
-                      {activeConversation?.type === 'group' ? 'Group room' : 'Direct chat'}
-                    </span>
-                    {activeConversation?.type === 'coach' ? <span className="chat-meta-badge coach">AI coach</span> : null}
-                  </div>
-                </div>
-              </div>
-              <div className="chat-latest-pill chat-latest-pill-elevated">
-                {activeConversation?.preview ? `Latest: ${activeConversation.preview}` : 'No messages yet'}
-              </div>
-            </header>
-
-            {activeConversation?.type === 'group' ? (
-              <section className="surface-subtle group-toolbar">
-                <div className="group-toolbar-head">
-                  <strong style={{ fontSize: 14 }}>Group members</strong>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ padding: '6px 10px' }}
-                    onClick={() => activeConversation.groupId && void loadActiveGroupMembers(activeConversation.groupId)}
-                    disabled={activeGroupMembersPending}
-                  >
-                    {activeGroupMembersPending ? 'Loading...' : 'Refresh'}
-                  </button>
-                </div>
-
-                <div className="group-chip-list">
-                  {activeGroupMembers.length === 0 ? (
-                    <span style={{ color: 'var(--ink-500)', fontSize: 12 }}>No members loaded</span>
-                  ) : (
-                    activeGroupMembers.map((member) => (
-                      <div key={member.id} className="surface-card group-member-chip">
-                        <span>{member.username} · {member.role}</span>
-                        {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
-                          <button
-                            className="btn btn-ghost"
-                            type="button"
-                            style={{ padding: '2px 6px', minHeight: 22 }}
-                            onClick={() => void handleRemoveFromActiveGroup(member)}
-                            disabled={activeGroupRemovePendingId === member.id}
-                          >
-                            {activeGroupRemovePendingId === member.id ? '...' : 'Remove'}
-                          </button>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="group-invite-row">
-                  <input
-                    className="input-shell"
-                    placeholder="Invite username"
-                    value={activeGroupInvite}
-                    onChange={(event) => setActiveGroupInvite(event.target.value)}
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => void handleInviteToActiveGroup()}
-                    disabled={activeGroupInvitePending}
-                  >
-                    {activeGroupInvitePending ? 'Inviting...' : 'Invite'}
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
-            <div ref={chatStreamRef} className="chat-stream chat-stream-layered">
-              {messages.map((message, index) => {
-                const mine = message.from_user_id === authUserId;
-                const previous = index > 0 ? messages[index - 1] : null;
-                const previousDate = previous?.created_at ? new Date(previous.created_at).toDateString() : null;
-                const currentDate = message.created_at ? new Date(message.created_at).toDateString() : null;
-                const showDateDivider = !previous || previousDate !== currentDate;
-                const compact = !!previous && previous.from_user_id === message.from_user_id && !showDateDivider;
-                const showMetaLine = !compact || mine;
-                const senderLabel = mine ? 'You' : message.username || (activeConversation?.type === 'coach' ? 'Coach' : 'User');
-                const avatarText = avatarInitial(message.username || (activeConversation?.type === 'coach' ? 'Coach' : 'User'));
-
-                return (
-                  <div key={`${message.id}-${message.created_at}`} className="message-block">
-                    {showDateDivider ? (
-                      <div className="message-date-divider">
-                        <span>{formatDayLabel(message.created_at)}</span>
-                      </div>
-                    ) : null}
-
-                    <div className={`message-row ${mine ? 'mine' : 'other'} ${compact ? 'compact' : ''}`}>
-                      {!mine ? (
-                        <div className={`message-avatar ${compact ? 'ghost' : ''}`}>
-                          {compact ? '' : avatarText}
-                        </div>
-                      ) : null}
-
-                      <article
-                        className={`chat-bubble ${mine ? 'mine' : 'their'} ${compact ? 'compact' : ''} zym-enter-fast`}
-                      >
-                        {showMetaLine ? (
-                          <div className="message-meta-line">
-                            <strong>{senderLabel}</strong>
-                            <span>{formatTime(message.created_at)}</span>
-                          </div>
-                        ) : null}
-
-                        {message.content ? <p className="message-content">{message.content}</p> : null}
-
-                        {message.media_urls?.length > 0 ? (
-                          <div className="chat-attachment-grid">
-                            {message.media_urls.map((url) => {
-                              const mediaUrl = resolveApiAssetUrl(url);
-                              if (!mediaUrl) return null;
-                              return (
-                                <button
-                                  key={mediaUrl}
-                                  type="button"
-                                  className={`chat-attachment-item ${mine ? 'mine' : ''}`}
-                                  onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
-                                >
-                                  {isVideoUrl(mediaUrl) ? (
-                                    <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 140 }} />
-                                  ) : (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={mediaUrl} alt="attachment" style={{ width: '100%', maxHeight: 170, objectFit: 'cover' }} />
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </article>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {typingLabel ? (
-                <div className="typing-indicator-row zym-fade">
-                  <div className="typing-pill">
-                    <span>{typingLabel}</span>
-                    <span className="typing-dots" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-
-              {coachReplyPending ? (
-                <div className="typing-indicator-row zym-fade">
-                  <div className="typing-pill coach-wait-pill">
-                    <span>@coach detected, waiting for reply...</span>
-                    <span className="typing-dots" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                  </div>
-                </div>
-              ) : null}
             </div>
+          </header>
 
-            <footer className="chat-composer chat-composer-elevated">
-              <MediaPreviewGrid
-                items={attachmentPreviews}
-                onRemove={(index) => removeAttachmentAt(index, setAttachments)}
-                wrapperClassName="chat-preview-grid"
-                itemClassName="chat-preview-item"
-              />
-
-              <div className="composer-row composer-row-elevated">
-                <div ref={composerMenuRef} className="composer-trigger-wrap">
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    style={{ minWidth: 42, display: 'grid', placeItems: 'center' }}
-                    onClick={() => setComposerActionsOpen((prev) => !prev)}
-                    aria-label="Open attachment actions"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                      <path d="M12 8v8M8 12h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                  {composerActionsOpen ? (
-                    <div
-                      className="surface-card composer-action-menu"
-                    >
-                      <label className="btn btn-ghost" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
-                        Photo / Video
-                        <input
-                          hidden
-                          type="file"
-                          multiple
-                          accept="image/*,video/*"
-                          onChange={(event) => {
-                            onFileSelect(attachments, setAttachments)(event);
-                            setComposerActionsOpen(false);
-                          }}
-                        />
-                      </label>
-                      {attachments.length > 0 ? (
+          {activeConversation?.type === 'group' ? (
+            <section className="border-b border-slate-200/50 px-5 py-4 md:px-6">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <strong className="text-sm text-slate-800">Group members</strong>
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  style={{ padding: '6px 10px' }}
+                  onClick={() => activeConversation.groupId && void loadActiveGroupMembers(activeConversation.groupId)}
+                  disabled={activeGroupMembersPending}
+                >
+                  {activeGroupMembersPending ? 'Loading...' : 'Refresh'}
+                </button>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {activeGroupMembers.length === 0 ? (
+                  <span className="text-sm text-slate-500">No members loaded</span>
+                ) : (
+                  activeGroupMembers.map((member) => (
+                    <div key={member.id} className="flex items-center gap-2 rounded-full border border-white/60 bg-white/55 px-3 py-2 text-xs text-slate-600">
+                      <span>{member.username} · {member.role}</span>
+                      {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
                         <button
-                          className="btn btn-ghost"
+                          className="text-[color:var(--coach-zj)]"
                           type="button"
-                          style={{ justifyContent: 'flex-start' }}
-                          onClick={() => {
-                            setAttachments([]);
-                            setComposerActionsOpen(false);
-                          }}
+                          onClick={() => void handleRemoveFromActiveGroup(member)}
+                          disabled={activeGroupRemovePendingId === member.id}
                         >
-                          Clear attachments
+                          {activeGroupRemovePendingId === member.id ? '...' : 'Remove'}
                         </button>
                       ) : null}
                     </div>
-                  ) : null}
-                </div>
+                  ))
+                )}
+              </div>
+              <div className="flex flex-col gap-3 md:flex-row">
                 <input
-                  className="input-shell composer-input"
-                  value={composer}
-                  onChange={(event) => setComposer(event.target.value)}
-                  placeholder="Type a message... (use @coach in groups to trigger AI reply)"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      void handleSendMessage();
-                    }
-                  }}
+                  className="input-shell"
+                  placeholder="Invite username"
+                  value={activeGroupInvite}
+                  onChange={(event) => setActiveGroupInvite(event.target.value)}
                 />
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => void handleInviteToActiveGroup()}
+                  disabled={activeGroupInvitePending}
+                >
+                  {activeGroupInvitePending ? 'Inviting...' : 'Invite'}
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-5 py-5 md:px-6">
+            {messages.map((message, index) => {
+              const mine = message.from_user_id === authUserId;
+              const previous = index > 0 ? messages[index - 1] : null;
+              const previousDate = parseDisplayDate(previous?.created_at)?.toDateString() || null;
+              const currentDate = parseDisplayDate(message.created_at)?.toDateString() || null;
+              const showDateDivider = !previous || previousDate !== currentDate;
+              const compact = !!previous && previous.from_user_id === message.from_user_id && !showDateDivider;
+              const showMetaLine = !compact || mine;
+              const counterpartyName = message.is_coach
+                ? coachDisplayName(activeConversationCoach)
+                : message.username || (activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
+              const senderLabel = mine ? 'You' : counterpartyName;
+              const avatarText = avatarInitial(counterpartyName);
+              const isCoachReply = !mine && message.is_coach;
+              const revealedCoachSegmentCount = isCoachReply ? animatedCoachReplies[String(message.id)] : undefined;
+              const contentSegments = isCoachReply ? splitReplySegments(message.content) : [];
+              const isInlineCoachReveal = isCoachReply && typeof revealedCoachSegmentCount === 'number';
+              const hasRemainingCoachSegments = isCoachReply
+                && (revealedCoachSegmentCount ?? contentSegments.length) < contentSegments.length;
+              const renderedSegments = isCoachReply
+                ? contentSegments.slice(0, revealedCoachSegmentCount ?? contentSegments.length)
+                : (message.content ? [message.content] : []);
+              const senderMetaLabel = !mine && activeConversation?.type === 'coach' ? '' : senderLabel;
+              const showMessageMedia = !isCoachReply || !isInlineCoachReveal || !hasRemainingCoachSegments;
+
+              return (
+                <div key={`${message.id}-${message.created_at}`} className="mb-5">
+                  {showDateDivider ? (
+                    <div className="mb-4 flex items-center gap-4 py-2">
+                      <div className="h-px flex-1 bg-slate-200/60" />
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">{formatDayLabel(message.created_at)}</span>
+                      <div className="h-px flex-1 bg-slate-200/60" />
+                    </div>
+                  ) : null}
+
+                  <div className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-2' : ''}`}>
+                    {!mine ? (
+                      <div
+                        className={`mt-1 flex size-8 items-center justify-center rounded-full text-xs font-semibold ${compact ? 'opacity-0' : ''}`}
+                        style={{
+                          background: message.is_coach
+                            ? (activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.12)')
+                            : 'rgba(148,163,184,0.16)',
+                          color: message.is_coach
+                            ? (activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)')
+                            : 'rgb(71 85 105)',
+                        }}
+                      >
+                        {compact ? '' : avatarText}
+                      </div>
+                    ) : null}
+
+                    <article className={`max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                      {showMetaLine ? (
+                        <div className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-400 ${mine ? 'justify-end' : 'justify-start'}`}>
+                          {senderMetaLabel ? (
+                            <strong
+                              className="font-semibold"
+                              style={{
+                                color: !mine && message.is_coach
+                                  ? activeConversationTheme.ink
+                                  : 'var(--ink-500)',
+                              }}
+                            >
+                              {senderMetaLabel}
+                            </strong>
+                          ) : null}
+                          <span>{formatTime(message.created_at)}</span>
+                        </div>
+                      ) : null}
+
+                      {showMessageMedia && message.media_urls?.length > 0 ? (
+                        <div
+                          className={`mb-2 flex max-w-full gap-2 overflow-x-auto pb-1 ${mine ? 'justify-end' : 'justify-start'}`}
+                          style={{
+                            scrollbarWidth: 'none',
+                          }}
+                        >
+                          {message.media_urls.map((url) => {
+                            const mediaUrl = resolveApiAssetUrl(url);
+                            if (!mediaUrl) return null;
+                            return (
+                              <button
+                                key={mediaUrl}
+                                type="button"
+                                className="relative h-32 w-32 shrink-0 overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 md:h-36 md:w-36"
+                                onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
+                              >
+                                {isVideoUrl(mediaUrl) ? (
+                                  <>
+                                    <video
+                                      src={mediaUrl}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      className="h-full w-full object-cover"
+                                    />
+                                    <span className="pointer-events-none absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+                                      Video
+                                    </span>
+                                  </>
+                                ) : (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={mediaUrl}
+                                    alt="attachment"
+                                    className="h-full w-full object-cover"
+                                  />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      {renderedSegments.map((segment, segmentIndex) => (
+                        <div
+                          key={`${message.id}-segment-${segmentIndex}`}
+                          className={`rounded-[22px] px-4 py-3 shadow-sm ${
+                            mine
+                              ? 'rounded-tr-md border border-white/80 bg-white/80 text-slate-800'
+                              : 'rounded-tl-md text-white'
+                          } ${segmentIndex > 0 ? 'mt-2' : ''}`}
+                          style={!mine ? (
+                            message.is_coach
+                              ? {
+                                  background: activeConversationTheme.gradient,
+                                  boxShadow: activeConversationCoach === 'lc'
+                                    ? '0 18px 36px rgba(242,138,58,0.22)'
+                                    : '0 18px 36px rgba(105,121,247,0.22)',
+                                }
+                              : {
+                                  background: 'rgba(100,116,139,0.95)',
+                                  boxShadow: '0 18px 36px rgba(100,116,139,0.22)',
+                                }
+                          ) : undefined}
+                        >
+                          {segment ? <p className="whitespace-pre-wrap text-sm leading-6">{segment}</p> : null}
+                        </div>
+                      ))}
+
+                      {isCoachReply && hasRemainingCoachSegments ? (
+                        <div
+                          className="mt-2 inline-flex items-center gap-3 rounded-full border border-white/60 bg-white/75 px-4 py-2 text-sm shadow-sm"
+                          style={{
+                            color: activeConversationTheme.ink,
+                          }}
+                        >
+                          <span>{avatarText} is typing...</span>
+                          <span className="typing-dots" aria-hidden="true">
+                            <i />
+                            <i />
+                            <i />
+                          </span>
+                        </div>
+                      ) : null}
+                    </article>
+                  </div>
+                </div>
+              );
+            })}
+
+            {typingLabel ? (
+              <div className="mt-4 flex justify-start">
+                <div className="inline-flex items-center gap-3 rounded-full bg-white/70 px-4 py-2 text-sm text-slate-500">
+                  <span>{typingLabel}</span>
+                  <span className="typing-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            {coachReplyPending ? (
+              <div className="mt-4 flex justify-start">
+                <div
+                  className="inline-flex items-center gap-3 rounded-full px-4 py-2 text-sm"
+                  style={{
+                    background: activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                    color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
+                  }}
+                >
+                  <span>@coach detected, waiting for reply...</span>
+                  <span className="typing-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <footer className="border-t border-slate-200/50 bg-white/35 px-5 py-4 md:px-6">
+            <MediaPreviewGrid
+              items={attachmentPreviews}
+              onRemove={(index) => removeAttachmentAt(index, setAttachments)}
+              wrapperClassName="chat-preview-grid"
+              itemClassName="chat-preview-item"
+            />
+
+            <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 md:flex-row md:items-end">
+              <div ref={composerMenuRef} className="relative">
+                <button
+                  className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                  type="button"
+                  onClick={() => setComposerActionsOpen((prev) => !prev)}
+                  aria-label="Open attachment actions"
+                >
+                  <span className="material-symbols-outlined">add_circle</span>
+                </button>
+                {composerActionsOpen ? (
+                  <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[200px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
+                    <label className="btn btn-ghost" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
+                      Photo / Video
+                      <input
+                        hidden
+                        type="file"
+                        multiple
+                        accept="image/*,video/*"
+                        onChange={(event) => {
+                          onFileSelect(attachments, setAttachments)(event);
+                          setComposerActionsOpen(false);
+                        }}
+                      />
+                    </label>
+                    {attachments.length > 0 ? (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        style={{ justifyContent: 'flex-start' }}
+                        onClick={() => {
+                          setAttachments([]);
+                          setComposerActionsOpen(false);
+                        }}
+                      >
+                        Clear attachments
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <input
+                className="flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                value={composer}
+                onChange={(event) => setComposer(event.target.value)}
+                placeholder="Type an encouraging message..."
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    void handleSendMessage();
+                  }
+                }}
+              />
+
+              <div className="flex items-center gap-2 self-end">
                 {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
                   <button
                     className="btn btn-ghost"
@@ -3055,97 +2694,878 @@ export default function AppPage() {
                     @coach
                   </button>
                 ) : null}
-                <button className="btn btn-primary composer-send-btn" disabled={pendingSend || !isOnline} onClick={() => void handleSendMessage()}>
-                  {pendingSend ? 'Sending...' : 'Send'}
+                <button
+                  className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                  disabled={pendingSend || !isOnline}
+                  onClick={() => void handleSendMessage()}
+                >
+                  <span className="material-symbols-outlined">send</span>
+                </button>
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500">
+              {attachments.length > 0 ? `${attachments.length}/${MAX_MEDIA_ATTACHMENTS} file(s) ready` : 'Supports images and videos up to 50MB each'}
+            </p>
+            {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
+          </footer>
+        </section>
+      </div>
+    </div>
+  );
+
+  const renderCommunityPage = () => (
+    <div className="flex h-full flex-col">
+      {renderAppHeader(
+        'Community Feed',
+        'Share workouts, meals, and wins with your accountability circle.',
+        communityQuery,
+        setCommunityQuery,
+        'Search community posts...',
+        undefined,
+      )}
+
+      <div className="grid min-h-0 flex-1 gap-6 p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="min-h-0 overflow-y-auto pr-1">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+            <section className="rounded-[30px] border border-white/70 bg-white/55 p-5 shadow-[0_24px_60px_rgba(105,121,247,0.06)] backdrop-blur-xl">
+              <div className="flex gap-4">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] text-lg font-semibold text-[color:var(--coach-zj)]">
+                  {avatarInitial(authUsername || profile?.username || 'U')}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <textarea
+                    className="min-h-[110px] w-full resize-none border-0 bg-transparent p-0 text-base text-slate-800 outline-none placeholder:text-slate-400"
+                    value={postText}
+                    placeholder="What's on your mind?"
+                    onChange={(event) => setPostText(event.target.value)}
+                  />
+                  <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/60 pt-4 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex cursor-pointer items-center gap-2 rounded-full bg-[rgba(105,121,247,0.1)] px-4 py-2 text-sm font-medium text-[color:var(--coach-zj)] transition hover:bg-[rgba(105,121,247,0.16)]">
+                        <span className="material-symbols-outlined text-lg">image</span>
+                        Add media
+                        <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
+                      </label>
+                      <span className="text-xs text-slate-500">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
+                      {postFiles.length > 0 ? (
+                        <button className="btn btn-ghost" style={{ padding: '6px 10px' }} type="button" onClick={() => setPostFiles([])}>
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                    <button className="btn btn-zj" disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
+                      {postPending ? 'Posting...' : 'Post'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <MediaPreviewGrid
+                items={postFilePreviews}
+                onRemove={(index) => removeAttachmentAt(index, setPostFiles)}
+                wrapperClassName="media-grid-preview"
+                itemClassName="media-thumb"
+              />
+            </section>
+
+            {feedLoading ? (
+              <section className="rounded-[30px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+                <div className="feed-skeleton" />
+                <div className="feed-skeleton" />
+              </section>
+            ) : null}
+
+            {filteredFeed.map((post) => (
+              <article key={post.id} className="rounded-[30px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl transition hover:bg-white/55">
+                <header className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-11 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] font-semibold text-[color:var(--coach-zj)]">
+                      {avatarInitial(post.username)}
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-sm text-slate-900">{post.username}</strong>
+                        <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
+                      </div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">{post.type}</p>
+                    </div>
+                  </div>
+                  <button className="text-slate-400" type="button">
+                    <span className="material-symbols-outlined">more_horiz</span>
+                  </button>
+                </header>
+
+                {post.content ? (
+                  <>
+                    <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                      {expandedPostIds.includes(post.id) || post.content.length <= 180
+                        ? post.content
+                        : `${post.content.slice(0, 180)}...`}
+                    </p>
+                    {post.content.length > 180 ? (
+                      <button className="mt-2 text-sm font-semibold text-[color:var(--coach-zj)]" onClick={() => togglePostExpanded(post.id)}>
+                        {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {post.media_urls?.length > 0 ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {post.media_urls.map((url) => {
+                      const mediaUrl = resolveApiAssetUrl(url);
+                      if (!mediaUrl) return null;
+                      return (
+                        <button
+                          key={mediaUrl}
+                          type="button"
+                          className="overflow-hidden rounded-[22px] border border-white/70 bg-white/40"
+                          onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
+                        >
+                          {isVideoUrl(mediaUrl) ? (
+                            <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 220 }} />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 260, objectFit: 'cover' }} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => void handleReact(post.id)}>
+                    Like {post.reaction_count || 0}
+                  </button>
+                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => void togglePostComments(post.id)}>
+                    Comments {post.comment_count || 0}
+                  </button>
+                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => togglePostExpanded(post.id)}>
+                    {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
+                  </button>
+                  <button
+                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]"
+                    onClick={() => void submitAbuseReport('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
+                  >
+                    Report
+                  </button>
+                </div>
+
+                {expandedCommentPostIds.includes(post.id) ? (
+                  <section className="mt-4 rounded-[22px] border border-white/70 bg-white/55 p-4">
+                    <div className="space-y-3">
+                      {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
+                      {(postCommentsById[post.id] || []).map((comment) => (
+                        <article key={comment.id} className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3">
+                          <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                            <strong className="text-slate-700">{comment.username}</strong>
+                            <span>{formatTime(comment.created_at)}</span>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-600">{comment.content}</p>
+                        </article>
+                      ))}
+                      {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
+                        <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                      <input
+                        className="input-shell"
+                        placeholder="Write a comment..."
+                        value={commentDraftByPostId[post.id] || ''}
+                        onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void handleCreatePostComment(post.id);
+                          }
+                        }}
+                      />
+                      <button
+                        className="btn btn-zj"
+                        type="button"
+                        disabled={commentPendingPostId === post.id}
+                        onClick={() => void handleCreatePostComment(post.id)}
+                      >
+                        {commentPendingPostId === post.id ? 'Posting...' : 'Reply'}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+              </article>
+            ))}
+
+            {!feedLoading && filteredFeed.length === 0 ? (
+              <div className="rounded-[28px] border border-dashed border-slate-300/80 bg-white/25 p-5 text-sm text-slate-500">
+                No community posts matched your search.
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Suggested Communities</h2>
+            <div className="mt-4 space-y-4">
+              {suggestedCommunities.map((item) => (
+                <div key={item.name} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.1)] text-[color:var(--coach-zj)]">
+                      <span className="material-symbols-outlined">{item.icon}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{item.name}</p>
+                      <p className="text-xs text-slate-500">{item.meta}</p>
+                    </div>
+                  </div>
+                  <button type="button" className="text-xs font-bold text-[color:var(--coach-zj)]">Join</button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Social Graph</h2>
+            <div className="mt-4 rounded-[22px] border border-[rgba(105,121,247,0.12)] bg-[rgba(105,121,247,0.06)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">Your connect ID</p>
+              <p className="mt-2 text-2xl font-bold tracking-[0.18em] text-slate-900">{connectId || '------'}</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">{connectCodeMeta}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    if (!connectCode) return;
+                    void navigator.clipboard.writeText(connectCode);
+                    showNotice('Connect code copied.');
+                  }}
+                >
+                  Copy code
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => void loadConnectInfo()}>
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <input
+                className="input-shell"
+                value={friendQuery}
+                onChange={(event) => setFriendQuery(event.target.value)}
+                placeholder="Search people by username"
+              />
+              <div className="mt-3 space-y-2">
+                {friendSearchResult.slice(0, 3).map((user) => (
+                  <div key={user.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/65 px-3 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                      <p className="text-xs text-slate-500">ID: {user.id}</p>
+                    </div>
+                    <button className="btn btn-zj" type="button" onClick={() => void handleAddFriend(user)}>
+                      Add
+                    </button>
+                  </div>
+                ))}
+                {friendQuery.trim() && friendSearchResult.length === 0 ? (
+                  <p className="text-sm text-slate-500">No matching users.</p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Pending Requests</h2>
+              <span className="text-xs font-semibold text-slate-400">{requests.length}</span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {requests.length === 0 ? <p className="text-sm text-slate-500">No pending requests right now.</p> : null}
+              {requests.slice(0, 3).map((friend) => (
+                <div key={friend.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/65 px-3 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{friend.username}</p>
+                    <p className="text-xs text-slate-500">Unlock DM and profile sharing</p>
+                  </div>
+                  <button className="btn btn-zj" type="button" onClick={() => void handleAcceptFriend(friend.id)}>
+                    Accept
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Trending Topics</h2>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {trendingTopics.map((topic) => (
+                <span key={topic} className="rounded-full border border-slate-200/80 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600">
+                  {topic}
+                </span>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+
+  const renderLeaderboardPage = () => (
+    <div className="flex h-full flex-col">
+      {renderAppHeader(
+        'Global Rankings',
+        'Real-time activity tracking across the ZYM network.',
+        leaderboardQuery,
+        setLeaderboardQuery,
+        'Find user...',
+        undefined,
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden p-4 md:p-6">
+        <div className="px-1">
+          <div className="inline-flex rounded-2xl bg-white/40 p-1 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={() => setLeaderboardMetric('steps')}
+              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
+                leaderboardMetric === 'steps' ? 'bg-white text-[color:var(--coach-zj)] shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              Steps
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeaderboardMetric('calories')}
+              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
+                leaderboardMetric === 'calories' ? 'bg-white text-[color:var(--coach-zj)] shadow-sm' : 'text-slate-500'
+              }`}
+            >
+              Calories
+            </button>
+          </div>
+        </div>
+
+        <section className="min-h-0 flex-1 overflow-hidden rounded-[32px] border border-white/70 bg-white/45 backdrop-blur-xl">
+          <div className="h-full overflow-auto">
+            <table className="min-w-full border-collapse text-left">
+              <thead>
+                <tr className="border-b border-slate-200/60">
+                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Rank</th>
+                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">User</th>
+                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Activity</th>
+                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Progress</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100/60">
+                {leaderboardLoading ? (
+                  <tr>
+                    <td className="px-6 py-8 text-sm text-slate-500" colSpan={4}>Loading leaderboard...</td>
+                  </tr>
+                ) : null}
+                {!leaderboardLoading && filteredLeaderboard.length === 0 ? (
+                  <tr>
+                    <td className="px-6 py-8 text-sm text-slate-500" colSpan={4}>No ranking data matched this search.</td>
+                  </tr>
+                ) : null}
+                {filteredLeaderboard.map((entry, index) => {
+                  const metricValue = leaderboardMetric === 'steps' ? Number(entry.steps || 0) : Number(entry.calories_burned || 0);
+                  const ratio = Math.max(0.08, metricValue / topLeaderboardMetric);
+                  const displayRank = index + 1;
+                  const rankTone = displayRank === 1 ? 'bg-amber-100 text-amber-600' : displayRank === 2 ? 'bg-slate-200 text-slate-600' : displayRank === 3 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-500';
+                  return (
+                    <tr key={entry.id} className="transition hover:bg-white/45">
+                      <td className="px-6 py-5">
+                        <span className={`flex size-8 items-center justify-center rounded-full text-sm font-bold ${rankTone}`}>
+                          {displayRank}
+                        </span>
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <div className="flex size-10 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] font-semibold text-[color:var(--coach-zj)]">
+                            {avatarInitial(entry.username)}
+                          </div>
+                          <span className="font-semibold text-slate-800">{entry.username}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-5 text-sm font-medium text-slate-600">
+                        {leaderboardMetric === 'steps'
+                          ? `${entry.steps || 0} steps`
+                          : `${entry.calories_burned || 0} cal`}
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-4">
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                            <div className="h-full rounded-full bg-[color:var(--coach-zj)]" style={{ width: `${Math.round(ratio * 100)}%` }} />
+                          </div>
+                          <span className="text-xs font-bold text-slate-500">{Math.round(ratio * 100)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div className="flex justify-center pt-1">
+          <button className="rounded-full border border-slate-200/80 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-white">
+            Load more users
+          </button>
+        </div>
+
+        <div className="grid gap-4 xl:hidden">
+          <div className="rounded-[24px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Momentum</p>
+            <div className="overflow-x-auto">
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Current streak</span>
+                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{healthMomentum?.streakDays ?? 0}d</strong>
+                </article>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Avg steps</span>
+                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{healthMomentum?.averages.steps ?? 0}</strong>
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderProfilePage = () => (
+    <div className="flex h-full flex-col overflow-y-auto">
+      <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-4 backdrop-blur-sm md:px-8">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]">
+            <span className="material-symbols-outlined">account_circle</span>
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">Unified Profile</h1>
+            <p className="text-sm text-slate-500">Tune your coach, stats, and account details.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            onClick={() => void loadAbuseReports()}
+            title="Notifications"
+          >
+            <span className="material-symbols-outlined">notifications</span>
+          </button>
+          <button
+            type="button"
+            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            onClick={() => void loadSecurityEvents()}
+            title="Settings"
+          >
+            <span className="material-symbols-outlined">settings</span>
+          </button>
+          <button className="btn btn-danger-soft" type="button" onClick={() => void handleLogout()}>
+            Logout
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-col gap-6 p-4 md:p-6">
+        <section className="rounded-[32px] border border-white/70 bg-white/50 p-5 backdrop-blur-xl md:p-8">
+          <div className="mb-8 overflow-hidden rounded-[28px] border border-white/70 bg-white/60">
+            {profileDraft.background_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolveApiAssetUrl(profileDraft.background_url)}
+                alt="Profile cover"
+                className="h-40 w-full object-cover"
+              />
+            ) : (
+              <div className="h-40 w-full bg-[linear-gradient(135deg,rgba(105,121,247,0.16),rgba(242,138,58,0.18))]" />
+            )}
+          </div>
+
+          <div className="flex flex-col gap-8 md:flex-row md:items-center">
+            <div className="relative">
+              {profileDraft.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={resolveApiAssetUrl(profileDraft.avatar_url)}
+                  alt="Profile avatar"
+                  className="size-32 rounded-full object-cover ring-4 ring-white"
+                />
+              ) : (
+                <div className="flex size-32 items-center justify-center rounded-full bg-[color:var(--coach-zj)] text-4xl font-bold text-white ring-4 ring-white">
+                  {avatarInitial(authUsername || profile?.username || 'User')}
+                </div>
+              )}
+              <span className="absolute bottom-2 right-2 size-8 rounded-full border-4 border-white bg-emerald-500" />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight text-slate-900">{authUsername || profile?.username || 'User'}</h2>
+                  <p className="mt-2 text-sm text-slate-500">ID: {authUserId} • Coach {selectedCoach.toUpperCase()} • Premium loop</p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <label className="btn btn-zj" style={{ cursor: 'pointer' }}>
+                    {profileAvatarUploading ? 'Uploading avatar...' : 'Upload avatar'}
+                    <input
+                      hidden
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          void handleUploadProfileAsset(file, 'avatar');
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
+                    {profileBackgroundUploading ? 'Uploading cover...' : 'Upload cover'}
+                    <input
+                      hidden
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                          void handleUploadProfileAsset(file, 'background');
+                        }
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
+                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">fitness_center</span>
+                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{leaderboard.length}</strong>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Ranked peers</span>
+                </article>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
+                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">shield</span>
+                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{authSessions.length}</strong>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Active sessions</span>
+                </article>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
+                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">bolt</span>
+                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{securityEvents.length}</strong>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Security events</span>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="flex flex-col gap-6">
+            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <h2 className="text-xl font-bold text-slate-900">Edit Profile</h2>
+              <p className="mt-1 text-sm text-slate-500">Changes sync to iOS and web for the same account.</p>
+              <div className="mt-5 grid gap-3">
+                <textarea
+                  className="input-shell"
+                  placeholder="Bio"
+                  value={profileDraft.bio}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
+                />
+                <input
+                  className="input-shell"
+                  placeholder="Avatar URL (optional)"
+                  value={profileDraft.avatar_url}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, avatar_url: event.target.value }))}
+                />
+                <input
+                  className="input-shell"
+                  placeholder="Background URL (optional)"
+                  value={profileDraft.background_url}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, background_url: event.target.value }))}
+                />
+                <input
+                  className="input-shell"
+                  placeholder="Fitness goal"
+                  value={profileDraft.fitness_goal}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, fitness_goal: event.target.value }))}
+                />
+                <input
+                  className="input-shell"
+                  placeholder="Hobbies"
+                  value={profileDraft.hobbies}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, hobbies: event.target.value }))}
+                />
+                <button className="btn btn-zj" disabled={profilePending} onClick={() => void handleSaveProfile()}>
+                  {profilePending ? 'Saving...' : 'Save profile'}
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Coach Style</h2>
+                  <p className="mt-1 text-sm text-slate-500">Choose the energy that fits your workflow.</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4">
+                {(['zj', 'lc'] as const).map((coach) => {
+                  const theme = coachTheme(coach);
+                  const activeCoach = selectedCoach === coach;
+                  return (
+                    <article
+                      key={coach}
+                      className={`rounded-[24px] border-2 bg-white p-5 shadow-sm transition ${
+                        activeCoach ? 'border-[rgba(105,121,247,0.4)]' : 'border-slate-100'
+                      }`}
+                    >
+                      <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">{coachDisplayName(coach)}</h3>
+                          <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: theme.ink }}>
+                            {coach === 'zj' ? 'The Technician' : 'The Motivator'}
+                          </p>
+                        </div>
+                        {activeCoach ? (
+                          <span className="rounded-full bg-[rgba(105,121,247,0.12)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">
+                            Active
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-sm leading-7 text-slate-600">{theme.description}</p>
+                      <button
+                        className={`mt-5 w-full rounded-2xl px-4 py-3 font-semibold transition ${
+                          activeCoach ? 'bg-[color:var(--coach-zj)] text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                        type="button"
+                        onClick={() => void handleSwitchCoach(coach)}
+                      >
+                        {activeCoach ? `Selected ${coach.toUpperCase()}` : `Select ${coach.toUpperCase()}`}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Device Sessions</h2>
+                  <p className="mt-1 text-sm text-slate-500">Manage where your account is signed in.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn btn-ghost" onClick={() => void loadAuthSessions()} disabled={authSessionsLoading}>
+                    {authSessionsLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                  <button className="btn btn-danger-soft" onClick={() => void handleLogoutAllSessions()} disabled={logoutAllSessionsPending}>
+                    {logoutAllSessionsPending ? 'Processing...' : 'Logout others'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {authSessionsLoading && authSessions.length === 0 ? <p className="text-sm text-slate-500">Loading sessions...</p> : null}
+                {authSessions.map((session) => (
+                  <article key={session.sessionId} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <strong className="text-slate-900">{session.deviceName || 'Unknown device'}</strong>
+                        <p className="mt-1 text-xs text-slate-500">{session.ipAddress || 'IP unavailable'} • Last seen {formatSessionDate(session.lastSeenAt)}</p>
+                        <p className="mt-1 text-xs text-slate-500">Created {formatSessionDate(session.createdAt)} • Expires {formatSessionDate(session.expiresAt)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {session.current ? <span className="rounded-full bg-[rgba(105,121,247,0.12)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">Current</span> : null}
+                        {!session.current ? (
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => void handleRevokeSession(session.sessionId)}
+                            disabled={authSessionPendingId === session.sessionId || Boolean(session.revokedAt)}
+                          >
+                            {authSessionPendingId === session.sessionId ? 'Revoking...' : (session.revokedAt ? 'Revoked' : 'Revoke')}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Security Timeline</h2>
+                  <p className="mt-1 text-sm text-slate-500">Recent auth and moderation events for your account.</p>
+                </div>
+                <button className="btn btn-ghost" onClick={() => void loadSecurityEvents()} disabled={securityEventsLoading}>
+                  {securityEventsLoading ? 'Refreshing...' : 'Refresh'}
                 </button>
               </div>
 
-              <p className="composer-hint">
-                {attachments.length > 0
-                  ? `${attachments.length}/${MAX_MEDIA_ATTACHMENTS} file(s) ready`
-                  : 'Supports images and videos up to 50MB each'}
-              </p>
-              {!isOnline ? (
-                <p className="composer-hint" style={{ marginTop: 4, color: 'var(--danger)' }}>
-                  Reconnect to send messages and media.
-                </p>
-              ) : null}
-              {activeConversation?.type === 'group' ? (
-                <p className="composer-hint" style={{ marginTop: 4 }}>
-                  {activeConversation.coachEnabled === 'none'
-                    ? 'Coach disabled in this group.'
-                    : 'Coach replies only when you mention @coach.'}
-                </p>
-              ) : null}
-            </footer>
-          </>
-        ) : (
-          <div className="insight-panel-shell">
-            <div className="insight-panel-card">
-              <h2 style={{ fontSize: 34 }}>{tabs.find((item) => item.key === tab)?.label}</h2>
-              <p className="entity-sub" style={{ marginTop: 8 }}>
-                Live summary and quick hints for this module.
-              </p>
+              <div className="mt-5 space-y-3">
+                {!securityEventsLoading && securityEvents.length === 0 ? <p className="text-sm text-slate-500">No security events yet.</p> : null}
+                {securityEvents.slice(0, 5).map((event) => (
+                  <article key={event.id} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <strong className="text-slate-900">{eventLabel(event.event_type)}</strong>
+                        <p className="mt-1 text-xs text-slate-500">{(event.ip_address || 'IP unavailable')} • {(event.user_agent || 'Unknown client').slice(0, 64)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{formatSessionDate(event.created_at)}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
+                        event.severity === 'high'
+                          ? 'bg-red-100 text-red-600'
+                          : event.severity === 'warn'
+                            ? 'bg-amber-100 text-amber-600'
+                            : 'bg-slate-100 text-slate-500'
+                      }`}
+                      >
+                        {event.severity}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
 
-              {tab === 'feed' ? (
-                <div className="insight-grid">
-                  <div className="insight-chip">
-                    <strong>{feed.length}</strong>
-                    <span>Total posts</span>
-                  </div>
-                  <div className="insight-chip">
-                    <strong>{feed.reduce((sum, post) => sum + (post.reaction_count || 0), 0)}</strong>
-                    <span>Total likes</span>
-                  </div>
+            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Safety Center</h2>
+                  <p className="mt-1 text-sm text-slate-500">Your latest moderation reports.</p>
                 </div>
-              ) : null}
+                <button className="btn btn-ghost" onClick={() => void loadAbuseReports()} disabled={abuseReportsLoading}>
+                  {abuseReportsLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
 
-              {tab === 'friends' ? (
-                <div className="insight-grid">
-                  <div className="insight-chip">
-                    <strong>{friends.length}</strong>
-                    <span>Friends</span>
-                  </div>
-                  <div className="insight-chip">
-                    <strong>{requests.length}</strong>
-                    <span>Pending requests</span>
-                  </div>
-                </div>
-              ) : null}
-
-              {tab === 'leaderboard' ? (
-                <div className="insight-grid">
-                  <div className="insight-chip">
-                    <strong>{leaderboard.length}</strong>
-                    <span>Ranked users</span>
-                  </div>
-                  <div className="insight-chip">
-                    <strong>{leaderboard[0]?.username || '-'}</strong>
-                    <span>Current #1</span>
-                  </div>
-                </div>
-              ) : null}
-
-              {tab === 'profile' ? (
-                <div className="insight-grid">
-                  <div className="insight-chip">
-                    <strong>{selectedCoach.toUpperCase()}</strong>
-                    <span>Selected coach</span>
-                  </div>
-                  <div className="insight-chip">
-                    <strong>{profileDraft.bio.trim() ? 'Ready' : 'Draft'}</strong>
-                    <span>Profile status</span>
-                  </div>
-                </div>
-              ) : null}
-
-              <p className="entity-sub">
-                Tip: use the middle panel for editing and actions. This right panel is optimized for context and status.
-              </p>
-            </div>
+              <div className="mt-5 space-y-3">
+                {abuseReports.length === 0 ? <p className="text-sm text-slate-500">No reports submitted yet.</p> : null}
+                {abuseReports.slice(0, 5).map((report) => (
+                  <article key={report.id} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
+                    <strong className="text-slate-900">{report.target_type} #{report.target_id}</strong>
+                    <p className="mt-1 text-sm text-slate-600">{report.reason}</p>
+                    <p className="mt-2 text-xs text-slate-500">{formatSessionDate(report.created_at)} • {report.status}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
           </div>
-        )}
-      </section>
+        </div>
+
+        <CoachRecordsPanel
+          userId={authUserId}
+          active={ready && activeTab === 'profile' && authUserId > 0}
+          onNotice={showNotice}
+          onError={setError}
+        />
+      </div>
+    </div>
+  );
+
+  if (!ready) {
+    return (
+      <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <div className="surface-card zym-enter" style={{ padding: 26, minWidth: 260, textAlign: 'center' }}>
+          <div className="zym-shimmer" style={{ width: 72, height: 72, margin: '0 auto', borderRadius: 20, display: 'grid', placeItems: 'center' }}>
+            <strong style={{ color: 'var(--sage-600)', fontSize: 24, fontFamily: 'var(--font-display)' }}>Z</strong>
+          </div>
+          <p style={{ marginTop: 14, color: 'var(--ink-500)', fontWeight: 600 }}>Preparing your community...</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <main className="relative h-screen overflow-hidden">
+        {!isOnline ? (
+          <div className="absolute left-4 right-4 top-3 z-20 rounded-full border border-[rgba(242,138,58,0.24)] bg-white/85 px-4 py-2 text-center text-xs font-semibold text-[color:var(--coach-lc-ink)] shadow-[0_10px_20px_rgba(177,99,34,0.12)] backdrop-blur-xl">
+            Offline mode: browsing is available, but sending messages and posts is temporarily disabled.
+          </div>
+        ) : null}
+
+        <div className="pointer-events-none absolute -left-16 -top-16 size-72 rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.14)_0%,_rgba(105,121,247,0)_72%)]" />
+        <div className="pointer-events-none absolute -bottom-24 -right-24 size-96 rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.12)_0%,_rgba(242,138,58,0)_72%)]" />
+
+        <aside className="fixed left-0 top-0 z-30 flex h-screen w-20 flex-col items-center border-r border-slate-200/50 bg-[rgba(255,255,255,0.52)] py-6 backdrop-blur-xl">
+            <button
+              type="button"
+              onClick={() => setTab('messages')}
+              className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-[0_18px_34px_rgba(105,121,247,0.18)]"
+              title="ZYM"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="ZYM logo" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+            </button>
+
+            <nav className="mt-8 flex flex-col gap-4">
+              {tabs.map((item) => {
+                const active = activeTab === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setTab(item.key)}
+                    aria-label={item.label}
+                    title={item.label}
+                    className={`relative flex size-12 items-center justify-center rounded-2xl text-slate-500 transition ${
+                      active ? 'bg-[rgba(105,121,247,0.14)] text-[color:var(--coach-zj)]' : 'hover:bg-white/55 hover:text-slate-800'
+                    }`}
+                  >
+                    <TabGlyph icon={item.icon} active={active} />
+                    {item.key === 'messages' && unreadMentionCount > 0 ? (
+                      <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[color:var(--coach-lc)] px-1 text-[10px] font-bold text-white">
+                        {Math.min(unreadMentionCount, 99)}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="mt-auto flex flex-col items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setTab('profile')}
+                className="flex size-12 items-center justify-center rounded-2xl text-slate-500 transition hover:bg-white/55 hover:text-slate-800"
+                title={selectedTabLabel}
+              >
+                <span className="material-symbols-outlined">settings</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('profile')}
+                className="flex size-11 items-center justify-center overflow-hidden rounded-full border-2 border-[rgba(105,121,247,0.18)] bg-white/70 text-sm font-bold text-[color:var(--coach-zj)]"
+                title={authUsername || 'Profile'}
+              >
+                {profileDraft.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={resolveApiAssetUrl(profileDraft.avatar_url)} alt={authUsername || 'Profile'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  avatarInitial(authUsername || profile?.username || 'U')
+                )}
+              </button>
+            </div>
+        </aside>
+
+        <section className={`relative z-10 ml-20 h-screen min-w-0 overflow-hidden ${isOnline ? '' : 'pt-12'}`}>
+            {activeTab === 'messages' ? renderMessagePage() : null}
+            {activeTab === 'community' ? renderCommunityPage() : null}
+            {activeTab === 'leaderboard' ? renderLeaderboardPage() : null}
+            {activeTab === 'profile' ? renderProfilePage() : null}
+        </section>
+      </main>
 
       {profileViewer.open ? (
         <div
@@ -3172,12 +3592,16 @@ export default function AppPage() {
 
             {!profileViewer.loading && profileViewer.type === 'coach' ? (
               <section className="profile-viewer-section">
-                <div className="flow-card flow-card-soft form-grid">
+                <div
+                  className="flow-card flow-card-soft form-grid"
+                  style={{
+                    background: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').softBackground,
+                    borderColor: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').borderColor,
+                  }}
+                >
                   <strong style={{ fontSize: 18 }}>{coachDisplayName(profileViewer.coachId || selectedCoach)}</strong>
-                  <p style={{ color: 'var(--ink-500)', lineHeight: 1.5 }}>
-                    {profileViewer.coachId === 'lc'
-                      ? 'Strict coaching style with direct accountability. Best for users who want hard feedback and action-first guidance.'
-                      : 'Encouraging coaching style focused on consistency, progressive habits, and sustainable fitness routines.'}
+                  <p style={{ color: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').ink, lineHeight: 1.5 }}>
+                    {coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').description}
                   </p>
                   <p style={{ color: 'var(--ink-500)', fontSize: 13 }}>
                     Supports: nutrition photo analysis, training feedback, profile planning, and progress guidance.
@@ -3193,7 +3617,7 @@ export default function AppPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={resolveApiAssetUrl(profileViewer.data.profile.background_url)} alt="background" style={{ width: '100%', height: 170, objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ width: '100%', height: 170, background: 'linear-gradient(120deg, #dce9df, #edf5ef)' }} />
+                    <div style={{ width: '100%', height: 170, background: 'linear-gradient(120deg, rgba(242,138,58,0.16), rgba(108,124,246,0.18))' }} />
                   )}
                 </div>
 
@@ -3211,7 +3635,7 @@ export default function AppPage() {
                         width: 66,
                         height: 66,
                         borderRadius: 18,
-                        background: 'linear-gradient(135deg, #5f6e5f, #4d5b4d)',
+                        background: coachTheme((profileViewer.data.profile.selected_coach || 'zj') as 'zj' | 'lc').gradient,
                         color: '#fff',
                         display: 'grid',
                         placeItems: 'center',
@@ -3375,6 +3799,6 @@ export default function AppPage() {
           </div>
         </div>
       ) : null}
-    </main>
+    </>
   );
 }

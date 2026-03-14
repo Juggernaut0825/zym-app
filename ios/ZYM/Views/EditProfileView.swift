@@ -50,7 +50,14 @@ struct EditProfileView: View {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuthorizationHeader(&request, token: appState.token)
-        let body = ["userId": userId, "bio": bio, "fitness_goal": fitnessGoal, "hobbies": hobbies] as [String: Any]
+        let body = [
+            "userId": userId,
+            "bio": bio,
+            "fitness_goal": fitnessGoal,
+            "hobbies": hobbies,
+            "avatar_visibility": "public",
+            "background_visibility": "friends",
+        ] as [String: Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {

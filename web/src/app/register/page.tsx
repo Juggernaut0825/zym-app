@@ -35,8 +35,8 @@ export default function RegisterPage() {
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
       <section className="surface-card zym-enter" style={{ width: 'min(560px, 100%)', padding: 30, position: 'relative', overflow: 'hidden' }}>
-        <span className="brand-orb zym-pulse" style={{ width: 100, height: 100, background: 'rgba(143,161,143,0.24)', top: -30, right: -20 }} />
-        <span className="brand-orb zym-float" style={{ width: 60, height: 60, background: 'rgba(95,110,95,0.2)', left: -12, bottom: 34 }} />
+        <span className="brand-orb zym-pulse" style={{ width: 100, height: 100, background: 'rgba(108,124,246,0.18)', top: -30, right: -20 }} />
+        <span className="brand-orb zym-float" style={{ width: 60, height: 60, background: 'rgba(242,138,58,0.18)', left: -12, bottom: 34 }} />
         <h1 style={{ fontSize: 38 }}>Create your account</h1>
         <p style={{ marginTop: 8, color: 'var(--ink-500)' }}>After signing up, choose ZJ or LC and enter the community.</p>
 

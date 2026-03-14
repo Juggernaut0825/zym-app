@@ -14,7 +14,7 @@ struct FriendsView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 14) {
@@ -243,7 +243,7 @@ struct AddFriendView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Your account ID: \(appState.userId ?? 0)")
@@ -562,7 +562,7 @@ struct ConnectQRCodeFullscreenView: View {
 
     var body: some View {
         ZStack {
-            Color.zymBackground.ignoresSafeArea()
+            ZYMBackgroundLayer().ignoresSafeArea()
 
             VStack(spacing: 16) {
                 HStack {

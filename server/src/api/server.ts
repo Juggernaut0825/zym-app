@@ -1,6 +1,7 @@
 import express, { Request } from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
@@ -14,6 +15,7 @@ import { getDB } from '../database/sqlite-db.js';
 import { FitnessSkills } from '../services/fitness-skills.js';
 import { CoachService } from '../services/coach-service.js';
 import { ModerationService } from '../services/moderation-service.js';
+import { MediaAssetService } from '../services/media-asset-service.js';
 import { SecurityEventService } from '../services/security-event-service.js';
 import { knowledgeIngestionService } from '../services/knowledge-ingestion-service.js';
 import { coachTypedToolsService } from '../services/coach-typed-tools-service.js';
@@ -22,7 +24,6 @@ import {
   fileNameFromMediaPath,
   mediaPathFromFileName,
   normalizeMediaStorageValue,
-  resolveMediaArrayForDelivery,
   resolveMediaForDelivery,
   verifyMediaPathSignature,
 } from '../security/media-url.js';
@@ -31,6 +32,7 @@ import { extractMentionHandles, resolveGroupCoachInvocation } from '../utils/coa
 import { WSServer } from '../websocket/ws-server.js';
 import { MediaStore } from '../context/media-store.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
+import type { MediaAssetVisibility } from '../storage/storage-provider.js';
 
 const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -77,6 +79,7 @@ const upload = multer({
 });
 
 const mediaStore = new MediaStore();
+const mediaAssetService = MediaAssetService.createFromEnvironment({ uploadsDir });
 const MODERATION_TARGET_TYPES = ['user', 'post', 'message', 'group'] as const;
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -628,6 +631,45 @@ function resolveUploadedFilePathFromInput(raw: unknown): string {
   return resolved;
 }
 
+async function resolveMediaPathForAnalysis(raw: unknown, actorUserId: number): Promise<{
+  absolutePath: string;
+  cleanup: () => Promise<void>;
+}> {
+  const normalized = normalizeMediaStorageValue(String(raw || '').trim());
+  const asset = normalized ? mediaAssetService.getByStorageValue(normalized) : null;
+  if (!asset) {
+    return {
+      absolutePath: resolveUploadedFilePathFromInput(raw),
+      cleanup: async () => {},
+    };
+  }
+
+  const allowed = await mediaAssetService.canAccessAsset(asset, actorUserId, false);
+  if (!allowed) {
+    throw new Error('Forbidden media asset');
+  }
+
+  const delivery = await mediaAssetService.resolveDelivery(asset);
+  if (delivery?.absolutePath) {
+    return {
+      absolutePath: delivery.absolutePath,
+      cleanup: async () => {},
+    };
+  }
+
+  const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'zym-media-analysis-'));
+  const extension = path.extname(asset.fileName) || '.bin';
+  const absolutePath = path.join(tempDir, `${asset.id}${extension}`);
+  const body = await mediaAssetService.getObjectBody(asset);
+  await fsPromises.writeFile(absolutePath, body);
+  return {
+    absolutePath,
+    cleanup: async () => {
+      await fsPromises.rm(tempDir, { recursive: true, force: true });
+    },
+  };
+}
+
 function buildMediaDelivery(req: Request, fileName: string): { path: string; url: string } {
   const mediaPath = mediaPathFromFileName(fileName);
   if (!mediaPath) {
@@ -637,6 +679,43 @@ function buildMediaDelivery(req: Request, fileName: string): { path: string; url
   const origin = tryBuildPublicOrigin(req);
   const url = signedPath.startsWith('/') && origin ? `${origin}${signedPath}` : signedPath;
   return { path: signedPath, url };
+}
+
+function normalizePublicMediaBaseUrl(): string | null {
+  const configured = String(process.env.PUBLIC_MEDIA_BASE_URL || '').trim();
+  if (!configured) return null;
+  try {
+    const parsed = new URL(configured);
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+function encodeObjectKeyForPublicUrl(objectKey: string): string {
+  return String(objectKey || '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
+function buildPublicMediaDelivery(asset: { objectKey: string; visibility: MediaAssetVisibility; storageProvider?: string | null }): { path: string; url: string } | null {
+  const baseUrl = normalizePublicMediaBaseUrl();
+  if (!baseUrl) return null;
+  if (asset.visibility !== 'public') return null;
+  if (asset.storageProvider && asset.storageProvider !== 's3') return null;
+  const encodedKey = encodeObjectKeyForPublicUrl(asset.objectKey);
+  if (!encodedKey) return null;
+  const absoluteUrl = `${baseUrl}/${encodedKey}`;
+  return {
+    path: absoluteUrl,
+    url: absoluteUrl,
+  };
+}
+
+function buildAssetDelivery(req: Request, asset: { fileName: string; objectKey: string; visibility: MediaAssetVisibility; storageProvider?: string | null }): { path: string; url: string } {
+  return buildPublicMediaDelivery(asset) || buildMediaDelivery(req, asset.fileName);
 }
 
 function inferUploadMimeType(fileName: string, fallback: string): string {
@@ -722,11 +801,34 @@ function sanitizeMediaUrls(input: unknown, maxItems = 5): string[] {
   return Array.from(new Set(cleaned));
 }
 
+function normalizeMediaVisibility(raw: unknown, fallback: MediaAssetVisibility = 'private'): MediaAssetVisibility {
+  if (raw === 'public' || raw === 'friends' || raw === 'authenticated') {
+    return raw;
+  }
+  return fallback;
+}
+
+function normalizePostVisibility(raw: unknown, fallback: 'private' | 'friends' | 'public' = 'friends'): 'private' | 'friends' | 'public' {
+  if (raw === 'public' || raw === 'private') {
+    return raw;
+  }
+  if (raw === 'friends' || raw === 'authenticated') {
+    return 'friends';
+  }
+  return fallback;
+}
+
 function mediaUrlForClient(req: Request, mediaUrl: unknown): string | null {
   const value = String(mediaUrl || '').trim();
   if (!value) return null;
 
-  const delivered = resolveMediaForDelivery(value);
+  const asset = mediaAssetService.getByStorageValue(value);
+  const publicDelivery = asset ? buildPublicMediaDelivery({
+    objectKey: asset.objectKey,
+    visibility: asset.visibility,
+    storageProvider: asset.storageProvider,
+  }) : null;
+  const delivered = publicDelivery?.url || resolveMediaForDelivery(value);
   if (!delivered) return null;
 
   if (!delivered.startsWith('/')) {
@@ -738,14 +840,41 @@ function mediaUrlForClient(req: Request, mediaUrl: unknown): string | null {
 }
 
 function mediaUrlsForClient(req: Request, mediaUrls: string[]): string[] {
-  const delivered = resolveMediaArrayForDelivery(mediaUrls);
-  const origin = tryBuildPublicOrigin(req);
-  return delivered.map((item) => {
-    if (item.startsWith('/')) {
-      return origin ? `${origin}${item}` : item;
+  const delivered: string[] = [];
+  const seen = new Set<string>();
+  for (const item of mediaUrls || []) {
+    const resolved = mediaUrlForClient(req, item);
+    if (!resolved || seen.has(resolved)) continue;
+    seen.add(resolved);
+    delivered.push(resolved);
+  }
+  return delivered;
+}
+
+function mediaPathsForAssetIds(assetIds: string[]): string[] {
+  const paths: string[] = [];
+  for (const assetId of assetIds) {
+    const asset = mediaAssetService.getById(assetId);
+    const mediaPath = asset ? mediaPathFromFileName(asset.fileName) : null;
+    if (mediaPath) {
+      paths.push(mediaPath);
     }
-    return item;
-  });
+  }
+  return Array.from(new Set(paths));
+}
+
+function resolveOwnedAssetIds(userId: number, mediaIds: string[], mediaUrls: string[]): string[] {
+  const collected = new Set<string>();
+  for (const asset of mediaAssetService.getOwnedReadyAssets(userId, mediaIds)) {
+    collected.add(asset.id);
+  }
+  for (const mediaUrl of mediaUrls) {
+    const asset = mediaAssetService.getByStorageValue(mediaUrl);
+    if (asset && asset.ownerUserId === userId && asset.status === 'ready') {
+      collected.add(asset.id);
+    }
+  }
+  return Array.from(collected);
 }
 
 function sanitizeMediaIds(input: unknown, maxItems = 5): string[] {
@@ -970,7 +1099,7 @@ app.post('/auth/refresh',
   }
 });
 
-app.get(['/media/file/:fileName', '/uploads/:fileName'], (req, res) => {
+app.get(['/media/file/:fileName', '/uploads/:fileName'], async (req, res) => {
   try {
     const mediaPath = mediaPathFromFileName(String(req.params.fileName || ''));
     if (!mediaPath) {
@@ -984,15 +1113,39 @@ app.get(['/media/file/:fileName', '/uploads/:fileName'], (req, res) => {
       ? authHeader.slice(7).trim()
       : '';
     const authPayload = bearerToken ? AuthService.verifyToken(bearerToken) : null;
-    const isAuthenticated = Boolean(authPayload?.userId);
-
-    if (!hasValidSignature && !isAuthenticated) {
-      return res.status(401).json({ error: 'Unauthorized media access' });
-    }
 
     const fileName = fileNameFromMediaPath(mediaPath);
     if (!fileName) {
       return res.status(400).json({ error: 'Invalid media file' });
+    }
+
+    const asset = mediaAssetService.getByFileName(fileName);
+    if (asset) {
+      const actorUserId = authPayload?.userId ? Number(authPayload.userId) : null;
+      if (!(await mediaAssetService.canAccessAsset(asset, actorUserId, hasValidSignature))) {
+        return res.status(actorUserId ? 403 : 401).json({ error: 'Unauthorized media access' });
+      }
+
+      const handle = await mediaAssetService.resolveDelivery(asset);
+      if (!handle) {
+        return res.status(404).json({ error: 'Media not found' });
+      }
+
+      res.setHeader('Content-Type', asset.mimeType || inferUploadMimeType(asset.fileName, 'application/octet-stream'));
+      res.setHeader('Cache-Control', hasValidSignature ? 'public, max-age=3600' : 'private, max-age=60');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (handle.absolutePath) {
+        return res.sendFile(handle.absolutePath);
+      }
+      if (handle.redirectUrl) {
+        return res.redirect(302, handle.redirectUrl);
+      }
+      return res.status(404).json({ error: 'Media not found' });
+    }
+
+    const isAuthenticated = Boolean(authPayload?.userId);
+    if (!hasValidSignature && !isAuthenticated) {
+      return res.status(401).json({ error: 'Unauthorized media access' });
     }
 
     const absoluteUploadRoot = path.resolve(uploadsDir);
@@ -1016,6 +1169,149 @@ app.get(['/media/file/:fileName', '/uploads/:fileName'], (req, res) => {
 });
 
 app.use(requireAuth);
+
+app.post('/media/upload-url',
+  APIGateway.rateLimit(60, 10 * 60_000, 'media-upload-url'),
+  APIGateway.validateSchema({
+    fileName: { required: true, type: 'string', minLength: 1, maxLength: 255 },
+    contentType: { required: true, type: 'string', minLength: 1, maxLength: 120 },
+    sizeBytes: { type: 'number', min: 1, max: 50 * 1024 * 1024 },
+    source: { type: 'string', maxLength: 40 },
+    visibility: { type: 'string', minLength: 1, maxLength: 20 },
+  }),
+  async (req, res) => {
+    try {
+      const authUserId = assertAuthUser(req);
+      const fileName = path.basename(String(req.body.fileName || '').trim());
+      const contentType = String(req.body.contentType || '').trim().toLowerCase();
+      const sizeBytes = Number(req.body.sizeBytes || 0);
+      const source = String(req.body.source || 'upload').trim();
+      const visibility = normalizeMediaVisibility(req.body.visibility, 'private');
+      if (!fileName) {
+        return res.status(400).json({ error: 'fileName is required' });
+      }
+      if (!ALLOWED_UPLOAD_MIME.has(contentType)) {
+        return res.status(400).json({ error: 'Unsupported contentType' });
+      }
+
+      const isHeic = contentType.includes('heic')
+        || contentType.includes('heif')
+        || fileName.toLowerCase().endsWith('.heic')
+        || fileName.toLowerCase().endsWith('.heif');
+      if (isHeic) {
+        return res.json({ strategy: 'legacy_multipart' });
+      }
+
+      const intent = await mediaAssetService.createUploadIntent({
+        ownerUserId: authUserId,
+        fileName,
+        mimeType: contentType,
+        sizeBytes,
+        source,
+        visibility,
+      }, (asset) => {
+        const origin = tryBuildPublicOrigin(req) || '';
+        return {
+          method: 'PUT',
+          url: `${origin}/media/upload/direct/${encodeURIComponent(asset.id)}`,
+          headers: {
+            'Content-Type': contentType,
+          },
+          expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+        };
+      });
+
+      const delivery = buildAssetDelivery(req, intent.asset);
+      res.json({
+        strategy: mediaAssetService.provider.kind === 's3' ? 'presigned' : 'direct',
+        assetId: intent.asset.id,
+        upload: intent.upload,
+        path: delivery.path,
+        url: delivery.url,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to create upload intent' });
+    }
+  });
+
+app.put('/media/upload/direct/:assetId',
+  APIGateway.rateLimit(60, 10 * 60_000, 'media-upload-direct'),
+  express.raw({ type: '*/*', limit: '50mb' }),
+  async (req, res) => {
+    try {
+      const authUserId = assertAuthUser(req);
+      const assetId = String(req.params.assetId || '').trim();
+      const asset = mediaAssetService.getById(assetId);
+      if (!asset) {
+        return res.status(404).json({ error: 'Upload intent not found' });
+      }
+      if (asset.ownerUserId !== authUserId) {
+        return res.status(403).json({ error: 'Forbidden upload intent' });
+      }
+      if (asset.status !== 'pending') {
+        return res.status(409).json({ error: 'Upload intent already finalized' });
+      }
+
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+      if (!body.length) {
+        return res.status(400).json({ error: 'Empty upload body' });
+      }
+      await mediaAssetService.writeObjectForAsset(asset, body, asset.mimeType);
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to upload media' });
+    }
+  });
+
+app.post('/media/finalize',
+  APIGateway.rateLimit(60, 10 * 60_000, 'media-finalize'),
+  APIGateway.validateSchema({
+    assetId: { required: true, type: 'string', minLength: 5, maxLength: 80 },
+  }),
+  async (req, res) => {
+    try {
+      const authUserId = assertAuthUser(req);
+      const assetId = String(req.body.assetId || '').trim();
+      const asset = mediaAssetService.getById(assetId);
+      if (!asset) {
+        return res.status(404).json({ error: 'Media asset not found' });
+      }
+      if (asset.ownerUserId !== authUserId) {
+        return res.status(403).json({ error: 'Forbidden media asset' });
+      }
+
+      const finalized = await mediaAssetService.finalizeUpload(assetId);
+      const delivery = buildAssetDelivery(req, finalized);
+      res.json({
+        assetId: finalized.id,
+        mediaId: finalized.id,
+        path: delivery.path,
+        url: delivery.url,
+        fileName: finalized.fileName,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to finalize media upload' });
+    }
+  });
+
+app.get('/media/access-url/:assetId', async (req, res) => {
+  try {
+    const authUserId = assertAuthUser(req);
+    const assetId = String(req.params.assetId || '').trim();
+    const asset = mediaAssetService.getById(assetId);
+    if (!asset) {
+      return res.status(404).json({ error: 'Media asset not found' });
+    }
+    const allowed = await mediaAssetService.canAccessAsset(asset, authUserId, false);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Forbidden media asset' });
+    }
+    const delivery = buildAssetDelivery(req, asset);
+    res.json({ path: delivery.path, url: delivery.url, assetId: asset.id });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to resolve media access URL' });
+  }
+});
 
 app.post('/auth/logout', (req, res) => {
   const authToken = String(req.authToken || '');
@@ -1179,17 +1475,24 @@ app.post('/community/post',
   APIGateway.validateSchema({
     userId: { required: true, type: 'number', integer: true, min: 1 },
     type: { type: 'string', minLength: 1, maxLength: 40 },
+    visibility: { type: 'string', minLength: 1, maxLength: 20 },
     content: { type: 'string', maxLength: 8000 },
     mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },
+    mediaIds: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 128 },
   }),
   async (req, res) => {
   try {
     const userId = toUserId(req.body.userId);
     const type = String(req.body.type || 'text').slice(0, 40);
+    const visibility = normalizePostVisibility(req.body.visibility, 'friends');
     const content = String(req.body.content || '').slice(0, 8000);
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
+    const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
+    const resolvedAssetIds = resolveOwnedAssetIds(userId, mediaIds, mediaUrls);
+    const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : mediaPathsForAssetIds(resolvedAssetIds);
 
-    const postId = CommunityService.createPost(userId, type, content, mediaUrls);
+    const postId = CommunityService.createPost(userId, type, content, resolvedMediaUrls, visibility);
+    await mediaAssetService.attachAssetsToPost(resolvedAssetIds, userId, postId, visibility);
     res.json({ postId });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -1278,6 +1581,8 @@ app.post('/media/upload', APIGateway.rateLimit(40, 10 * 60_000, 'media-upload'),
     const authUserId = assertAuthUser(req);
     const file = (req as any).file;
     if (!file) return res.status(400).json({ error: 'No file' });
+    const source = String(req.body?.source || 'upload').trim().slice(0, 40) || 'upload';
+    const visibility = normalizeMediaVisibility(req.body?.visibility, 'private');
 
     let processedPath = file.path as string;
     let finalName = path.basename(processedPath);
@@ -1299,22 +1604,82 @@ app.post('/media/upload', APIGateway.rateLimit(40, 10 * 60_000, 'media-upload'),
       throw new Error('Invalid upload file path');
     }
 
-    const delivered = buildMediaDelivery(req, finalName);
-    let mediaId: string | null = null;
+    let assetId: string | null = null;
+    let legacyMediaId: string | null = null;
+    let deliveredPath = '';
+    let deliveredUrl = '';
+
+    const deliveredMime = inferUploadMimeType(finalName, String(file.mimetype || '').toLowerCase());
 
     try {
-      const refs = await mediaStore.ingestLocalFiles(String(authUserId), [{
-        absolutePath: processedPath,
-        contentType: inferUploadMimeType(finalName, String(file.mimetype || '').toLowerCase()),
-        name: finalName,
-        platform: 'web',
-      }]);
-      mediaId = refs[0]?.id || null;
-    } catch (ingestErr) {
-      console.error('Failed to index uploaded media:', ingestErr);
+      const asset = mediaAssetService.provider.kind === 'local'
+        ? await mediaAssetService.registerStoredObject({
+            ownerUserId: authUserId,
+            fileName: finalName,
+            mimeType: deliveredMime,
+            originalFilename: String(file.originalname || finalName),
+            source,
+            visibility,
+            metadata: {
+              platform: source,
+            },
+          })
+        : await mediaAssetService.registerUpload({
+            ownerUserId: authUserId,
+            absolutePath: processedPath,
+            fileName: finalName,
+            mimeType: deliveredMime,
+            originalFilename: String(file.originalname || finalName),
+            source,
+            visibility,
+            metadata: {
+              platform: source,
+            },
+          });
+      assetId = asset.id;
+      const delivered = buildAssetDelivery(req, asset);
+      deliveredPath = delivered.path;
+      deliveredUrl = delivered.url;
+    } catch (assetErr) {
+      console.error('Failed to register uploaded media asset:', assetErr);
+      try {
+        const refs = await mediaStore.ingestLocalFiles(String(authUserId), [{
+          absolutePath: processedPath,
+          contentType: deliveredMime,
+          name: finalName,
+          platform: source,
+        }]);
+        legacyMediaId = refs[0]?.id || null;
+      } catch (ingestErr) {
+        console.error('Failed to index uploaded media fallback:', ingestErr);
+      }
     }
 
-    res.json({ path: delivered.path, url: delivered.url, fileName: finalName, mediaId });
+    if (!deliveredPath) {
+      const delivered = buildMediaDelivery(req, finalName);
+      deliveredPath = delivered.path;
+      deliveredUrl = delivered.url;
+    }
+
+    if (mediaAssetService.provider.kind === 'local') {
+      if (processedPath !== file.path) {
+        void fsPromises.unlink(file.path).catch(() => {});
+      }
+    } else {
+      void fsPromises.unlink(file.path).catch(() => {});
+      if (processedPath !== file.path) {
+        void fsPromises.unlink(processedPath).catch(() => {});
+      }
+    }
+
+    res.json({
+      path: deliveredPath,
+      url: deliveredUrl,
+      fileName: assetId ? (mediaAssetService.getById(assetId)?.fileName || finalName) : finalName,
+      mediaId: assetId || legacyMediaId,
+      assetId,
+      legacyMediaId,
+    });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -1329,9 +1694,17 @@ app.post('/media/analyze-food',
   }),
   async (req, res) => {
   try {
-    const localImagePath = resolveUploadedFilePathFromInput(req.body.imagePath || req.body.path || req.body.url);
-    const result = await MediaService.analyzeFood(localImagePath);
-    res.json(result);
+    const authUserId = assertAuthUser(req);
+    const { absolutePath, cleanup } = await resolveMediaPathForAnalysis(
+      req.body.imagePath || req.body.path || req.body.url,
+      authUserId,
+    );
+    try {
+      const result = await MediaService.analyzeFood(absolutePath);
+      res.json(result);
+    } finally {
+      await cleanup();
+    }
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -1581,12 +1954,14 @@ app.post('/messages/send',
     const content = String(req.body.content || '').trim().slice(0, 8000);
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
+    const resolvedAssetIds = resolveOwnedAssetIds(fromUserId, mediaIds, mediaUrls);
+    const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : mediaPathsForAssetIds(resolvedAssetIds);
 
     if (!topic) {
       return res.status(400).json({ error: 'Topic is required' });
     }
 
-    if (!content && mediaUrls.length === 0) {
+    if (!content && resolvedMediaUrls.length === 0 && resolvedAssetIds.length === 0) {
       return res.status(400).json({ error: 'Message content or media is required' });
     }
 
@@ -1599,7 +1974,8 @@ app.post('/messages/send',
     const groupId = parseGroupId(topic);
 
     const mentions = extractMentionHandles(content);
-    const messageId = await MessageService.sendMessage(fromUserId, topic, content, mediaUrls, mentions, toOptionalInt(req.body.replyTo));
+    const messageId = await MessageService.sendMessage(fromUserId, topic, content, resolvedMediaUrls, mentions, toOptionalInt(req.body.replyTo));
+    await mediaAssetService.attachAssetsToMessage(resolvedAssetIds, fromUserId, messageId, topic);
     await MessageService.markTopicRead(fromUserId, topic, messageId);
     const mentionTargets = await MessageService.createMessageMentionNotifications(
       fromUserId,
@@ -1609,7 +1985,7 @@ app.post('/messages/send',
       content,
     );
     const [newMessage] = (await MessageService.getMessages(topic, 1));
-    const deliveredMediaUrls = mediaUrlsForClient(req, mediaUrls);
+    const deliveredMediaUrls = mediaUrlsForClient(req, resolvedMediaUrls);
     const deliveredMessage = newMessage
       ? {
           ...newMessage,
@@ -1648,6 +2024,11 @@ app.post('/messages/send',
 
     if (shouldCoachReplyInCoachThread || shouldCoachReplyInGroup) {
       ws?.broadcastTyping(topic, 'coach', true);
+      ws?.broadcastCoachStatus(topic, {
+        phase: 'retrieving_knowledge',
+        label: 'Retrieving knowledge base...',
+        active: true,
+      });
 
       void (async () => {
         try {
@@ -1665,6 +2046,7 @@ app.post('/messages/send',
             coachOverride,
             conversationScope: shouldCoachReplyInGroup ? 'group' : 'coach_dm',
             allowWriteTools: shouldCoachReplyInGroup ? false : true,
+            onStatus: (status) => ws?.broadcastCoachStatus(topic, status),
           });
           await MessageService.sendMessage(0, topic, aiResponse, []);
           const [coachMessage] = await MessageService.getMessages(topic, 1);
@@ -1679,6 +2061,11 @@ app.post('/messages/send',
         } catch (error) {
           console.error('Coach async reply failed:', error);
         } finally {
+          ws?.broadcastCoachStatus(topic, {
+            phase: 'complete',
+            label: '',
+            active: false,
+          });
           ws?.broadcastTyping(topic, 'coach', false);
         }
       })();
@@ -1925,15 +2312,35 @@ app.get('/profile/public/:userId', async (req, res) => {
   }
 
   const fullAccess = authUserId === targetUserId || isFriend(authUserId, targetUserId);
+  const avatarAsset = user.avatar_url ? mediaAssetService.getByStorageValue(user.avatar_url) : null;
+  const backgroundAsset = user.background_url ? mediaAssetService.getByStorageValue(user.background_url) : null;
   if (!fullAccess) {
+    const recentPublicPosts = db.prepare(`
+      SELECT p.id, p.user_id, p.type, p.content, p.media_urls, p.created_at, p.visibility,
+        (SELECT COUNT(1) FROM post_reactions pr WHERE pr.post_id = p.id) AS reaction_count
+      FROM posts p
+      WHERE p.user_id = ? AND p.visibility = 'public'
+      ORDER BY p.created_at DESC
+      LIMIT 16
+    `).all(targetUserId).map((post: any) => ({
+      id: Number(post.id),
+      user_id: Number(post.user_id),
+      type: String(post.type || 'text'),
+      visibility: normalizePostVisibility(post.visibility, 'public'),
+      content: post.content || null,
+      media_urls: mediaUrlsForClient(req, parseStringArrayJson(post.media_urls)),
+      reaction_count: Number(post.reaction_count || 0),
+      created_at: String(post.created_at),
+    }));
+
     return res.json({
       visibility: 'limited',
       isFriend: false,
       profile: {
         id: user.id,
         username: user.username,
-        avatar_url: mediaUrlForClient(req, user.avatar_url),
-        background_url: null,
+        avatar_url: avatarAsset?.visibility === 'public' ? mediaUrlForClient(req, user.avatar_url) : null,
+        background_url: backgroundAsset?.visibility === 'public' ? mediaUrlForClient(req, user.background_url) : null,
         bio: null,
         fitness_goal: null,
         hobbies: null,
@@ -1941,7 +2348,7 @@ app.get('/profile/public/:userId', async (req, res) => {
         timezone: null,
       },
       today_health: null,
-      recent_posts: [],
+      recent_posts: recentPublicPosts,
     });
   }
 
@@ -1951,7 +2358,7 @@ app.get('/profile/public/:userId', async (req, res) => {
     .get(targetUserId, today) as any;
 
   const recentPosts = db.prepare(`
-    SELECT p.id, p.user_id, p.type, p.content, p.media_urls, p.created_at,
+    SELECT p.id, p.user_id, p.type, p.content, p.media_urls, p.created_at, p.visibility,
       (SELECT COUNT(1) FROM post_reactions pr WHERE pr.post_id = p.id) AS reaction_count
     FROM posts p
     WHERE p.user_id = ?
@@ -1961,6 +2368,7 @@ app.get('/profile/public/:userId', async (req, res) => {
     id: Number(post.id),
     user_id: Number(post.user_id),
     type: String(post.type || 'text'),
+    visibility: normalizePostVisibility(post.visibility, 'friends'),
     content: post.content || null,
     media_urls: mediaUrlsForClient(req, parseStringArrayJson(post.media_urls)),
     reaction_count: Number(post.reaction_count || 0),
@@ -1991,7 +2399,9 @@ app.get('/profile/public/:userId', async (req, res) => {
 app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
   userId: { required: true, type: 'number', integer: true, min: 1 },
   avatar_url: { type: 'string', maxLength: 2048 },
+  avatar_visibility: { type: 'string', minLength: 1, maxLength: 20 },
   background_url: { type: 'string', maxLength: 2048 },
+  background_visibility: { type: 'string', minLength: 1, maxLength: 20 },
   bio: { type: 'string', maxLength: 1000 },
   fitness_goal: { type: 'string', maxLength: 200 },
   hobbies: { type: 'string', maxLength: 400 },
@@ -1999,7 +2409,9 @@ app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.vali
 }), async (req, res) => {
   const db = getDB();
   const userId = toUserId(req.body.userId);
-  const { avatar_url, background_url, bio, fitness_goal, hobbies, timezone } = req.body;
+  const { avatar_url, avatar_visibility, background_url, background_visibility, bio, fitness_goal, hobbies, timezone } = req.body;
+  const avatarVisibility = normalizeMediaVisibility(avatar_visibility, 'public');
+  const backgroundVisibility = normalizeMediaVisibility(background_visibility, 'friends');
   const updates: string[] = [];
   const values: unknown[] = [];
 
@@ -2053,6 +2465,17 @@ app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.vali
 
   if (timezone !== undefined) {
     await persistUserTimezone(userId, timezone);
+  }
+
+  if (avatar_url !== undefined) {
+    const normalized = String(avatar_url || '').trim();
+    const asset = normalized ? mediaAssetService.getByStorageValue(normalized) : null;
+    await mediaAssetService.attachUserAsset(asset?.id || null, userId, 'user_avatar', avatarVisibility);
+  }
+  if (background_url !== undefined) {
+    const normalized = String(background_url || '').trim();
+    const asset = normalized ? mediaAssetService.getByStorageValue(normalized) : null;
+    await mediaAssetService.attachUserAsset(asset?.id || null, userId, 'user_background', backgroundVisibility);
   }
 
   res.json({ success: true });
@@ -2523,13 +2946,14 @@ app.post('/chat',
     const message = String(req.body.message || '').trim().slice(0, 8000);
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
+    const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : mediaPathsForAssetIds(mediaIds);
 
-    if (!message && mediaUrls.length === 0 && mediaIds.length === 0) {
+    if (!message && resolvedMediaUrls.length === 0 && mediaIds.length === 0) {
       return res.status(400).json({ error: 'Message or media is required' });
     }
 
     const normalizedMessage = message || 'Please analyze attached media and summarize key observations and practical guidance.';
-    const deliveredMediaUrls = mediaUrlsForClient(req, mediaUrls);
+    const deliveredMediaUrls = mediaUrlsForClient(req, resolvedMediaUrls);
 
     const response = await CoachService.chat(userId, normalizedMessage, {
       mediaUrls: deliveredMediaUrls,

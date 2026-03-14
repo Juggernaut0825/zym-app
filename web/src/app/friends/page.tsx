@@ -7,7 +7,7 @@ export default function FriendsRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/app?tab=friends');
+    router.replace('/app?tab=community');
   }, [router]);
 
   return null;

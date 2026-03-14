@@ -7,7 +7,7 @@ export default function FeedRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/app?tab=feed');
+    router.replace('/app?tab=community');
   }, [router]);
 
   return null;

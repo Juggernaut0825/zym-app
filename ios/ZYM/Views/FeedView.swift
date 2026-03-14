@@ -11,7 +11,7 @@ struct FeedView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -190,7 +190,7 @@ struct FeedPostDetailSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {

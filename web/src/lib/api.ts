@@ -221,11 +221,38 @@ export async function markMessagesRead(payload: {
 export interface UploadedMedia {
   url: string;
   mediaId?: string | null;
+  assetId?: string | null;
 }
 
-export async function uploadFile(file: File): Promise<UploadedMedia> {
+export type MediaVisibility = 'private' | 'friends' | 'public';
+export type PostVisibility = 'private' | 'friends' | 'public';
+
+interface UploadFileOptions {
+  source?: string;
+  visibility?: MediaVisibility;
+}
+
+interface MediaUploadIntentResponse {
+  strategy?: 'legacy_multipart' | 'direct' | 'presigned';
+  assetId?: string;
+  upload?: {
+    method: 'PUT';
+    url: string;
+    headers?: Record<string, string>;
+  };
+  path?: string;
+  url?: string;
+}
+
+async function uploadFileLegacy(file: File, options: UploadFileOptions = {}): Promise<UploadedMedia> {
   const body = new FormData();
   body.append('file', file);
+  if (options.source) {
+    body.append('source', options.source);
+  }
+  if (options.visibility) {
+    body.append('visibility', options.visibility);
+  }
 
   let response = await fetch(`${API_BASE_URL}/media/upload`, {
     method: 'POST',
@@ -260,6 +287,74 @@ export async function uploadFile(file: File): Promise<UploadedMedia> {
   return {
     url: resolvedUrl || rawUrl,
     mediaId: payload.mediaId || null,
+    assetId: payload.assetId || null,
+  };
+}
+
+function shouldUseAuthForUploadTarget(targetUrl: string): boolean {
+  try {
+    const uploadUrl = new URL(targetUrl, API_BASE_URL);
+    const apiUrl = new URL(API_BASE_URL);
+    return uploadUrl.origin === apiUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+export async function uploadFile(file: File, options: UploadFileOptions = {}): Promise<UploadedMedia> {
+  const intent = await request<MediaUploadIntentResponse>('/media/upload-url', {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      source: options.source || 'web',
+      visibility: options.visibility || 'private',
+    }),
+  }).catch(() => null);
+
+  if (!intent || intent.strategy === 'legacy_multipart' || !intent.assetId || !intent.upload?.url) {
+    return uploadFileLegacy(file, options);
+  }
+
+  const uploadHeaders = new Headers(intent.upload.headers || {});
+  if (!uploadHeaders.has('Content-Type')) {
+    uploadHeaders.set('Content-Type', file.type || 'application/octet-stream');
+  }
+  if (shouldUseAuthForUploadTarget(intent.upload.url)) {
+    const authHeaders = buildHeaders(undefined, false);
+    const auth = authHeaders.get('Authorization');
+    if (auth && !uploadHeaders.has('Authorization')) {
+      uploadHeaders.set('Authorization', auth);
+    }
+  }
+
+  const uploadResponse = await fetch(intent.upload.url, {
+    method: intent.upload.method || 'PUT',
+    headers: uploadHeaders,
+    body: file,
+  });
+
+  if (!uploadResponse.ok) {
+    return uploadFileLegacy(file, options);
+  }
+
+  const finalized = await request<{
+    assetId: string;
+    mediaId: string;
+    path: string;
+    url?: string;
+  }>('/media/finalize', {
+    method: 'POST',
+    body: JSON.stringify({ assetId: intent.assetId }),
+  });
+
+  const rawUrl = String(finalized.url || finalized.path || '').trim();
+  const resolvedUrl = resolveApiAssetUrl(rawUrl);
+  return {
+    url: resolvedUrl || rawUrl,
+    mediaId: finalized.mediaId || finalized.assetId || null,
+    assetId: finalized.assetId || null,
   };
 }
 
@@ -354,6 +449,8 @@ export async function createPost(payload: {
   type: string;
   content: string;
   mediaUrls: string[];
+  mediaIds?: string[];
+  visibility?: PostVisibility;
 }): Promise<void> {
   await request('/community/post', {
     method: 'POST',
@@ -428,7 +525,9 @@ export async function updateProfile(payload: {
   fitness_goal?: string;
   hobbies?: string;
   avatar_url?: string;
+  avatar_visibility?: MediaVisibility;
   background_url?: string;
+  background_visibility?: MediaVisibility;
   timezone?: string;
 }): Promise<void> {
   await request('/profile/update', {

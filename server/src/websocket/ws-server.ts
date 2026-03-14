@@ -1,7 +1,14 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import path from 'path';
 import { AuthService } from '../services/auth-service.js';
+import { MediaAssetService } from '../services/media-asset-service.js';
 import { MessageService } from '../services/message-service.js';
-import { normalizeMediaStorageValue, resolveMediaArrayForDelivery, resolveMediaForDelivery } from '../security/media-url.js';
+import {
+  mediaPathFromFileName,
+  normalizeMediaStorageValue,
+  resolveMediaArrayForDelivery,
+  resolveMediaForDelivery,
+} from '../security/media-url.js';
 import { CoachService } from '../services/coach-service.js';
 import { getDB } from '../database/sqlite-db.js';
 import { extractMentionHandles, resolveGroupCoachInvocation } from '../utils/coach-mention.js';
@@ -49,6 +56,9 @@ export class WSServer {
   private readonly maxMessagesPerWindow = 90;
   private readonly sessionValidationIntervalMs = 15_000;
   private readonly publicMediaOrigin: string | null = this.resolvePublicMediaOrigin();
+  private readonly mediaAssetService = MediaAssetService.createFromEnvironment({
+    uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+  });
 
   constructor(port: number) {
     this.wss = new WebSocketServer({ port, maxPayload: 128 * 1024 });
@@ -175,6 +185,32 @@ export class WSServer {
     });
   }
 
+  private mediaPathsForAssetIds(assetIds: string[]): string[] {
+    const paths: string[] = [];
+    for (const assetId of assetIds) {
+      const asset = this.mediaAssetService.getById(assetId);
+      const mediaPath = asset ? mediaPathFromFileName(asset.fileName) || '' : '';
+      if (mediaPath) {
+        paths.push(mediaPath);
+      }
+    }
+    return Array.from(new Set(paths));
+  }
+
+  private resolveOwnedAssetIds(userId: number, mediaIds: string[], mediaUrls: string[]): string[] {
+    const collected = new Set<string>();
+    for (const asset of this.mediaAssetService.getOwnedReadyAssets(userId, mediaIds)) {
+      collected.add(asset.id);
+    }
+    for (const mediaUrl of mediaUrls) {
+      const asset = this.mediaAssetService.getByStorageValue(mediaUrl);
+      if (asset && asset.ownerUserId === userId && asset.status === 'ready') {
+        collected.add(asset.id);
+      }
+    }
+    return Array.from(collected);
+  }
+
   private normalizeOutgoingMessage(message: unknown): unknown {
     if (!message || typeof message !== 'object') return message;
     const raw = message as Record<string, unknown>;
@@ -272,13 +308,16 @@ export class WSServer {
       const content = String(msg.content || '').trim().slice(0, 8000);
       const mediaUrls = this.sanitizeMediaUrls(msg.mediaUrls, 5);
       const mediaIds = this.sanitizeMediaIds(msg.mediaIds, 5);
-      if (!content && mediaUrls.length === 0) {
+      const resolvedAssetIds = this.resolveOwnedAssetIds(userId, mediaIds, mediaUrls);
+      const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : this.mediaPathsForAssetIds(resolvedAssetIds);
+      if (!content && resolvedMediaUrls.length === 0 && resolvedAssetIds.length === 0) {
         this.send(ws, { type: 'error', message: 'Empty message' });
         return;
       }
 
       const mentions = extractMentionHandles(content);
-      const messageId = await MessageService.sendMessage(userId, topic, content, mediaUrls, mentions);
+      const messageId = await MessageService.sendMessage(userId, topic, content, resolvedMediaUrls, mentions);
+      await this.mediaAssetService.attachAssetsToMessage(resolvedAssetIds, userId, messageId, topic);
       await MessageService.markTopicRead(userId, topic, messageId);
       const mentionTargets = await MessageService.createMessageMentionNotifications(
         userId,
@@ -293,7 +332,7 @@ export class WSServer {
         topic,
         from_user_id: userId,
         content,
-        media_urls: mediaUrls,
+        media_urls: resolvedMediaUrls,
         mentions,
         created_at: new Date().toISOString(),
       });
@@ -323,7 +362,12 @@ export class WSServer {
             const coachOverride = shouldCoachReplyInGroup
               ? groupCoachInvocation.coachOverride
               : undefined;
-            const deliveredMediaUrls = this.mediaUrlsForClient(mediaUrls);
+            const deliveredMediaUrls = this.mediaUrlsForClient(resolvedMediaUrls);
+            this.broadcastCoachStatus(topic, {
+              phase: 'retrieving_knowledge',
+              label: 'Retrieving knowledge base...',
+              active: true,
+            });
             const aiResponse = await CoachService.chat(String(userId), prompt, {
               mediaUrls: deliveredMediaUrls,
               mediaIds,
@@ -331,6 +375,7 @@ export class WSServer {
               coachOverride,
               conversationScope: shouldCoachReplyInGroup ? 'group' : 'coach_dm',
               allowWriteTools: shouldCoachReplyInGroup ? false : true,
+              onStatus: (status) => this.broadcastCoachStatus(topic, status),
             });
             await MessageService.sendMessage(0, topic, aiResponse, []);
             const [coachMessage] = await MessageService.getMessages(topic, 1);
@@ -347,6 +392,11 @@ export class WSServer {
           } catch (error) {
             console.error('Coach async reply failed (ws):', error);
           } finally {
+            this.broadcastCoachStatus(topic, {
+              phase: 'complete',
+              label: '',
+              active: false,
+            });
             this.broadcastTyping(topic, 'coach', false);
           }
         })();
@@ -439,6 +489,25 @@ export class WSServer {
       topic,
       userId,
       isTyping,
+    });
+  }
+
+  broadcastCoachStatus(
+    topic: string,
+    status: {
+      phase: string;
+      label: string;
+      active: boolean;
+      tool?: string;
+    },
+  ) {
+    this.broadcastToTopic(topic, {
+      type: 'coach_status',
+      topic,
+      phase: String(status.phase || 'composing'),
+      label: String(status.label || ''),
+      active: Boolean(status.active),
+      tool: status.tool ? String(status.tool) : undefined,
     });
   }
 

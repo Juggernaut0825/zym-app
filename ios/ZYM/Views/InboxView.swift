@@ -16,7 +16,7 @@ struct InboxView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 10) {
@@ -240,7 +240,7 @@ struct ConversationRow: View {
                             .scaledToFill()
                     default:
                         Circle()
-                            .fill(conversation.isCoach ? Color.zymPrimary : Color.zymSurfaceSoft)
+                            .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
                     }
                 }
                 .frame(width: 46, height: 46)
@@ -251,12 +251,12 @@ struct ConversationRow: View {
                 )
             } else {
                 Circle()
-                    .fill(conversation.isCoach ? Color.zymPrimary : Color.zymSurfaceSoft)
+                    .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
                     .frame(width: 46, height: 46)
                     .overlay(
                         Text(conversation.isCoach ? (appState.selectedCoach == "lc" ? "LC" : "ZJ") : (conversation.isGroup ? "GR" : "DM"))
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(conversation.isCoach ? .white : Color.zymPrimary)
+                            .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
                     )
             }
 
@@ -283,7 +283,7 @@ struct ConversationRow: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(Color.zymPrimaryDark)
+                    .background(Color.zymSecondaryDark)
                     .clipShape(Capsule())
             }
 
@@ -383,7 +383,7 @@ struct MentionsInboxSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 8) {

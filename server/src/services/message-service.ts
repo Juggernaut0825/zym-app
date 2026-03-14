@@ -71,6 +71,18 @@ function uniqueLower(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean)));
 }
 
+function normalizeTimestamp(value: unknown): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(raw)
+      ? `${raw}Z`
+      : raw;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? raw : date.toISOString();
+}
+
 export function buildP2PTopic(userIdA: number, userIdB: number): string {
   const [a, b] = [userIdA, userIdB].sort((x, y) => x - y);
   return `p2p_${a}_${b}`;
@@ -162,7 +174,7 @@ export class MessageService {
           other_user_id: String(otherUserId),
           username: user?.username || `User ${otherUserId}`,
           avatar_url: user?.avatar_url || null,
-          last_message_at: item.last_message_at,
+          last_message_at: normalizeTimestamp(item.last_message_at),
           last_message_preview: preview?.content || '',
           unread_count: Number(unreadRow?.count || 0),
           mention_count: Number(mentionRow?.count || 0),
@@ -188,7 +200,7 @@ export class MessageService {
         topic,
         name: group.name,
         coach_enabled: group.coach_enabled,
-        last_message_at: group.last_message_at || null,
+        last_message_at: normalizeTimestamp(group.last_message_at) || null,
         last_message_preview: preview?.content || '',
         unread_count: Number(unreadRow?.count || 0),
         mention_count: Number(mentionRow?.count || 0),
@@ -204,7 +216,7 @@ export class MessageService {
     return {
       coach: {
         topic: coachTopic,
-        last_message_at: coachLast?.last_message_at || null,
+        last_message_at: normalizeTimestamp(coachLast?.last_message_at) || null,
         last_message_preview: coachPreview?.content || '',
         unread_count: Number(coachUnread?.count || 0),
         mention_count: Number(coachMentions?.count || 0),
@@ -233,7 +245,7 @@ export class MessageService {
       media_urls: parseJsonArray(row.media_urls),
       mentions: parseJsonArray(row.mentions),
       reply_to: row.reply_to || null,
-      created_at: row.created_at,
+      created_at: normalizeTimestamp(row.created_at) || String(row.created_at || ''),
       username: row.from_user_id === 0 ? 'Coach' : (row.username || `User ${row.from_user_id}`),
       avatar_url: row.avatar_url || null,
       is_coach: Number(row.from_user_id) === 0,

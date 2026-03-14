@@ -10,7 +10,7 @@ struct CreateGroupView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 VStack(spacing: 12) {
                     TextField("Group Name", text: $groupName)

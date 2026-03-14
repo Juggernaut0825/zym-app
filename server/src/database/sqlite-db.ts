@@ -63,6 +63,7 @@ export function initDB() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       type TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'friends',
       content TEXT,
       media_urls TEXT,
       metadata TEXT,
@@ -179,10 +180,42 @@ export function initDB() {
       metadata TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS media_assets (
+      id TEXT PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL,
+      storage_provider TEXT NOT NULL DEFAULT 'local',
+      storage_bucket TEXT,
+      object_key TEXT NOT NULL,
+      file_name TEXT NOT NULL UNIQUE,
+      mime_type TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'file',
+      visibility TEXT NOT NULL DEFAULT 'private',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT,
+      source TEXT NOT NULL DEFAULT 'upload',
+      metadata TEXT,
+      status TEXT NOT NULL DEFAULT 'ready',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS media_asset_attachments (
+      media_asset_id TEXT NOT NULL,
+      owner_user_id INTEGER NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      entity_key TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (media_asset_id, entity_type, entity_id, entity_key)
+    );
   `);
 
   const userColumns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
   const sessionColumns = db.prepare('PRAGMA table_info(user_sessions)').all() as Array<{ name: string }>;
+  const postColumns = db.prepare('PRAGMA table_info(posts)').all() as Array<{ name: string }>;
   if (!userColumns.some((column) => column.name === 'connect_code')) {
     db.exec('ALTER TABLE users ADD COLUMN connect_code TEXT');
   }
@@ -195,6 +228,9 @@ export function initDB() {
   if (!sessionColumns.some((column) => column.name === 'refresh_token_hash')) {
     db.exec('ALTER TABLE user_sessions ADD COLUMN refresh_token_hash TEXT');
   }
+  if (!postColumns.some((column) => column.name === 'visibility')) {
+    db.exec("ALTER TABLE posts ADD COLUMN visibility TEXT DEFAULT 'friends'");
+  }
 
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
@@ -202,6 +238,7 @@ export function initDB() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_mentions_user_read ON mention_notifications(user_id, is_read, created_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status, created_at DESC)');
@@ -210,6 +247,11 @@ export function initDB() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_status ON knowledge_ingestion_requests(status, created_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_requester ON knowledge_ingestion_requests(requester_user_id, created_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_audit_request ON knowledge_ingestion_audit(request_id, created_at DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_owner_created ON media_assets(owner_user_id, created_at DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_status_created ON media_assets(status, created_at DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_object_key ON media_assets(object_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_entity ON media_asset_attachments(entity_type, entity_id, entity_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_owner ON media_asset_attachments(owner_user_id, created_at DESC)');
 
   const missingCodes = db.prepare("SELECT id FROM users WHERE connect_code IS NULL OR connect_code = ''").all() as Array<{ id: number }>;
   const findByCode = db.prepare('SELECT id FROM users WHERE connect_code = ?');

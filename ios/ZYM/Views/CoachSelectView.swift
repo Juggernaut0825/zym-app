@@ -9,40 +9,45 @@ struct CoachSelectView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.zymBackground, Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.18))
-                .frame(width: 180, height: 180)
-                .blur(radius: 8)
-                .offset(x: -130, y: -300)
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.12))
-                .frame(width: 120, height: 120)
-                .blur(radius: 7)
-                .offset(x: 140, y: 310)
+            ZYMBackgroundLayer()
+                .ignoresSafeArea()
 
             VStack(spacing: 24) {
                 VStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.zymPrimary)
+                            .frame(width: 9, height: 9)
+                        Text("TWO COACHING PERSONALITIES")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.8)
+                            .foregroundColor(Color.zymSubtext)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.72))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.zymLine, lineWidth: 1)
+                    )
+                    .clipShape(Capsule())
+
                     Text("Choose your coach")
                         .font(.custom("Syne", size: 38))
                         .foregroundColor(Color.zymText)
 
-                    Text("You can switch coach style anytime in Profile.")
+                    Text("You can switch coach style anytime in Profile. ZJ keeps things warm and encouraging. LC stays direct and tougher.")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
+                        .multilineTextAlignment(.center)
                 }
                 .zymAppear(delay: 0.04)
 
                 HStack(spacing: 12) {
                     CoachSelectionCard(
+                        coach: "zj",
                         tag: "ZJ",
+                        badge: "Gentle encouragement",
                         title: "Encouraging",
                         subtitle: "Supportive coaching focused on sustainable habits.",
                         highlight: "\"Let's complete your easiest win today first.\"",
@@ -54,7 +59,9 @@ struct CoachSelectView: View {
                     }
 
                     CoachSelectionCard(
+                        coach: "lc",
                         tag: "LC",
+                        badge: "Tough accountability",
                         title: "Strict",
                         subtitle: "Direct accountability with execution-first feedback.",
                         highlight: "\"No excuses. Finish your training first.\"",
@@ -89,7 +96,7 @@ struct CoachSelectView: View {
                 .zymAppear(delay: 0.2)
             }
             .padding(22)
-            .background(Color.white.opacity(0.84))
+            .background(Color.white.opacity(0.82))
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -143,7 +150,9 @@ struct CoachSelectView: View {
 }
 
 private struct CoachSelectionCard: View {
+    let coach: String
     let tag: String
+    let badge: String
     let title: String
     let subtitle: String
     let highlight: String
@@ -153,11 +162,24 @@ private struct CoachSelectionCard: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
+                Text(badge.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundColor(Color.zymCoachInk(coach))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.72))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.zymCoachAccent(coach).opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(Capsule())
+
                 ZStack {
                     RoundedRectangle(cornerRadius: 13, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [Color.zymPrimary, Color.zymPrimaryDark],
+                                colors: [Color.zymCoachAccent(coach), Color.zymCoachAccentDark(coach)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -179,18 +201,28 @@ private struct CoachSelectionCard: View {
 
                 Text(highlight)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.zymPrimaryDark)
+                    .foregroundColor(Color.zymCoachInk(coach))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(selected ? Color.zymSurfaceSoft : Color.white)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(selected ? 0.98 : 0.92),
+                        Color.zymCoachSoft(coach).opacity(selected ? 0.84 : 0.56)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(selected ? Color.zymPrimary : Color.zymLine, lineWidth: selected ? 2 : 1)
+                    .stroke(selected ? Color.zymCoachAccent(coach) : Color.zymLine, lineWidth: selected ? 2 : 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .scaleEffect(selected ? 1 : 0.985)
+            .shadow(color: selected ? Color.zymCoachAccent(coach).opacity(0.16) : .clear, radius: 12, x: 0, y: 8)
             .animation(.zymSpring, value: selected)
         }
         .buttonStyle(.plain)

@@ -125,11 +125,16 @@ export class ConversationRunner {
         }
 
         if (this.isBlank(finalContent)) {
-          logger.warn(`[Turn ${turns}] Still empty after retry`);
-          return {
-            response: '',
-            messages,
-          };
+          const fallbackFromTools = this.buildFallbackFromToolResults(messages);
+          if (this.isBlank(fallbackFromTools)) {
+            logger.warn(`[Turn ${turns}] Still empty after retry`);
+            return {
+              response: '',
+              messages,
+            };
+          }
+          logger.warn(`[Turn ${turns}] Still empty after retry, using tool-result fallback`);
+          finalContent = fallbackFromTools;
         }
 
         if (this.containsCjk(finalContent)) {
@@ -258,5 +263,100 @@ export class ConversationRunner {
 
   private getToolCallSignature(toolCall: ToolCall): string {
     return `${toolCall.function.name}:${toolCall.function.arguments}`;
+  }
+
+  private buildFallbackFromToolResults(messages: Message[]): string {
+    const latestResults = new Map<string, any>();
+
+    for (const message of [...messages].reverse()) {
+      if (message.role !== 'tool' || typeof message.content !== 'string' || !message.name) {
+        continue;
+      }
+      if (latestResults.has(message.name)) {
+        continue;
+      }
+      const parsed = this.tryParseJson(message.content);
+      if (parsed && typeof parsed === 'object') {
+        latestResults.set(message.name, parsed);
+      }
+    }
+
+    const parts: string[] = [];
+    const media = latestResults.get('inspect_media');
+    if (media) {
+      const summary = this.safeToolString(media.answerSummary, 800);
+      if (summary) {
+        parts.push(`I finished the media analysis. ${summary}`);
+      }
+
+      const evidence = Array.isArray(media.evidence)
+        ? media.evidence
+            .map((item: any) => this.safeToolString(item?.observation, 240))
+            .filter(Boolean)
+            .slice(0, 2)
+        : [];
+      if (evidence.length > 0) {
+        parts.push(`Visible evidence: ${evidence.join(' ')}`);
+      }
+
+      const ambiguities = Array.isArray(media.ambiguities)
+        ? media.ambiguities
+            .map((item: unknown) => this.safeToolString(item, 180))
+            .filter(Boolean)
+            .slice(0, 2)
+        : [];
+      if (ambiguities.length > 0) {
+        parts.push(`Uncertainty: ${ambiguities.join('; ')}.`);
+      }
+    }
+
+    const training = latestResults.get('log_training');
+    if (training) {
+      const day = this.safeToolString(training.day, 32);
+      const entries = Number(training.entries);
+      if (Number.isFinite(entries) && entries > 0) {
+        parts.push(`I also logged ${entries} training ${entries === 1 ? 'entry' : 'entries'}${day ? ` for ${day}` : ''}.`);
+      }
+    }
+
+    const meal = latestResults.get('log_meal');
+    if (meal?.meal) {
+      const calories = Number(meal.meal.calories);
+      const day = this.safeToolString(meal.day, 32);
+      const calorieSuffix = Number.isFinite(calories) && calories > 0 ? ` at about ${Math.round(calories)} kcal` : '';
+      parts.push(`I logged that meal${day ? ` for ${day}` : ''}${calorieSuffix}.`);
+    }
+
+    const profile = latestResults.get('get_profile');
+    if (parts.length === 0 && profile?.timezone) {
+      parts.push(`I confirmed your profile context. Timezone: ${this.safeToolString(profile.timezone, 80)}.`);
+    }
+
+    const knowledge = latestResults.get('search_knowledge');
+    if (parts.length === 0 && Number.isFinite(Number(knowledge?.total))) {
+      parts.push(`I checked the knowledge base and found ${Number(knowledge.total)} relevant matches.`);
+    }
+
+    return parts
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+  }
+
+  private tryParseJson(content: string): any | null {
+    try {
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+
+  private safeToolString(value: unknown, maxLength = 240): string {
+    return String(value || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLength);
   }
 }

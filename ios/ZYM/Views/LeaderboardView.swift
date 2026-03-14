@@ -13,7 +13,7 @@ struct LeaderboardView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 10) {

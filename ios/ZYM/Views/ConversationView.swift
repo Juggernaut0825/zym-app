@@ -63,7 +63,7 @@ struct ConversationView: View {
 
     var body: some View {
         ZStack {
-            Color.zymBackground.ignoresSafeArea()
+            ZYMBackgroundLayer().ignoresSafeArea()
 
             VStack(spacing: 0) {
                 ScrollView {
@@ -194,21 +194,21 @@ struct ConversationView: View {
                                         .scaledToFill()
                                 default:
                                     Circle()
-                                        .fill(conversation.isCoach ? Color.zymPrimary : Color.zymSurfaceSoft)
+                                        .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
                                 }
                             }
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
                         } else {
                             Circle()
-                                .fill(conversation.isCoach ? Color.zymPrimary : Color.zymSurfaceSoft)
+                                .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
                                 .frame(width: 32, height: 32)
                                 .overlay(
                                     Text(conversation.isCoach
                                          ? ((appState.selectedCoach ?? "zj").uppercased())
                                          : String(conversation.name.prefix(2)).uppercased())
                                         .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(conversation.isCoach ? .white : Color.zymPrimary)
+                                        .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
                                 )
                         }
                     }
@@ -369,8 +369,9 @@ struct ConversationView: View {
     }
 
     private func loadMedia() {
-        clearDraftAttachments()
-        for item in selectedMedia {
+        let items = selectedMedia
+        clearDraftAttachments(resetSelection: false)
+        for item in items {
             let detectedType = item.supportedContentTypes.first(where: { type in
                 type.conforms(to: .movie) || type.conforms(to: .audiovisualContent) || type.conforms(to: .video)
             }) ?? item.supportedContentTypes.first(where: { type in
@@ -425,12 +426,109 @@ struct ConversationView: View {
         }
 
         group.notify(queue: .main) {
+            if mediaUrls.isEmpty && mediaIds.isEmpty && newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                isSending = false
+                infoNotice = "Selected media could not be prepared for upload."
+                return
+            }
             sendTextMessage(userId: userId, mediaUrls: mediaUrls, mediaIds: mediaIds)
             clearDraftAttachments()
         }
     }
 
     private func uploadMedia(_ attachment: DraftAttachment, completion: @escaping (UploadResponse?) -> Void) {
+        requestUploadIntent(for: attachment) { intent in
+            guard let intent = intent,
+                  intent.strategy != "legacy_multipart",
+                  let assetId = intent.assetId,
+                  let upload = intent.upload,
+                  let uploadURL = URL(string: upload.url) else {
+                uploadMediaLegacy(attachment, completion: completion)
+                return
+            }
+
+            var uploadRequest = URLRequest(url: uploadURL)
+            uploadRequest.httpMethod = upload.method.isEmpty ? "PUT" : upload.method
+            uploadRequest.httpBody = attachment.data
+            for (header, value) in upload.headers ?? [:] {
+                uploadRequest.setValue(value, forHTTPHeaderField: header)
+            }
+            if uploadRequest.value(forHTTPHeaderField: "Content-Type") == nil {
+                uploadRequest.setValue(attachment.contentType, forHTTPHeaderField: "Content-Type")
+            }
+            if shouldAuthorizeUploadTarget(uploadURL) {
+                applyAuthorizationHeader(&uploadRequest, token: appState.token)
+            }
+
+            authorizedDataTask(appState: appState, request: uploadRequest) { _, response, _ in
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    uploadMediaLegacy(attachment, completion: completion)
+                    return
+                }
+                finalizeUploadedMedia(assetId: assetId, completion: completion)
+            }.resume()
+        }
+    }
+
+    private func requestUploadIntent(for attachment: DraftAttachment, completion: @escaping (UploadIntentResponse?) -> Void) {
+        guard let url = apiURL("/media/upload-url") else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "fileName": attachment.filename,
+            "contentType": attachment.contentType,
+            "sizeBytes": attachment.data.count,
+            "source": "ios_message",
+            "visibility": "private",
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadIntentResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(response)
+        }.resume()
+    }
+
+    private func finalizeUploadedMedia(assetId: String, completion: @escaping (UploadResponse?) -> Void) {
+        guard let url = apiURL("/media/finalize") else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "assetId": assetId
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(response)
+        }.resume()
+    }
+
+    private func shouldAuthorizeUploadTarget(_ url: URL) -> Bool {
+        guard let apiBase = apiURL("/") else { return false }
+        return url.host == apiBase.host && url.port == apiBase.port
+    }
+
+    private func uploadMediaLegacy(_ attachment: DraftAttachment, completion: @escaping (UploadResponse?) -> Void) {
         guard let url = apiURL("/media/upload") else {
             completion(nil)
             return
@@ -444,6 +542,12 @@ struct ConversationView: View {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"source\"\r\n\r\n".data(using: .utf8)!)
+        body.append("ios_message\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"visibility\"\r\n\r\n".data(using: .utf8)!)
+        body.append("private\r\n".data(using: .utf8)!)
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(attachment.filename)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: \(attachment.contentType)\r\n\r\n".data(using: .utf8)!)
@@ -605,14 +709,16 @@ struct ConversationView: View {
         }.resume()
     }
 
-    private func clearDraftAttachments() {
+    private func clearDraftAttachments(resetSelection: Bool = true) {
         for attachment in draftAttachments {
             if let previewURL = attachment.previewURL {
                 try? FileManager.default.removeItem(at: previewURL)
             }
         }
         draftAttachments = []
-        selectedMedia = []
+        if resetSelection {
+            selectedMedia = []
+        }
     }
 
     private func makeTempPreviewURL(for data: Data, fileExtension: String) -> URL? {
@@ -903,7 +1009,7 @@ struct GroupMembersSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 VStack(spacing: 12) {
                     HStack {
@@ -1059,7 +1165,7 @@ private struct ConversationProfileSheet: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color.zymBackground.ignoresSafeArea()
+                ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 12) {
@@ -1072,10 +1178,23 @@ private struct ConversationProfileSheet: View {
                                      ? "Strict, direct, execution-first coaching style."
                                      : "Encouraging, supportive, habit-first coaching style.")
                                     .font(.system(size: 14))
-                                    .foregroundColor(Color.zymSubtext)
+                                    .foregroundColor(Color.zymCoachInk(appCoach))
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .zymCard()
+                            .padding(16)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.96), Color.zymCoachSoft(appCoach).opacity(0.82)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(Color.zymCoachAccent(appCoach).opacity(0.18), lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: Color.zymCoachAccent(appCoach).opacity(0.12), radius: 14, x: 0, y: 8)
                         } else if loading {
                             ProgressView("Loading profile...")
                                 .padding(.top, 18)

@@ -1,14 +1,35 @@
 import SwiftUI
 
 extension Color {
-    static let zymBackground = Color(red: 0.97, green: 0.985, blue: 0.975)
+    static let zymBackground = Color(red: 0.969, green: 0.961, blue: 0.941)
+    static let zymBackgroundSoft = Color(red: 0.984, green: 0.980, blue: 0.969)
     static let zymSurface = Color.white
-    static let zymSurfaceSoft = Color(red: 0.95, green: 0.97, blue: 0.955)
-    static let zymLine = Color(red: 0.84, green: 0.89, blue: 0.86)
-    static let zymPrimary = Color(red: 0.37, green: 0.43, blue: 0.37)
-    static let zymPrimaryDark = Color(red: 0.30, green: 0.36, blue: 0.30)
-    static let zymText = Color(red: 0.10, green: 0.14, blue: 0.12)
-    static let zymSubtext = Color(red: 0.40, green: 0.46, blue: 0.42)
+    static let zymSurfaceSoft = Color(red: 0.965, green: 0.949, blue: 0.918)
+    static let zymLine = Color(red: 0.867, green: 0.847, blue: 0.812)
+    static let zymPrimary = Color(red: 0.424, green: 0.486, blue: 0.965)
+    static let zymPrimaryDark = Color(red: 0.290, green: 0.341, blue: 0.788)
+    static let zymSecondary = Color(red: 0.949, green: 0.541, blue: 0.227)
+    static let zymSecondaryDark = Color(red: 0.694, green: 0.388, blue: 0.133)
+    static let zymText = Color(red: 0.122, green: 0.122, blue: 0.122)
+    static let zymSubtext = Color(red: 0.439, green: 0.415, blue: 0.388)
+
+    static func zymCoachAccent(_ coach: String?) -> Color {
+        coach == "lc" ? .zymSecondary : .zymPrimary
+    }
+
+    static func zymCoachAccentDark(_ coach: String?) -> Color {
+        coach == "lc" ? .zymSecondaryDark : .zymPrimaryDark
+    }
+
+    static func zymCoachSoft(_ coach: String?) -> Color {
+        coach == "lc"
+            ? Color(red: 0.988, green: 0.941, blue: 0.890)
+            : Color(red: 0.933, green: 0.945, blue: 1.0)
+    }
+
+    static func zymCoachInk(_ coach: String?) -> Color {
+        coach == "lc" ? .zymSecondaryDark : .zymPrimaryDark
+    }
 }
 
 extension Animation {
@@ -21,14 +42,20 @@ struct ZYMCard: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(14)
-            .background(Color.zymSurface)
+            .background(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.96), Color.zymBackgroundSoft.opacity(0.94)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.zymLine, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.black.opacity(0.06), radius: 16, x: 0, y: 8)
-            .shadow(color: Color.zymPrimary.opacity(0.04), radius: 1, x: 0, y: 0)
+            .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 10)
+            .shadow(color: Color.zymSecondary.opacity(0.05), radius: 2, x: 0, y: 0)
     }
 }
 
@@ -68,13 +95,14 @@ struct ZYMPrimaryButton: ButtonStyle {
             .padding(.vertical, 10)
             .background(
                 LinearGradient(
-                    colors: [Color.zymPrimary, Color.zymPrimaryDark],
+                    colors: [Color.zymSecondary, Color.zymSecondaryDark],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .opacity(configuration.isPressed ? 0.82 : 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: Color.zymSecondary.opacity(configuration.isPressed ? 0.16 : 0.24), radius: 14, x: 0, y: 8)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }
@@ -86,11 +114,72 @@ struct ZYMGhostButton: ButtonStyle {
             .foregroundColor(Color.zymText)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .background(Color.zymSurfaceSoft.opacity(configuration.isPressed ? 0.8 : 1))
+            .background(Color.white.opacity(configuration.isPressed ? 0.88 : 0.78))
             .overlay(
                 RoundedRectangle(cornerRadius: 11)
                     .stroke(Color.zymLine, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+}
+
+struct ZYMCoachButtonStyle: ButtonStyle {
+    let coach: String
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(selected ? .white : Color.zymCoachInk(coach))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background {
+                if selected {
+                    LinearGradient(
+                        colors: [Color.zymCoachAccent(coach), Color.zymCoachAccentDark(coach)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                } else {
+                    Color.zymCoachSoft(coach).opacity(configuration.isPressed ? 0.92 : 0.72)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(selected ? Color.white.opacity(0.16) : Color.zymCoachAccent(coach).opacity(0.18), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: selected ? Color.zymCoachAccent(coach).opacity(0.2) : .clear, radius: 12, x: 0, y: 8)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
+struct ZYMBackgroundLayer: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.zymBackground, Color.zymBackgroundSoft, Color(red: 0.973, green: 0.968, blue: 0.955)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(Color.zymSecondary.opacity(0.12))
+                .frame(width: 280, height: 280)
+                .blur(radius: 28)
+                .offset(x: -150, y: -320)
+
+            Circle()
+                .fill(Color.zymPrimary.opacity(0.13))
+                .frame(width: 320, height: 320)
+                .blur(radius: 36)
+                .offset(x: 170, y: -250)
+
+            Circle()
+                .fill(Color.zymSecondary.opacity(0.08))
+                .frame(width: 240, height: 240)
+                .blur(radius: 40)
+                .offset(x: 180, y: 340)
+        }
     }
 }

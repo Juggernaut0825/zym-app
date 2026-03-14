@@ -35,58 +35,98 @@ export default function LoginPage() {
   };
 
   return (
-    <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
-      <section className="surface-card auth-shell zym-enter" style={{ position: 'relative' }}>
-        <span className="brand-orb zym-pulse" style={{ width: 120, height: 120, background: 'rgba(95,110,95,0.24)', top: -26, left: -30 }} />
-        <span className="brand-orb zym-float" style={{ width: 86, height: 86, background: 'rgba(143,161,143,0.26)', right: 16, top: 14 }} />
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-10">
+      <div className="pointer-events-none absolute -left-20 -top-20 size-[28rem] rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.18)_0%,_rgba(105,121,247,0)_70%)]" />
+      <div className="pointer-events-none absolute -bottom-24 -right-16 size-[30rem] rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.16)_0%,_rgba(242,138,58,0)_70%)]" />
 
-        <div className="auth-hero zym-enter zym-delay-1">
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 999, border: '1px solid #b9cbbf', background: 'rgba(255,255,255,0.7)' }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1f9d5b' }} />
-            <span style={{ fontSize: 12, color: 'var(--ink-700)', fontWeight: 600 }}>Lifestyle Fitness Community</span>
-          </div>
-          <h1 style={{ marginTop: 20, fontSize: 52, lineHeight: 1.05 }}>Welcome to ZYM</h1>
-          <p style={{ marginTop: 14, color: 'var(--ink-500)', maxWidth: 420, fontSize: 18 }}>
-            Pick your AI coach, connect with friends, and manage training, nutrition, and daily habits in one premium community app.
-          </p>
-          <div style={{ marginTop: 32, display: 'grid', gap: 12 }}>
-            <div className="surface-subtle" style={{ padding: 12 }}>
-              <strong style={{ display: 'block', marginBottom: 4 }}>Coach Persona</strong>
-              <span style={{ color: 'var(--ink-500)', fontSize: 14 }}>Switch between ZJ (encouraging) and LC (strict)</span>
+      <div className="relative z-10 w-full max-w-[480px]">
+        <section className="rounded-[32px] border border-white/60 bg-white/70 p-8 shadow-[0_30px_80px_rgba(59,49,40,0.12)] backdrop-blur-2xl md:p-10">
+          <div className="mb-8 flex items-center justify-center gap-3">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-white shadow-[0_18px_32px_rgba(105,121,247,0.12)]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="ZYM logo" className="size-10 object-contain" />
             </div>
-            <div className="surface-subtle" style={{ padding: 12 }}>
-              <strong style={{ display: 'block', marginBottom: 4 }}>Community First</strong>
-              <span style={{ color: 'var(--ink-500)', fontSize: 14 }}>Group chat + DM + Feed + Leaderboard in one flow</span>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-[color:var(--ink-900)]">ZYM</h1>
             </div>
           </div>
+
+          <div className="mb-8 text-center">
+            <h2 className="text-lg font-medium text-[color:var(--ink-900)]">Welcome Back</h2>
+            <p className="mt-3 text-sm leading-7 text-[color:var(--ink-500)]">
+              Pick your AI coach, connect with friends, and manage training, nutrition, and daily habits in one premium community app.
+            </p>
+          </div>
+
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <label className="ml-1 text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Username</label>
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[20px] text-[color:var(--ink-300)]">person</span>
+                <input
+                  className="w-full rounded-2xl border border-[rgba(171,164,155,0.22)] bg-white/55 py-4 pl-12 pr-4 text-[color:var(--ink-900)] outline-none transition focus:border-[rgba(105,121,247,0.32)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+                  placeholder="your username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <label className="ml-1 text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Password</label>
+                <span className="text-xs text-[color:var(--ink-300)]">Secure session</span>
+              </div>
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[20px] text-[color:var(--ink-300)]">lock</span>
+                <input
+                  className="w-full rounded-2xl border border-[rgba(171,164,155,0.22)] bg-white/55 py-4 pl-12 pr-4 text-[color:var(--ink-900)] outline-none transition focus:border-[rgba(105,121,247,0.32)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+                  placeholder="••••••••"
+                  value={password}
+                  type="password"
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </div>
+            </div>
+
+            {error ? <p className="text-sm text-[color:var(--danger)]">{error}</p> : null}
+
+            <button
+              type="submit"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[color:var(--coach-lc)] to-[color:var(--coach-lc-strong)] px-4 py-4 text-sm font-bold text-white shadow-[0_18px_32px_rgba(177,99,34,0.22)] transition active:scale-[0.99]"
+              disabled={pending}
+            >
+              {pending ? 'Signing in...' : 'Get to Work'}
+              <span className="material-symbols-outlined text-base">arrow_forward</span>
+            </button>
+          </form>
+
+          <div className="mt-8 border-t border-[rgba(171,164,155,0.12)] pt-8 text-center">
+            <p className="text-sm text-[color:var(--ink-500)]">New to the community?</p>
+            <button
+              type="button"
+              className="mt-3 inline-flex items-center justify-center gap-1 text-sm font-bold text-[color:var(--coach-zj)] transition hover:underline"
+              onClick={() => router.push('/register')}
+            >
+              Start Your 14-Day Challenge
+            </button>
+          </div>
+        </section>
+
+        <div className="mt-10 flex justify-center gap-8 opacity-60">
+          {[
+            { label: 'Coach ZJ', tone: 'bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]' },
+            { label: 'Coach LC', tone: 'bg-[rgba(242,138,58,0.12)] text-[color:var(--coach-lc)]' },
+          ].map((coach) => (
+            <div key={coach.label} className="flex flex-col items-center">
+              <div className={`flex size-12 items-center justify-center rounded-full border border-white/70 ${coach.tone}`}>
+                <span className="material-symbols-outlined">fitness_center</span>
+              </div>
+              <span className="mt-2 text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">{coach.label}</span>
+            </div>
+          ))}
         </div>
-
-        <form onSubmit={onSubmit} className="auth-form zym-enter zym-delay-2">
-          <h2 style={{ fontSize: 30 }}>Sign in</h2>
-          <p style={{ color: 'var(--ink-500)', marginTop: 8 }}>Continue your fitness journey</p>
-
-          <div style={{ marginTop: 24, display: 'grid', gap: 12 }}>
-            <input className="input-shell" placeholder="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
-            <input
-              className="input-shell"
-              placeholder="Password"
-              value={password}
-              type="password"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
-
-          {error && <p style={{ marginTop: 12, color: 'var(--danger)', fontSize: 14 }}>{error}</p>}
-
-          <button type="submit" className={`btn btn-primary ${pending ? 'zym-shimmer' : ''}`} disabled={pending} style={{ marginTop: 18, width: '100%' }}>
-            {pending ? 'Signing in...' : 'Login'}
-          </button>
-
-          <button type="button" className="btn btn-ghost" style={{ marginTop: 10, width: '100%' }} onClick={() => router.push('/register')}>
-            Create account
-          </button>
-        </form>
-      </section>
+      </div>
     </main>
   );
 }

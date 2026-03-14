@@ -86,6 +86,11 @@ DerivedData/
 # Reference repo not part of app product
 cats-company/
 
+# Local design/docs/reference assets not published
+docs/
+stitch/
+server/src/knowledge/papers/
+
 # Local status docs / utility scripts (not published)
 /COMPLETE.md
 /COMPLETION_REPORT.md

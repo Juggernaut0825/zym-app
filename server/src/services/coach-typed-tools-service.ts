@@ -6,8 +6,10 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { MediaStore } from '../context/media-store.js';
 import { SessionStore } from '../context/session-store.js';
+import { MediaAssetService, type MediaAssetRecord } from './media-asset-service.js';
 import { knowledgeService } from './knowledge-service.js';
 import { resolveSkillRoot, resolveUserDataDir } from '../utils/path-resolver.js';
+import { logger } from '../utils/logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +181,9 @@ function getLocalDateTimeParts(date: Date, timeZone: string): { day: string; tim
 
 export class CoachTypedToolsService {
   private mediaStore = new MediaStore();
+  private mediaAssetService = MediaAssetService.createFromEnvironment({
+    uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+  });
   private sessionStore = new SessionStore();
 
   private getUserDataDir(userId: string): string {
@@ -580,7 +585,7 @@ Return ONLY JSON:
   async listRecentMedia(userId: string, input: { limit?: unknown; activeOnly?: unknown } = {}): Promise<Record<string, unknown>> {
     const limit = clampInt(input.limit, 1, 20, 5);
     const activeOnly = Boolean(input.activeOnly);
-    const items = await this.mediaStore.listRecentMedia(userId, limit);
+    const items = this.mediaAssetService.listRecentForUser(Number(userId), limit);
     const filtered = activeOnly ? items.filter((item) => item.status === 'ready') : items;
     return {
       items: filtered.map((item) => ({
@@ -591,8 +596,43 @@ Return ONLY JSON:
         createdAt: item.createdAt,
         expiresAt: item.expiresAt,
         status: item.status,
-        analysisCount: Array.isArray(item.analysisIds) ? item.analysisIds.length : 0,
+        analysisCount: 0,
       })),
+    };
+  }
+
+  private async resolveMediaForInspection(
+    userId: string,
+    mediaId: string,
+  ): Promise<{ id: string; kind: 'image' | 'video'; mimeType: string; body: Buffer; sourceType: 'asset' | 'legacy'; asset?: MediaAssetRecord }> {
+    if (mediaId.startsWith('asset_')) {
+      const asset = this.mediaAssetService.getById(mediaId);
+      if (!asset || asset.ownerUserId !== Number(userId) || asset.status !== 'ready') {
+        throw new Error('mediaId not found or expired');
+      }
+      const body = await this.mediaAssetService.getObjectBody(asset);
+      return {
+        id: asset.id,
+        kind: asset.kind === 'video' ? 'video' : 'image',
+        mimeType: asset.mimeType,
+        body,
+        sourceType: 'asset',
+        asset,
+      };
+    }
+
+    const media = await this.mediaStore.getMediaById(userId, mediaId);
+    if (!media) {
+      throw new Error('mediaId not found or expired');
+    }
+    const absolutePath = this.assertMediaPathWithinUserRoot(userId, media.storedPath);
+    const body = await fs.readFile(absolutePath);
+    return {
+      id: media.id,
+      kind: media.kind,
+      mimeType: media.mimeType,
+      body,
+      sourceType: 'legacy',
     };
   }
 
@@ -610,6 +650,8 @@ Question: ${question || 'Provide a baseline analysis.'}
 Instructions:
 - Use only visible evidence from media.
 - Do not hallucinate details.
+- For videos sampled by frames, do not claim an exact rep count, set count, or plate load unless it is clearly visible across the sampled evidence.
+- If reps, sets, or total load are uncertain, say so explicitly, provide the most likely range, and set needsConfirmation to true.
 - If uncertain, lower confidence and list ambiguities.
 - Return ONLY JSON.
 {
@@ -668,12 +710,11 @@ ${domainPrompt[domain]}`;
     const frames: Buffer[] = [];
     try {
       const duration = (await this.probeVideoDurationSeconds(absolutePath)) || 4;
-      const points = Array.from(new Set([
-        Math.max(0.1, duration * 0.1),
-        Math.max(0.2, duration * 0.35),
-        Math.max(0.3, duration * 0.6),
-        Math.max(0.4, duration * 0.85),
-      ])).slice(0, 4);
+      const targetFrameCount = duration <= 12 ? 8 : duration <= 24 ? 6 : 4;
+      const points = Array.from({ length: targetFrameCount }, (_, index) => {
+        const ratio = (index + 1) / (targetFrameCount + 1);
+        return Math.max(0.1, duration * ratio);
+      });
 
       for (let index = 0; index < points.length; index += 1) {
         const outputPath = path.join(tempRoot, `frame_${index}.jpg`);
@@ -725,27 +766,31 @@ ${domainPrompt[domain]}`;
     input: { mediaId: unknown; question?: unknown; domain?: unknown },
   ): Promise<Record<string, unknown>> {
     const mediaId = safeString(input.mediaId, 128);
-    if (!/^med_[a-zA-Z0-9._-]{4,120}$/.test(mediaId)) {
+    if (!/^(med|asset)_[a-zA-Z0-9._-]{4,120}$/.test(mediaId)) {
       throw new Error('Invalid mediaId');
     }
     const question = safeString(input.question, 500);
     const domain = normalizeInspectDomain(input.domain);
 
-    const media = await this.mediaStore.getMediaById(userId, mediaId);
-    if (!media) {
-      throw new Error('mediaId not found or expired');
-    }
-
-    const absolutePath = this.assertMediaPathWithinUserRoot(userId, media.storedPath);
-    const binary = await fs.readFile(absolutePath);
+    const media = await this.resolveMediaForInspection(userId, mediaId);
+    const binary = media.body;
     const fileSizeMb = binary.length / (1024 * 1024);
+    logger.info(
+      `[tool][inspect_media] start mediaId=${mediaId} kind=${media.kind} mime=${media.mimeType} sizeMb=${fileSizeMb.toFixed(2)} question="${question.slice(0, 160)}"`,
+    );
 
     let result: any;
     const contentParts: any[] = [];
 
     if (media.kind === 'video') {
-      const frames = await this.extractVideoFrames(absolutePath);
+      const tempVideoPath = path.join(os.tmpdir(), `zym-inspect-${mediaId}${media.mimeType.includes('quicktime') ? '.mov' : '.mp4'}`);
+      await fs.writeFile(tempVideoPath, binary);
+      const frames = await this.extractVideoFrames(tempVideoPath);
+      await fs.rm(tempVideoPath, { force: true }).catch(() => {});
       if (frames.length > 0) {
+        logger.info(
+          `[tool][inspect_media] extracted_frames mediaId=${mediaId} count=${frames.length} mime=${media.mimeType}`,
+        );
         for (const frame of frames) {
           contentParts.push({
             type: 'image_url',
@@ -753,11 +798,17 @@ ${domainPrompt[domain]}`;
           });
         }
       } else if (fileSizeMb <= 22) {
+        logger.warn(
+          `[tool][inspect_media] direct_video_fallback mediaId=${mediaId} mime=${media.mimeType} sizeMb=${fileSizeMb.toFixed(2)}`,
+        );
         contentParts.push({
           type: 'video_url',
           video_url: { url: `data:${media.mimeType};base64,${binary.toString('base64')}` },
         });
       } else {
+        logger.warn(
+          `[tool][inspect_media] video_too_large mediaId=${mediaId} mime=${media.mimeType} sizeMb=${fileSizeMb.toFixed(2)}`,
+        );
         result = {
           kind: question ? 'focused_qa' : 'baseline',
           confidence: 'low',
@@ -816,15 +867,20 @@ ${domainPrompt[domain]}`;
     await ensureDir(analysisDir);
     await writeJsonAtomic(path.join(analysisDir, `${analysisId}.json`), normalized);
 
-    const index = await this.mediaStore.loadIndex(userId);
-    const item = index.items.find((entry) => entry.id === mediaId);
-    if (item) {
-      item.analysisIds = Array.isArray(item.analysisIds) ? item.analysisIds : [];
-      if (!item.analysisIds.includes(analysisId)) {
-        item.analysisIds.push(analysisId);
+    if (media.sourceType === 'legacy') {
+      const index = await this.mediaStore.loadIndex(userId);
+      const item = index.items.find((entry) => entry.id === mediaId);
+      if (item) {
+        item.analysisIds = Array.isArray(item.analysisIds) ? item.analysisIds : [];
+        if (!item.analysisIds.includes(analysisId)) {
+          item.analysisIds.push(analysisId);
+        }
+        await this.mediaStore.saveIndex(userId, index);
       }
-      await this.mediaStore.saveIndex(userId, index);
     }
+    logger.info(
+      `[tool][inspect_media] done mediaId=${mediaId} analysisId=${analysisId} confidence=${normalized.confidence} evidence=${normalized.evidence.length} ambiguities=${normalized.ambiguities.length}`,
+    );
 
     return normalized;
   }
@@ -842,11 +898,17 @@ ${domainPrompt[domain]}`;
     const domains = inferKnowledgeDomains(input.domains);
     const topK = clampInt(input.topK, 1, 8, 4);
     const minScore = toNumber(input.minScore, 0, 1) ?? 0.08;
+    logger.info(
+      `[tool][search_knowledge] start domains=${domains.join(',')} topK=${topK} minScore=${minScore.toFixed(2)} query="${query.slice(0, 160)}"`,
+    );
     const matches = await knowledgeService.searchHybrid(query, {
       domains,
       topK,
       minScore,
     });
+    logger.info(
+      `[tool][search_knowledge] done matches=${matches.length} domains=${domains.join(',')} query="${query.slice(0, 160)}"`,
+    );
 
     return {
       query,

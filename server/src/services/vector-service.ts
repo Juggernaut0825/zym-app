@@ -1,4 +1,4 @@
-import { Pinecone } from '@pinecone-database/pinecone';
+import { ChromaClient, type Collection } from 'chromadb';
 
 export interface VectorKnowledgeMatch {
   id: string;
@@ -18,29 +18,87 @@ export interface VectorKnowledgeUpsertInput {
   domain: 'fitness' | 'nutrition';
   source: string;
   text: string;
+  embedding?: number[];
+  title?: string;
+  referenceUrl?: string;
+  pdfUrl?: string;
+  authors?: string;
+  year?: string;
+  category?: string;
+  corpus?: string;
+}
+
+function parseAllowedSourceRegex(): RegExp | null {
+  const raw = String(process.env.KB_ALLOWED_SOURCE_REGEX || '').trim();
+  if (!raw) return null;
+  try {
+    return new RegExp(raw, 'i');
+  } catch {
+    return null;
+  }
+}
+
+function parseChromaUrl(raw: string): { host: string; port: number; ssl: boolean } | null {
+  const value = String(raw || '').trim();
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return {
+      host: parsed.hostname,
+      port: Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80)),
+      ssl: parsed.protocol === 'https:',
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class VectorService {
-  private static pinecone: Pinecone | null = null;
+  private static client: ChromaClient | null = null;
+  private static collection: Collection | null = null;
   private static initialized = false;
-  private static indexName = String(process.env.PINECONE_INDEX_NAME || 'zym-knowledge').trim();
-  private static allowedSourceRegex: RegExp | null = this.parseAllowedSourceRegex();
-
-  private static parseAllowedSourceRegex(): RegExp | null {
-    const raw = String(process.env.KB_ALLOWED_SOURCE_REGEX || '').trim();
-    if (!raw) return null;
-    try {
-      return new RegExp(raw, 'i');
-    } catch {
-      return null;
-    }
-  }
+  private static collectionName = String(process.env.CHROMA_COLLECTION_NAME || 'zym-knowledge').trim();
+  private static chromaUrl = String(process.env.CHROMA_URL || 'http://127.0.0.1:8000').trim();
+  private static allowedSourceRegex: RegExp | null = parseAllowedSourceRegex();
 
   static async init() {
     if (this.initialized) return;
     this.initialized = true;
-    if (!process.env.PINECONE_API_KEY) return;
-    this.pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+
+    const parsed = parseChromaUrl(this.chromaUrl);
+    if (!parsed) return;
+
+    const headers: Record<string, string> = {};
+    const authToken = String(process.env.CHROMA_AUTH_TOKEN || '').trim();
+    if (authToken) {
+      headers['x-chroma-token'] = authToken;
+    }
+
+    this.client = new ChromaClient({
+      host: parsed.host,
+      port: parsed.port,
+      ssl: parsed.ssl,
+      tenant: String(process.env.CHROMA_TENANT || '').trim() || undefined,
+      database: String(process.env.CHROMA_DATABASE || '').trim() || undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+    });
+  }
+
+  private static async getCollection(): Promise<Collection | null> {
+    await this.init();
+    if (!this.client) return null;
+    if (this.collection) return this.collection;
+
+    try {
+      this.collection = await this.client.getOrCreateCollection({
+        name: this.collectionName,
+        metadata: { 'hnsw:space': 'cosine' },
+        embeddingFunction: null,
+      });
+      return this.collection;
+    } catch {
+      return null;
+    }
   }
 
   private static fallbackDomainsForQuery(query: string): Array<'fitness' | 'nutrition'> {
@@ -58,13 +116,24 @@ export class VectorService {
     return ['fitness', 'nutrition'];
   }
 
+  private static normalizeScore(distance: number): number {
+    const numeric = Number(distance);
+    if (!Number.isFinite(numeric)) return 0;
+    if (numeric <= 1) return Math.max(0, 1 - numeric);
+    return 1 / (1 + numeric);
+  }
+
   static async searchKnowledge(
     query: string,
     options: VectorSearchOptions = {},
   ): Promise<VectorKnowledgeMatch[]> {
-    await this.init();
     const normalized = String(query || '').trim();
-    if (!normalized || !this.pinecone || !process.env.OPENROUTER_API_KEY) {
+    if (!normalized || !process.env.OPENROUTER_API_KEY) {
+      return [];
+    }
+
+    const collection = await this.getCollection();
+    if (!collection) {
       return [];
     }
 
@@ -73,36 +142,45 @@ export class VectorService {
     const embedding = await this.getEmbedding(normalized);
     if (embedding.length === 0) return [];
 
-    const index = this.pinecone.index(this.indexName);
     const merged = new Map<string, VectorKnowledgeMatch>();
 
     for (const domain of domains) {
-      const results = await index.query({
-        vector: embedding,
-        filter: { domain },
-        topK,
-        includeMetadata: true,
-      });
-
-      for (const match of results.matches || []) {
-        const text = String(match.metadata?.text || '').replace(/\s+/g, ' ').trim().slice(0, 4_000);
-        if (!text) continue;
-        const source = String(match.metadata?.source || match.metadata?.title || `${domain}-kb`).trim().slice(0, 180);
-        if (this.allowedSourceRegex && !this.allowedSourceRegex.test(source)) {
-          continue;
-        }
-        const score = Number(match.score || 0);
-        const id = String(match.id || `${domain}:${source}:${Math.round(score * 1000)}`);
-        const key = `${source}:${text.slice(0, 120)}`;
-        const existing = merged.get(key);
-        if (existing && existing.score >= score) continue;
-        merged.set(key, {
-          id,
-          domain,
-          source,
-          text,
-          score,
+      try {
+        const result = await collection.query({
+          queryEmbeddings: [embedding],
+          nResults: topK,
+          where: { domain },
+          include: ['metadatas', 'documents', 'distances'],
         });
+
+        const ids = Array.isArray(result.ids?.[0]) ? result.ids[0] : [];
+        const documents = Array.isArray(result.documents?.[0]) ? result.documents[0] : [];
+        const metadatas = Array.isArray(result.metadatas?.[0]) ? result.metadatas[0] : [];
+        const distances = Array.isArray(result.distances?.[0]) ? result.distances[0] : [];
+
+        for (let index = 0; index < ids.length; index += 1) {
+          const metadata = metadatas[index] as Record<string, unknown> | null | undefined;
+          const text = String(documents[index] || metadata?.text || '').replace(/\s+/g, ' ').trim().slice(0, 4_000);
+          if (!text) continue;
+          const source = String(metadata?.source || metadata?.title || `${domain}-kb`).trim().slice(0, 180);
+          if (this.allowedSourceRegex && !this.allowedSourceRegex.test(source)) {
+            continue;
+          }
+          const score = this.normalizeScore(Number(distances[index] || 0));
+          const id = String(ids[index] || `${domain}:${source}:${index + 1}`);
+          const key = `${source}:${text.slice(0, 120)}`;
+          const existing = merged.get(key);
+          if (existing && existing.score >= score) continue;
+          merged.set(key, {
+            id,
+            domain,
+            source,
+            text,
+            score,
+          });
+        }
+      } catch {
+        continue;
       }
     }
 
@@ -116,63 +194,129 @@ export class VectorService {
     return hits.map((item) => item.text);
   }
 
+  static async deleteKnowledgeDocuments(where: Record<string, string | number | boolean>): Promise<number> {
+    const collection = await this.getCollection();
+    if (!collection || !where || Object.keys(where).length === 0) {
+      return 0;
+    }
+
+    try {
+      const result = await collection.delete({ where });
+      return Number(result.deleted || 0);
+    } catch {
+      return 0;
+    }
+  }
+
   static async upsertKnowledgeDocuments(docs: VectorKnowledgeUpsertInput[]): Promise<{ upserted: number; skipped: number }> {
-    await this.init();
     if (!Array.isArray(docs) || docs.length === 0) {
       return { upserted: 0, skipped: 0 };
     }
-    if (!this.pinecone || !process.env.OPENROUTER_API_KEY) {
+    if (!process.env.OPENROUTER_API_KEY) {
       return { upserted: 0, skipped: docs.length };
     }
 
-    const index = this.pinecone.index(this.indexName);
-    let upserted = 0;
-    let skipped = 0;
+    const collection = await this.getCollection();
+    if (!collection) {
+      return { upserted: 0, skipped: docs.length };
+    }
 
-    const vectors: any[] = [];
-    for (const doc of docs.slice(0, 240)) {
+    const normalizedDocs = docs.slice(0, 2_400).map((doc) => {
       const text = String(doc.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
       const source = String(doc.source || '').trim().slice(0, 180);
       const id = String(doc.id || '').trim().slice(0, 180);
       const domain = doc.domain === 'nutrition' ? 'nutrition' : 'fitness';
-      if (!id || !text || !source) {
-        skipped += 1;
-        continue;
-      }
-      const embedding = await this.getEmbedding(text);
-      if (!Array.isArray(embedding) || embedding.length === 0) {
-        skipped += 1;
-        continue;
-      }
-      vectors.push({
+      if (!id || !text || !source) return null;
+      return {
         id,
-        values: embedding,
-        metadata: {
-          domain,
-          source,
-          text,
-        },
-      });
-    }
+        domain,
+        source,
+        text,
+        embedding: Array.isArray(doc.embedding) ? doc.embedding.map((value) => Number(value) || 0) : [],
+        title: String(doc.title || '').trim().slice(0, 300),
+        referenceUrl: String(doc.referenceUrl || '').trim().slice(0, 500),
+        pdfUrl: String(doc.pdfUrl || '').trim().slice(0, 500),
+        authors: String(doc.authors || '').trim().slice(0, 300),
+        year: String(doc.year || '').trim().slice(0, 16),
+        category: String(doc.category || '').trim().slice(0, 80),
+        corpus: String(doc.corpus || '').trim().slice(0, 80),
+      };
+    });
 
-    if (vectors.length === 0) {
-      return { upserted: 0, skipped };
-    }
+    const validDocs = normalizedDocs.filter((item): item is NonNullable<typeof item> => Boolean(item));
+    let skipped = normalizedDocs.length - validDocs.length;
+    let upserted = 0;
 
-    try {
-      await (index as any).upsert(vectors);
-      upserted = vectors.length;
-    } catch {
-      skipped += vectors.length;
-      upserted = 0;
+    const batchSize = 32;
+    for (let offset = 0; offset < validDocs.length; offset += batchSize) {
+      const batch = validDocs.slice(offset, offset + batchSize);
+      const needsRemoteEmbeddings = batch.some((doc) => doc.embedding.length === 0);
+      const embeddings = needsRemoteEmbeddings
+        ? await this.getEmbeddings(batch.map((doc) => doc.text))
+        : batch.map((doc) => doc.embedding);
+
+      const ids: string[] = [];
+      const documents: string[] = [];
+      const metadatas: Array<Record<string, string>> = [];
+      const vectors: number[][] = [];
+
+      for (let index = 0; index < batch.length; index += 1) {
+        const doc = batch[index];
+        const embedding = doc.embedding.length > 0
+          ? doc.embedding
+          : Array.isArray(embeddings[index]) ? embeddings[index] : [];
+        if (embedding.length === 0) {
+          skipped += 1;
+          continue;
+        }
+        ids.push(doc.id);
+        documents.push(doc.text);
+        vectors.push(embedding);
+        metadatas.push({
+          domain: doc.domain,
+          source: doc.source,
+          text: doc.text,
+          title: doc.title || '',
+          referenceUrl: doc.referenceUrl || '',
+          pdfUrl: doc.pdfUrl || '',
+          authors: doc.authors || '',
+          year: doc.year || '',
+          category: doc.category || '',
+          corpus: doc.corpus || '',
+        });
+      }
+
+      if (ids.length === 0) {
+        continue;
+      }
+
+      try {
+        await collection.upsert({
+          ids,
+          documents,
+          embeddings: vectors,
+          metadatas,
+        });
+        upserted += ids.length;
+      } catch {
+        skipped += ids.length;
+      }
     }
 
     return { upserted, skipped };
   }
 
   static async getEmbedding(text: string): Promise<number[]> {
+    const [embedding] = await this.getEmbeddings([text]);
+    return Array.isArray(embedding) ? embedding : [];
+  }
+
+  static async getEmbeddings(texts: string[]): Promise<number[][]> {
     const apiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
-    if (!apiKey) return [];
+    const normalized = Array.isArray(texts)
+      ? texts.map((text) => String(text || '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 128)
+      : [];
+    if (!apiKey || normalized.length === 0) return [];
 
     const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
       method: 'POST',
@@ -181,9 +325,10 @@ export class VectorService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.GAUZ_EMBEDDING_MODEL || 'text-embedding-3-small',
-        input: text,
+        model: process.env.GAUZ_EMBEDDING_MODEL || 'qwen/qwen3-embedding-4b',
+        input: normalized.length === 1 ? normalized[0] : normalized,
       }),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -191,12 +336,17 @@ export class VectorService {
     }
 
     const data = await response.json().catch(() => ({} as any));
-    const embedding = data?.data?.[0]?.embedding;
-    return Array.isArray(embedding) ? embedding.map((value: unknown) => Number(value) || 0) : [];
+    if (!Array.isArray(data?.data)) {
+      return [];
+    }
+    return data.data.map((item: any) => (
+      Array.isArray(item?.embedding)
+        ? item.embedding.map((value: unknown) => Number(value) || 0)
+        : []
+    ));
   }
 }
 
-// Backward compatibility for older call sites.
 export async function searchKnowledge(query: string, domain: 'fitness' | 'nutrition'): Promise<string[]> {
   return VectorService.searchKnowledgeByDomain(query, domain);
 }
