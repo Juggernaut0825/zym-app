@@ -5,7 +5,13 @@ import { fileURLToPath } from 'url';
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function looksLikeSkillRoot(candidate: string): boolean {
-  return fs.existsSync(path.join(candidate, 'scripts')) && fs.existsSync(path.join(candidate, '.env'));
+  const hasScripts = fs.existsSync(path.join(candidate, 'scripts'));
+  const hasTrackedStructure =
+    fs.existsSync(path.join(candidate, 'SKILL.md'))
+    || fs.existsSync(path.join(candidate, '.env.example'))
+    || fs.existsSync(path.join(candidate, 'references'));
+  const hasLocalEnv = fs.existsSync(path.join(candidate, '.env'));
+  return hasScripts && (hasTrackedStructure || hasLocalEnv);
 }
 
 export function resolveSkillRoot(): string {
