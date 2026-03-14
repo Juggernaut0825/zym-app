@@ -106,6 +106,8 @@ interface ProfileViewerState {
 
 const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const COMMUNITY_POST_VISIBILITY = 'friends' as const;
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
 const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
@@ -118,6 +120,15 @@ function isSupportedMediaFile(file: File): boolean {
   }
   const lowerName = file.name.toLowerCase();
   return mediaFallbackExtensions.some((ext) => lowerName.endsWith(ext));
+}
+
+function isHeicLikeFile(file: File): boolean {
+  const mime = String(file.type || '').toLowerCase();
+  const name = String(file.name || '').toLowerCase();
+  return mime.includes('heic')
+    || mime.includes('heif')
+    || name.endsWith('.heic')
+    || name.endsWith('.heif');
 }
 
 function mergeMediaFiles(existing: File[], incoming: File[]): { files: File[]; errors: string[] } {
@@ -2065,6 +2076,15 @@ export default function AppPage() {
     try {
       if (kind === 'avatar') setProfileAvatarUploading(true);
       if (kind === 'background') setProfileBackgroundUploading(true);
+      if (isHeicLikeFile(file)) {
+        throw new Error(`${kind === 'avatar' ? 'Avatar' : 'Background'} uploads do not support HEIC/HEIF yet. Please convert it to JPG or PNG first.`);
+      }
+      const maxSize = kind === 'avatar' ? MAX_PROFILE_AVATAR_FILE_SIZE_BYTES : MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES;
+      if (file.size > maxSize) {
+        const label = kind === 'avatar' ? 'Avatar' : 'Background';
+        const mb = kind === 'avatar' ? 5 : 10;
+        throw new Error(`${label} image is too large. Please upload a file smaller than ${mb}MB.`);
+      }
       const uploaded = await uploadFile(file, {
         source: kind === 'avatar' ? 'web_profile_avatar' : 'web_profile_background',
         visibility: kind === 'avatar' ? 'public' : 'friends',

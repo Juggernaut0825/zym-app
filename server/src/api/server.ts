@@ -33,6 +33,7 @@ import { WSServer } from '../websocket/ws-server.js';
 import { MediaStore } from '../context/media-store.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
 import type { MediaAssetVisibility } from '../storage/storage-provider.js';
+import { logger } from '../utils/logger.js';
 
 const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -50,6 +51,10 @@ const ALLOWED_UPLOAD_MIME = new Set([
   'video/webm',
 ]);
 const ALLOWED_MEDIA_URL_PROTOCOLS = new Set(['http:', 'https:']);
+const PROFILE_UPLOAD_SOURCES = new Set([
+  'web_profile_avatar',
+  'web_profile_background',
+]);
 
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, uploadsDir),
@@ -1198,6 +1203,10 @@ app.post('/media/upload-url',
         || contentType.includes('heif')
         || fileName.toLowerCase().endsWith('.heic')
         || fileName.toLowerCase().endsWith('.heif');
+      if (isHeic && PROFILE_UPLOAD_SOURCES.has(source)) {
+        logger.warn(`[media] rejecting HEIC profile upload source=${source} file="${fileName}" size=${sizeBytes || 0}`);
+        return res.status(400).json({ error: 'Profile avatar/background uploads do not support HEIC/HEIF yet. Please convert to JPG or PNG first.' });
+      }
       if (isHeic) {
         return res.json({ strategy: 'legacy_multipart' });
       }
@@ -1593,9 +1602,17 @@ app.post('/media/upload', APIGateway.rateLimit(40, 10 * 60_000, 'media-upload'),
       || lowerMime.includes('heif')
       || lowerName.endsWith('.heic')
       || lowerName.endsWith('.heif');
+    if (isHeic && PROFILE_UPLOAD_SOURCES.has(source)) {
+      logger.warn(`[media] blocking legacy HEIC profile upload source=${source} file="${String(file.originalname || '').slice(0, 200)}" size=${Number(file.size || 0)}`);
+      void fsPromises.unlink(file.path).catch(() => {});
+      return res.status(400).json({ error: 'Profile avatar/background uploads do not support HEIC/HEIF yet. Please convert to JPG or PNG first.' });
+    }
     if (isHeic) {
+      const heicStart = Date.now();
+      logger.info(`[media] HEIC conversion:start source=${source} file="${String(file.originalname || '').slice(0, 200)}" size=${Number(file.size || 0)}`);
       processedPath = await MediaService.convertHEIC(file.path);
       finalName = path.basename(processedPath);
+      logger.info(`[media] HEIC conversion:done source=${source} file="${String(file.originalname || '').slice(0, 200)}" elapsed_ms=${Date.now() - heicStart}`);
     }
 
     const absoluteUploadRoot = `${path.resolve(uploadsDir)}${path.sep}`;
