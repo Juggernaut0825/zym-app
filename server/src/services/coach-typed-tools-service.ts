@@ -90,9 +90,21 @@ function extractJsonPayload(raw: string): string {
 }
 
 function inferKnowledgeDomains(raw: unknown): KnowledgeDomain[] {
+  if (Array.isArray(raw)) {
+    const values = raw
+      .map((item) => safeString(item, 40).toLowerCase())
+      .filter((item): item is KnowledgeDomain => item === 'fitness' || item === 'nutrition');
+    if (values.length > 0) {
+      return Array.from(new Set(values));
+    }
+  }
+
   const text = safeString(raw, 200).toLowerCase();
   if (text === 'fitness') return ['fitness'];
   if (text === 'nutrition') return ['nutrition'];
+  if (text === 'fitness,nutrition' || text === 'nutrition,fitness' || text === 'both') {
+    return ['fitness', 'nutrition'];
+  }
   return ['fitness', 'nutrition'];
 }
 

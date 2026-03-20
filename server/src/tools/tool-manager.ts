@@ -1,28 +1,9 @@
 import { Tool, ToolDefinition, ToolCall, ToolResult, ToolExecutionContext } from '../types/index.js';
-import { BashTool } from './bash-tool.js';
 import { SecurityEventService } from '../services/security-event-service.js';
-import {
-  GetContextTool,
-  GetProfileTool,
-  InspectMediaTool,
-  ListRecentMediaTool,
-  LogMealTool,
-  LogTrainingTool,
-  SearchKnowledgeTool,
-  SetProfileTool,
-} from './typed-coach-tools.js';
+import { createDefaultTypedTools } from './tool-registry.js';
 
 const MAX_TOOL_OUTPUT_CHARS = 12_000;
-const ENABLE_LEGACY_BASH_TOOL = String(process.env.ENABLE_LEGACY_BASH_TOOL || '').trim() === '1';
 const WRITE_TOOL_NAMES = new Set(['set_profile', 'log_meal', 'log_training']);
-const WRITE_BASH_SCRIPTS = new Set([
-  'set-profile.sh',
-  'set-goal.sh',
-  'generate-plan.sh',
-  'log-meal.sh',
-  'log-training.sh',
-  'cleanup-media.sh',
-]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -66,6 +47,30 @@ function validateNumberRule(value: number, rule: any, key: string): string | nul
   return null;
 }
 
+function validateArrayRule(value: unknown[], rule: any, key: string): string | null {
+  if (typeof rule?.maxItems === 'number' && value.length > rule.maxItems) {
+    return `Invalid "${key}" length; maximum is ${rule.maxItems}`;
+  }
+
+  if (typeof rule?.itemType === 'string') {
+    for (const item of value) {
+      if (!matchesPrimitiveType(item, rule.itemType)) {
+        return `Invalid "${key}" item type; expected ${rule.itemType}`;
+      }
+    }
+  }
+
+  if (Array.isArray(rule?.itemEnum)) {
+    for (const item of value) {
+      if (!rule.itemEnum.includes(item as never)) {
+        return `Invalid "${key}" value`;
+      }
+    }
+  }
+
+  return null;
+}
+
 function validateArgsAgainstSchema(definition: ToolDefinition, args: unknown): string | null {
   const schema = definition.parameters;
   if (!isObject(args)) {
@@ -93,7 +98,17 @@ function validateArgsAgainstSchema(definition: ToolDefinition, args: unknown): s
       continue;
     }
 
+    const allowsSingletonStringForArray = rule.type === 'array'
+      && typeof value === 'string'
+      && rule.itemType === 'string';
+
     if (typeof rule.type === 'string' && !matchesPrimitiveType(value, rule.type)) {
+      if (allowsSingletonStringForArray) {
+        if (Array.isArray(rule.itemEnum) && !rule.itemEnum.includes(value as never)) {
+          return `Invalid "${key}" value`;
+        }
+        continue;
+      }
       return `Invalid "${key}" type; expected ${rule.type}`;
     }
 
@@ -108,6 +123,11 @@ function validateArgsAgainstSchema(definition: ToolDefinition, args: unknown): s
 
     if ((rule.type === 'number' || rule.type === 'integer') && typeof value === 'number') {
       const error = validateNumberRule(value, rule, key);
+      if (error) return error;
+    }
+
+    if (rule.type === 'array' && Array.isArray(value)) {
+      const error = validateArrayRule(value, rule, key);
       if (error) return error;
     }
   }
@@ -153,18 +173,9 @@ function trackToolSecurityEvent(
   }
 }
 
-function extractBashScriptName(args: unknown): string | null {
-  if (!isObject(args)) return null;
-  const command = String(args.command || '').trim();
-  if (!command) return null;
-  const match = command.match(/^bash\s+scripts\/([a-zA-Z0-9._-]+\.sh)(?:\s|$)/);
-  if (!match) return null;
-  return match[1];
-}
-
 function validateToolPolicy(
   toolName: string,
-  args: unknown,
+  _args: unknown,
   context: ToolExecutionContext,
 ): string | null {
   if (context.allowWriteTools !== false) {
@@ -175,49 +186,45 @@ function validateToolPolicy(
     return `Write tool is not allowed in this conversation scope: ${toolName}`;
   }
 
-  if (toolName !== 'bash') {
-    return null;
-  }
-
-  const scriptName = extractBashScriptName(args);
-  if (!scriptName) {
-    return 'Cannot resolve script name from command';
-  }
-
-  if (WRITE_BASH_SCRIPTS.has(scriptName)) {
-    return `Write tool is not allowed in this conversation scope: ${scriptName}`;
-  }
-
   return null;
 }
 
-/**
- * Tool manager for all available tools.
- * ZJ agent minimal setup: keep only the bash tool.
- */
 export class ToolManager {
   private tools: Map<string, Tool> = new Map();
   private workingDirectory: string;
+  private allowedTools: Set<string> | null;
+  private disallowedTools: Set<string>;
 
-  constructor(workingDirectory: string = process.cwd()) {
+  constructor(
+    workingDirectory: string = process.cwd(),
+    toolPolicy: { allowedTools?: string[]; disallowedTools?: string[] } = {},
+  ) {
     this.workingDirectory = workingDirectory;
+    this.allowedTools = Array.isArray(toolPolicy.allowedTools) && toolPolicy.allowedTools.length > 0
+      ? new Set(toolPolicy.allowedTools.map((item) => String(item || '').trim()).filter(Boolean))
+      : null;
+    this.disallowedTools = new Set(
+      Array.isArray(toolPolicy.disallowedTools)
+        ? toolPolicy.disallowedTools.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+    );
     this.registerDefaultTools();
   }
 
   private registerDefaultTools(): void {
-    // Typed tools are the default primary path.
-    this.registerTool(new GetContextTool());
-    this.registerTool(new GetProfileTool());
-    this.registerTool(new SetProfileTool());
-    this.registerTool(new ListRecentMediaTool());
-    this.registerTool(new InspectMediaTool());
-    this.registerTool(new LogMealTool());
-    this.registerTool(new LogTrainingTool());
-    this.registerTool(new SearchKnowledgeTool());
-
-    if (ENABLE_LEGACY_BASH_TOOL) {
-      this.registerTool(new BashTool());
+    for (const tool of createDefaultTypedTools()) {
+      this.registerTool(tool);
     }
+  }
+
+  private isToolAllowed(toolName: string): boolean {
+    if (this.disallowedTools.has(toolName)) {
+      return false;
+    }
+    if (this.allowedTools && !this.allowedTools.has(toolName)) {
+      return false;
+    }
+    return true;
   }
 
   registerTool(tool: Tool): void {
@@ -225,7 +232,9 @@ export class ToolManager {
   }
 
   getToolDefinitions(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map(tool => tool.definition);
+    return Array.from(this.tools.values())
+      .filter((tool) => this.isToolAllowed(tool.definition.name))
+      .map(tool => tool.definition);
   }
 
   async executeTool(
@@ -243,6 +252,22 @@ export class ToolManager {
         content: `Error: tool "${toolName}" was not found.`,
         ok: false,
         errorCode: 'TOOL_NOT_FOUND',
+      };
+    }
+
+    if (!this.isToolAllowed(toolName)) {
+      const numericUserId = normalizeUserId(contextOverrides?.userId);
+      trackToolSecurityEvent(numericUserId, 'coach_tool_policy_rejected', 'warn', {
+        tool: toolName,
+        reason: 'tool_not_allowed_for_skill',
+      });
+      return {
+        tool_call_id: toolCall.id,
+        role: 'tool',
+        name: toolName,
+        content: `Tool policy error: tool "${toolName}" is not available in the active skill.`,
+        ok: false,
+        errorCode: 'TOOL_POLICY_DENIED',
       };
     }
 
@@ -352,6 +377,6 @@ export class ToolManager {
   }
 
   getToolCount(): number {
-    return this.tools.size;
+    return this.getToolDefinitions().length;
   }
 }

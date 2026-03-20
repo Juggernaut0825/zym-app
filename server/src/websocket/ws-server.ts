@@ -9,9 +9,12 @@ import {
   resolveMediaArrayForDelivery,
   resolveMediaForDelivery,
 } from '../security/media-url.js';
-import { CoachService } from '../services/coach-service.js';
-import { getDB } from '../database/sqlite-db.js';
-import { extractMentionHandles, resolveGroupCoachInvocation } from '../utils/coach-mention.js';
+import { extractMentionHandles } from '../utils/coach-mention.js';
+import { logger } from '../utils/logger.js';
+import { buildCoachReplyJob } from '../jobs/coach-reply-routing.js';
+import { enqueueCoachReply } from '../jobs/coach-reply-worker.js';
+import { publishRealtimeEvent, subscribeToRealtimeEvents } from '../realtime/realtime-event-bus.js';
+import type { RealtimeEvent, RealtimeCoachStatus } from '../realtime/realtime-events.js';
 
 const ALLOWED_MEDIA_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -51,6 +54,7 @@ export class WSServer {
   private wss: WebSocketServer;
   private clients = new Map<WebSocket, Client>();
   private heartbeatTimer: NodeJS.Timeout;
+  private realtimeUnsubscribe: (() => void) | null = null;
   private readonly maxSubscriptionsPerClient = 80;
   private readonly rateLimitWindowMs = 30_000;
   private readonly maxMessagesPerWindow = 90;
@@ -65,6 +69,7 @@ export class WSServer {
     this.wss.on('connection', this.handleConnection.bind(this));
     this.heartbeatTimer = setInterval(() => this.heartbeat(), 30_000);
     WSServer.instanceRef = this;
+    void this.attachRealtimeSubscription();
     console.log(`WebSocket server running on port ${port}`);
   }
 
@@ -221,11 +226,47 @@ export class WSServer {
     };
   }
 
-  private parseGroupId(topic: string): number | null {
-    const match = String(topic || '').trim().match(/^grp_(\d+)$/);
-    if (!match) return null;
-    const id = Number(match[1]);
-    return Number.isInteger(id) && id > 0 ? id : null;
+  private async attachRealtimeSubscription(): Promise<void> {
+    try {
+      this.realtimeUnsubscribe = await subscribeToRealtimeEvents((event) => {
+        this.handleRealtimeEvent(event);
+      });
+    } catch (error) {
+      logger.error('[ws] failed to attach realtime subscription', error);
+    }
+  }
+
+  private handleRealtimeEvent(event: RealtimeEvent) {
+    switch (event.type) {
+      case 'message_created':
+        this.broadcastToTopic(event.topic, {
+          type: 'message_created',
+          topic: event.topic,
+          message: this.normalizeOutgoingMessage(event.message),
+        });
+        return;
+      case 'typing':
+        this.broadcastToTopic(event.topic, {
+          type: 'typing',
+          topic: event.topic,
+          userId: event.userId,
+          isTyping: Boolean(event.isTyping),
+        });
+        return;
+      case 'coach_status':
+        this.broadcastToTopic(event.topic, {
+          type: 'coach_status',
+          topic: event.topic,
+          phase: String(event.status.phase || 'composing'),
+          label: String(event.status.label || ''),
+          active: Boolean(event.status.active),
+          tool: event.status.tool ? String(event.status.tool) : undefined,
+        });
+        return;
+      case 'inbox_updated':
+        this.deliverInboxUpdated(event.userIds);
+        return;
+    }
   }
 
   private async handleMessage(ws: WebSocket, msg: WSIncomingMessage) {
@@ -343,63 +384,22 @@ export class WSServer {
         this.notifyInboxUpdated(mentionTargets);
       }
 
-      const groupId = this.parseGroupId(topic);
-      const shouldCoachReplyInCoachThread = topic === `coach_${userId}`;
-      const groupCoachEnabled = groupId
-        ? (getDB().prepare('SELECT coach_enabled FROM groups WHERE id = ?').get(groupId) as any)?.coach_enabled
-        : 'none';
-      const groupCoachInvocation = groupId
-        ? resolveGroupCoachInvocation(mentions, groupCoachEnabled)
-        : { shouldReply: false as const };
-      const shouldCoachReplyInGroup = Boolean(groupId) && groupCoachInvocation.shouldReply;
-      if (shouldCoachReplyInCoachThread || shouldCoachReplyInGroup) {
-        this.broadcastTyping(topic, 'coach', true);
-        void (async () => {
-          try {
-            const prompt = shouldCoachReplyInGroup
-              ? `Group message (topic ${topic})\n${content}`
-              : content;
-            const coachOverride = shouldCoachReplyInGroup
-              ? groupCoachInvocation.coachOverride
-              : undefined;
-            const deliveredMediaUrls = this.mediaUrlsForClient(resolvedMediaUrls);
-            this.broadcastCoachStatus(topic, {
-              phase: 'retrieving_knowledge',
-              label: 'Retrieving knowledge base...',
-              active: true,
-            });
-            const aiResponse = await CoachService.chat(String(userId), prompt, {
-              mediaUrls: deliveredMediaUrls,
-              mediaIds,
-              platform: 'web',
-              coachOverride,
-              conversationScope: shouldCoachReplyInGroup ? 'group' : 'coach_dm',
-              allowWriteTools: shouldCoachReplyInGroup ? false : true,
-              onStatus: (status) => this.broadcastCoachStatus(topic, status),
-            });
-            await MessageService.sendMessage(0, topic, aiResponse, []);
-            const [coachMessage] = await MessageService.getMessages(topic, 1);
-            this.broadcastMessage(topic, coachMessage || {
-              id: `coach_${Date.now()}`,
-              topic,
-              from_user_id: 0,
-              content: aiResponse,
-              media_urls: [],
-              mentions: [],
-              created_at: new Date().toISOString(),
-            });
-            this.notifyInboxUpdated(participants.length > 0 ? participants : [userId]);
-          } catch (error) {
-            console.error('Coach async reply failed (ws):', error);
-          } finally {
-            this.broadcastCoachStatus(topic, {
-              phase: 'complete',
-              label: '',
-              active: false,
-            });
-            this.broadcastTyping(topic, 'coach', false);
-          }
-        })();
+      const coachReplyJob = buildCoachReplyJob({
+        userId,
+        topic,
+        content,
+        mentions,
+        mediaUrls: this.mediaUrlsForClient(resolvedMediaUrls),
+        mediaIds: resolvedAssetIds.length > 0 ? resolvedAssetIds : mediaIds,
+        participantUserIds: participants,
+        platform: 'websocket',
+      });
+      if (coachReplyJob) {
+        try {
+          await enqueueCoachReply(coachReplyJob);
+        } catch (error) {
+          logger.error('[ws] failed to enqueue coach reply', error);
+        }
       }
     }
   }
@@ -471,6 +471,12 @@ export class WSServer {
     }
   }
 
+  private publishEvent(event: RealtimeEvent) {
+    void publishRealtimeEvent(event).catch((error) => {
+      logger.error('[ws] realtime publish failed', error);
+    });
+  }
+
   private broadcastToTopic(topic: string, payload: unknown) {
     for (const client of this.clients.values()) {
       if (!client.authenticated) continue;
@@ -480,11 +486,11 @@ export class WSServer {
   }
 
   broadcastMessage(topic: string, message: unknown) {
-    this.broadcastToTopic(topic, { type: 'message_created', topic, message: this.normalizeOutgoingMessage(message) });
+    this.publishEvent({ type: 'message_created', topic, message });
   }
 
   broadcastTyping(topic: string, userId: string, isTyping: boolean) {
-    this.broadcastToTopic(topic, {
+    this.publishEvent({
       type: 'typing',
       topic,
       userId,
@@ -494,30 +500,48 @@ export class WSServer {
 
   broadcastCoachStatus(
     topic: string,
-    status: {
-      phase: string;
-      label: string;
-      active: boolean;
-      tool?: string;
-    },
+    status: RealtimeCoachStatus,
   ) {
-    this.broadcastToTopic(topic, {
+    this.publishEvent({
       type: 'coach_status',
       topic,
-      phase: String(status.phase || 'composing'),
-      label: String(status.label || ''),
-      active: Boolean(status.active),
-      tool: status.tool ? String(status.tool) : undefined,
+      status,
     });
   }
 
   notifyInboxUpdated(userIds: number[]) {
+    this.publishEvent({
+      type: 'inbox_updated',
+      userIds: Array.from(new Set(userIds)),
+    });
+  }
+
+  private deliverInboxUpdated(userIds: number[]) {
     const unique = new Set(userIds);
     for (const client of this.clients.values()) {
       if (!client.authenticated || client.userId === null) continue;
       if (!unique.has(client.userId)) continue;
       this.send(client.ws, { type: 'inbox_updated' });
     }
+  }
+
+  async close(): Promise<void> {
+    clearInterval(this.heartbeatTimer);
+    this.realtimeUnsubscribe?.();
+    this.realtimeUnsubscribe = null;
+    WSServer.instanceRef = WSServer.instanceRef === this ? null : WSServer.instanceRef;
+
+    for (const client of this.clients.values()) {
+      try {
+        client.ws.close(1001, 'Server shutting down');
+      } catch {
+        client.ws.terminate();
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      this.wss.close(() => resolve());
+    });
   }
 
   disconnectUserSession(userId: number, sessionId?: string) {

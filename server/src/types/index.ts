@@ -45,6 +45,9 @@ export interface ToolDefinition {
       type: string;
       description: string;
       enum?: string[];
+      itemType?: string;
+      itemEnum?: string[];
+      maxItems?: number;
       minLength?: number;
       maxLength?: number;
       minimum?: number;
@@ -168,14 +171,23 @@ export interface SkillMeta {
   disallowedTools?: string[];
 }
 
+export interface SkillToolPolicy {
+  allowedTools?: string[];
+  disallowedTools?: string[];
+}
+
 export interface SkillActivationSignal {
   skillName: string;
   systemPrompt: string;
-  toolPolicy?: {
-    allowedTools?: string[];
-    disallowedTools?: string[];
-  };
+  toolPolicy?: SkillToolPolicy;
   maxTurns?: number;
+}
+
+export interface LoadedSkill extends SkillMeta {
+  prompt: string;
+  toolPolicy: SkillToolPolicy;
+  maxTurns?: number;
+  filePath: string;
 }
 
 export interface DiscordConfig {

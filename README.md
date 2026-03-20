@@ -81,6 +81,11 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
 NEXT_PUBLIC_WS_URL=ws://localhost:8080
 ```
 
+For deployable examples, see:
+
+- `web/.env.development.example`
+- `web/.env.production.example`
+
 ## Production Notes
 
 - Backend Node requirement: `>=20 <23` (Node 20/22 are supported).

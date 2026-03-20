@@ -28,12 +28,15 @@ import {
   verifyMediaPathSignature,
 } from '../security/media-url.js';
 import { requireAuth, requireSameUserIdFromBody, requireSameUserIdFromParam } from '../security/auth-middleware.js';
-import { extractMentionHandles, resolveGroupCoachInvocation } from '../utils/coach-mention.js';
+import { extractMentionHandles } from '../utils/coach-mention.js';
 import { WSServer } from '../websocket/ws-server.js';
 import { MediaStore } from '../context/media-store.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
 import type { MediaAssetVisibility } from '../storage/storage-provider.js';
 import { logger } from '../utils/logger.js';
+import { buildCoachReplyJob } from '../jobs/coach-reply-routing.js';
+import { enqueueCoachReply } from '../jobs/coach-reply-worker.js';
+import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 
 const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -457,6 +460,14 @@ function tryBuildPublicOrigin(req: Request): string | null {
       }
     }
     return null;
+  }
+}
+
+async function publishRealtimeEventSafely(event: Parameters<typeof publishRealtimeEvent>[0], label: string): Promise<void> {
+  try {
+    await publishRealtimeEvent(event);
+  } catch (error) {
+    logger.error(`[api] realtime publish failed (${label})`, error);
   }
 }
 
@@ -1579,7 +1590,10 @@ app.post('/community/comment',
     content,
   );
   if (notifiedUsers.length > 0) {
-    WSServer.getInstance()?.notifyInboxUpdated(notifiedUsers);
+    await publishRealtimeEventSafely({
+      type: 'inbox_updated',
+      userIds: notifiedUsers,
+    }, 'community-comment-mentions');
   }
 
   res.json({ success: true, commentId });
@@ -1988,7 +2002,6 @@ app.post('/messages/send',
     }
 
     const participants = await MessageService.getTopicParticipants(topic);
-    const groupId = parseGroupId(topic);
 
     const mentions = extractMentionHandles(content);
     const messageId = await MessageService.sendMessage(fromUserId, topic, content, resolvedMediaUrls, mentions, toOptionalInt(req.body.replyTo));
@@ -2011,8 +2024,10 @@ app.post('/messages/send',
         }
       : null;
 
-    const ws = WSServer.getInstance();
-    ws?.broadcastMessage(topic, deliveredMessage || {
+    await publishRealtimeEventSafely({
+      type: 'message_created',
+      topic,
+      message: deliveredMessage || {
       id: messageId,
       topic,
       from_user_id: fromUserId,
@@ -2022,70 +2037,37 @@ app.post('/messages/send',
       reply_to: null,
       created_at: new Date().toISOString(),
       username: req.body.username || `User ${fromUserId}`,
-      avatar_url: null,
-      is_coach: false,
-    });
-    ws?.notifyInboxUpdated(participants.length > 0 ? participants : [fromUserId]);
+        avatar_url: null,
+        is_coach: false,
+      },
+    }, 'message-created');
+    await publishRealtimeEventSafely({
+      type: 'inbox_updated',
+      userIds: participants.length > 0 ? participants : [fromUserId],
+    }, 'inbox-updated');
     if (mentionTargets.length > 0) {
-      ws?.notifyInboxUpdated(mentionTargets);
+      await publishRealtimeEventSafely({
+        type: 'inbox_updated',
+        userIds: mentionTargets,
+      }, 'mention-inbox-updated');
     }
 
-    const shouldCoachReplyInCoachThread = topic === `coach_${fromUserId}`;
-    const groupCoachEnabled = groupId
-      ? (getDB().prepare('SELECT coach_enabled FROM groups WHERE id = ?').get(groupId) as any)?.coach_enabled
-      : 'none';
-    const groupCoachInvocation = groupId
-      ? resolveGroupCoachInvocation(mentions, groupCoachEnabled)
-      : { shouldReply: false as const };
-    const shouldCoachReplyInGroup = Boolean(groupId) && groupCoachInvocation.shouldReply;
-
-    if (shouldCoachReplyInCoachThread || shouldCoachReplyInGroup) {
-      ws?.broadcastTyping(topic, 'coach', true);
-      ws?.broadcastCoachStatus(topic, {
-        phase: 'retrieving_knowledge',
-        label: 'Retrieving knowledge base...',
-        active: true,
-      });
-
-      void (async () => {
-        try {
-          const prompt = shouldCoachReplyInGroup
-            ? `Group message (topic ${topic})\n${content}`
-            : content;
-          const coachOverride = shouldCoachReplyInGroup
-            ? groupCoachInvocation.coachOverride
-            : undefined;
-
-          const aiResponse = await CoachService.chat(String(fromUserId), prompt, {
-            mediaUrls: deliveredMediaUrls,
-            mediaIds,
-            platform: 'web',
-            coachOverride,
-            conversationScope: shouldCoachReplyInGroup ? 'group' : 'coach_dm',
-            allowWriteTools: shouldCoachReplyInGroup ? false : true,
-            onStatus: (status) => ws?.broadcastCoachStatus(topic, status),
-          });
-          await MessageService.sendMessage(0, topic, aiResponse, []);
-          const [coachMessage] = await MessageService.getMessages(topic, 1);
-          ws?.broadcastMessage(topic, coachMessage
-            ? {
-                ...coachMessage,
-                avatar_url: mediaUrlForClient(req, coachMessage.avatar_url),
-                media_urls: mediaUrlsForClient(req, Array.isArray(coachMessage.media_urls) ? coachMessage.media_urls : []),
-              }
-            : coachMessage);
-          ws?.notifyInboxUpdated(participants.length > 0 ? participants : [fromUserId]);
-        } catch (error) {
-          console.error('Coach async reply failed:', error);
-        } finally {
-          ws?.broadcastCoachStatus(topic, {
-            phase: 'complete',
-            label: '',
-            active: false,
-          });
-          ws?.broadcastTyping(topic, 'coach', false);
-        }
-      })();
+    const coachReplyJob = buildCoachReplyJob({
+      userId: fromUserId,
+      topic,
+      content,
+      mentions,
+      mediaUrls: deliveredMediaUrls,
+      mediaIds: resolvedAssetIds.length > 0 ? resolvedAssetIds : mediaIds,
+      participantUserIds: participants,
+      platform: 'web',
+    });
+    if (coachReplyJob) {
+      try {
+        await enqueueCoachReply(coachReplyJob);
+      } catch (error) {
+        logger.error('[api] failed to enqueue coach reply', error);
+      }
     }
 
     res.json({ success: true, messageId });

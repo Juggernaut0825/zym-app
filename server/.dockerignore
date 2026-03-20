@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+skills/z/data
+skills/z/scripts/__pycache__
+server.log
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

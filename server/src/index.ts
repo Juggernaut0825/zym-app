@@ -7,6 +7,9 @@ import { initDB } from './database/sqlite-db.js';
 import { knowledgeService } from './services/knowledge-service.js';
 import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
 import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
+import { initializeRealtimeEventBus, shutdownRealtimeEventBus } from './realtime/realtime-event-bus.js';
+import { shutdownCoachReplyWorker, startCoachReplyWorker } from './jobs/coach-reply-worker.js';
+import { logger } from './utils/logger.js';
 
 dotenv.config();
 
@@ -22,17 +25,45 @@ knowledgeService.init();
 const wsPort = parseInt(process.env.WEBSOCKET_PORT || '8080', 10);
 const apiPort = parseInt(process.env.API_PORT || '3001', 10);
 
-new WSServer(wsPort);
-startAPI(apiPort);
-
 const mediaCleanup = new MediaCleanupScheduler();
-mediaCleanup.start();
 const sessionCleanup = new SessionCleanupScheduler();
-sessionCleanup.start();
+let wsServer: WSServer | null = null;
+let shuttingDown = false;
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    mediaCleanup.stop();
-    sessionCleanup.stop();
-  });
+async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[bootstrap] received ${signal}, shutting down`);
+
+  mediaCleanup.stop();
+  sessionCleanup.stop();
+  await Promise.allSettled([
+    wsServer?.close() ?? Promise.resolve(),
+    shutdownCoachReplyWorker(),
+    shutdownRealtimeEventBus(),
+  ]);
+
+  process.exit(0);
 }
+
+async function main() {
+  await initializeRealtimeEventBus();
+  await startCoachReplyWorker();
+
+  wsServer = new WSServer(wsPort);
+  startAPI(apiPort);
+
+  mediaCleanup.start();
+  sessionCleanup.start();
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      void shutdown(signal);
+    });
+  }
+}
+
+void main().catch((error) => {
+  logger.error('[bootstrap] startup failed', error);
+  process.exit(1);
+});

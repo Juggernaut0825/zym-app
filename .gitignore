@@ -26,6 +26,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 .temp/
+*.tsbuildinfo
 
 # Node modules (if using Node.js projects)
 node_modules/
@@ -53,6 +54,7 @@ target/
 **/.env.*
 !.env.example
 !**/.env.example
+!**/.env.*.example
 
 # Build / runtime outputs
 dist/
@@ -70,6 +72,7 @@ coverage/
 server/data/
 server/skills/z/data/
 server/skills/z/scripts/__pycache__/
+server/src/knowledge/local-vector-index.json
 web/.next/
 
 # Dependencies
