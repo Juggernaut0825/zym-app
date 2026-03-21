@@ -1,12 +1,227 @@
 import Database from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
+import { Worker } from 'worker_threads';
 
-let db: Database.Database;
+type RunResult = {
+  changes: number;
+  lastInsertRowid: number | string | null;
+};
 
-export function initDB() {
-  db = new Database(path.join(process.cwd(), 'data', 'zym.db'));
+interface DatabaseStatement {
+  get(...params: unknown[]): Record<string, unknown> | undefined;
+  all(...params: unknown[]): Array<Record<string, unknown>>;
+  run(...params: unknown[]): RunResult;
+}
 
-  db.exec(`
+interface RuntimeDatabase {
+  prepare(sql: string): DatabaseStatement;
+  exec(sql: string): void;
+}
+
+type RuntimeProvider = 'sqlite' | 'postgres';
+
+const POSTGRES_RESULT_BUFFER_BYTES = 16 * 1024 * 1024;
+
+let db: RuntimeDatabase | null = null;
+let postgresBridge: PostgresBridge | null = null;
+
+function resolveRuntimeProvider(): RuntimeProvider {
+  const configured = String(process.env.DATABASE_PROVIDER || '').trim().toLowerCase();
+  if (configured === 'postgres') {
+    return 'postgres';
+  }
+  return 'sqlite';
+}
+
+function getSqliteDatabasePath(): string {
+  const configured = String(process.env.SQLITE_DATABASE_PATH || '').trim();
+  if (configured) {
+    return path.isAbsolute(configured)
+      ? configured
+      : path.join(process.cwd(), configured);
+  }
+  return path.join(process.cwd(), 'data', 'zym.db');
+}
+
+function getPostgresDatabaseUrl(): string {
+  return String(process.env.DATABASE_URL || '').trim();
+}
+
+function getPostgresStatementTimeoutMs(): number {
+  const parsed = Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15_000);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000;
+}
+
+function runtimeWorkerUrl(): URL {
+  const isTsRuntime = import.meta.url.endsWith('.ts');
+  return new URL(`./postgres-sync-worker.${isTsRuntime ? 'ts' : 'js'}`, import.meta.url);
+}
+
+function runtimeWorkerExecArgv(): string[] {
+  return import.meta.url.endsWith('.ts') ? ['--import', 'tsx'] : [];
+}
+
+class SqliteStatementAdapter implements DatabaseStatement {
+  constructor(private readonly statement: Database.Statement) {}
+
+  get(...params: unknown[]): Record<string, unknown> | undefined {
+    return this.statement.get(...params) as Record<string, unknown> | undefined;
+  }
+
+  all(...params: unknown[]): Array<Record<string, unknown>> {
+    return this.statement.all(...params) as Array<Record<string, unknown>>;
+  }
+
+  run(...params: unknown[]): RunResult {
+    const result = this.statement.run(...params);
+    return {
+      changes: Number(result.changes || 0),
+      lastInsertRowid: result.lastInsertRowid === undefined || result.lastInsertRowid === null
+        ? null
+        : typeof result.lastInsertRowid === 'bigint'
+          ? Number(result.lastInsertRowid)
+          : result.lastInsertRowid,
+    };
+  }
+}
+
+class SqliteDatabaseAdapter implements RuntimeDatabase {
+  constructor(private readonly sqlite: Database.Database) {}
+
+  prepare(sql: string): DatabaseStatement {
+    return new SqliteStatementAdapter(this.sqlite.prepare(sql));
+  }
+
+  exec(sql: string): void {
+    this.sqlite.exec(sql);
+  }
+}
+
+interface PostgresBridgeRequest {
+  type: 'init' | 'query' | 'close';
+  header: SharedArrayBuffer;
+  payload: SharedArrayBuffer;
+  sql?: string;
+  params?: unknown[];
+  mode?: 'get' | 'all' | 'run' | 'exec';
+  databaseUrl?: string;
+  schemaSql?: string;
+  statementTimeoutMs?: number;
+}
+
+class PostgresBridge {
+  private readonly worker: Worker;
+  private readonly encoder = new TextEncoder();
+  private readonly decoder = new TextDecoder();
+
+  constructor() {
+    this.worker = new Worker(runtimeWorkerUrl(), {
+      execArgv: runtimeWorkerExecArgv(),
+    });
+  }
+
+  initialize(schemaSql: string): void {
+    this.call({
+      type: 'init',
+      databaseUrl: getPostgresDatabaseUrl(),
+      schemaSql,
+      statementTimeoutMs: getPostgresStatementTimeoutMs(),
+    });
+  }
+
+  query(
+    sql: string,
+    params: unknown[],
+    mode: 'get' | 'all' | 'run',
+  ): Record<string, unknown> | Array<Record<string, unknown>> | RunResult | undefined {
+    return this.call({
+      type: 'query',
+      sql,
+      params,
+      mode,
+      databaseUrl: getPostgresDatabaseUrl(),
+      statementTimeoutMs: getPostgresStatementTimeoutMs(),
+    });
+  }
+
+  close(): void {
+    try {
+      this.call({
+        type: 'close',
+        databaseUrl: getPostgresDatabaseUrl(),
+        statementTimeoutMs: getPostgresStatementTimeoutMs(),
+      });
+    } finally {
+      void this.worker.terminate();
+    }
+  }
+
+  private call(request: Omit<PostgresBridgeRequest, 'header' | 'payload'>): any {
+    const header = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+    const payload = new SharedArrayBuffer(POSTGRES_RESULT_BUFFER_BYTES);
+    const headerView = new Int32Array(header);
+    const payloadView = new Uint8Array(payload);
+
+    this.worker.postMessage({
+      ...request,
+      header,
+      payload,
+    } satisfies PostgresBridgeRequest);
+
+    Atomics.wait(headerView, 0, 0);
+    const status = Atomics.load(headerView, 0);
+    const bytesLength = Atomics.load(headerView, 1);
+    const text = this.decoder.decode(payloadView.subarray(0, bytesLength));
+    const data = text ? JSON.parse(text) : null;
+
+    if (status === 2) {
+      throw new Error(String(data?.message || 'Unknown Postgres worker error'));
+    }
+
+    return data ?? undefined;
+  }
+}
+
+class PostgresStatementAdapter implements DatabaseStatement {
+  constructor(
+    private readonly bridge: PostgresBridge,
+    private readonly sql: string,
+  ) {}
+
+  get(...params: unknown[]): Record<string, unknown> | undefined {
+    const row = this.bridge.query(this.sql, params, 'get');
+    return row ? row as Record<string, unknown> : undefined;
+  }
+
+  all(...params: unknown[]): Array<Record<string, unknown>> {
+    const rows = this.bridge.query(this.sql, params, 'all');
+    return Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];
+  }
+
+  run(...params: unknown[]): RunResult {
+    const result = this.bridge.query(this.sql, params, 'run');
+    if (!result || Array.isArray(result)) {
+      return { changes: 0, lastInsertRowid: null };
+    }
+    return result as RunResult;
+  }
+}
+
+class PostgresDatabaseAdapter implements RuntimeDatabase {
+  constructor(private readonly bridge: PostgresBridge) {}
+
+  prepare(sql: string): DatabaseStatement {
+    return new PostgresStatementAdapter(this.bridge, sql);
+  }
+
+  exec(sql: string): void {
+    this.bridge.query(sql, [], 'run');
+  }
+}
+
+function initializeSqliteSchema(sqlite: Database.Database): void {
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
@@ -213,55 +428,59 @@ export function initDB() {
     );
   `);
 
-  const userColumns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
-  const sessionColumns = db.prepare('PRAGMA table_info(user_sessions)').all() as Array<{ name: string }>;
-  const postColumns = db.prepare('PRAGMA table_info(posts)').all() as Array<{ name: string }>;
+  const userColumns = sqlite.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  const sessionColumns = sqlite.prepare('PRAGMA table_info(user_sessions)').all() as Array<{ name: string }>;
+  const postColumns = sqlite.prepare('PRAGMA table_info(posts)').all() as Array<{ name: string }>;
   if (!userColumns.some((column) => column.name === 'connect_code')) {
-    db.exec('ALTER TABLE users ADD COLUMN connect_code TEXT');
+    sqlite.exec('ALTER TABLE users ADD COLUMN connect_code TEXT');
   }
   if (!userColumns.some((column) => column.name === 'timezone')) {
-    db.exec('ALTER TABLE users ADD COLUMN timezone TEXT');
+    sqlite.exec('ALTER TABLE users ADD COLUMN timezone TEXT');
   }
   if (!sessionColumns.some((column) => column.name === 'ip_address')) {
-    db.exec('ALTER TABLE user_sessions ADD COLUMN ip_address TEXT');
+    sqlite.exec('ALTER TABLE user_sessions ADD COLUMN ip_address TEXT');
   }
   if (!sessionColumns.some((column) => column.name === 'refresh_token_hash')) {
-    db.exec('ALTER TABLE user_sessions ADD COLUMN refresh_token_hash TEXT');
+    sqlite.exec('ALTER TABLE user_sessions ADD COLUMN refresh_token_hash TEXT');
   }
   if (!postColumns.some((column) => column.name === 'visibility')) {
-    db.exec("ALTER TABLE posts ADD COLUMN visibility TEXT DEFAULT 'friends'");
+    sqlite.exec("ALTER TABLE posts ADD COLUMN visibility TEXT DEFAULT 'friends'");
   }
 
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_mentions_user_read ON mention_notifications(user_id, is_read, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_status ON knowledge_ingestion_requests(status, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_requester ON knowledge_ingestion_requests(requester_user_id, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_audit_request ON knowledge_ingestion_audit(request_id, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_owner_created ON media_assets(owner_user_id, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_status_created ON media_assets(status, created_at DESC)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_object_key ON media_assets(object_key)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_entity ON media_asset_attachments(entity_type, entity_id, entity_key)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_owner ON media_asset_attachments(owner_user_id, created_at DESC)');
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_mentions_user_read ON mention_notifications(user_id, is_read, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_status ON knowledge_ingestion_requests(status, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_requester ON knowledge_ingestion_requests(requester_user_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_audit_request ON knowledge_ingestion_audit(request_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_owner_created ON media_assets(owner_user_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_status_created ON media_assets(status, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_media_assets_object_key ON media_assets(object_key)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_entity ON media_asset_attachments(entity_type, entity_id, entity_key)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_media_asset_attachments_owner ON media_asset_attachments(owner_user_id, created_at DESC)');
+}
 
-  const missingCodes = db.prepare("SELECT id FROM users WHERE connect_code IS NULL OR connect_code = ''").all() as Array<{ id: number }>;
-  const findByCode = db.prepare('SELECT id FROM users WHERE connect_code = ?');
-  const updateCode = db.prepare('UPDATE users SET connect_code = ? WHERE id = ?');
+function ensureConnectCodes(runtimeDb: RuntimeDatabase): void {
+  const missingCodes = runtimeDb
+    .prepare("SELECT id FROM users WHERE connect_code IS NULL OR connect_code = ''")
+    .all() as Array<{ id: number }>;
+  const findByCode = runtimeDb.prepare('SELECT id FROM users WHERE connect_code = ?');
+  const updateCode = runtimeDb.prepare('UPDATE users SET connect_code = ? WHERE id = ?');
 
   for (const row of missingCodes) {
     for (let attempts = 0; attempts < 40; attempts += 1) {
       const candidate = String(Math.floor(100000 + Math.random() * 900000));
-      const exists = findByCode.get(candidate) as { id: number } | undefined;
-      if (!exists) {
+      const exists = findByCode.get(candidate) as { id?: number } | undefined;
+      if (!exists?.id) {
         updateCode.run(candidate, row.id);
         break;
       }
@@ -269,6 +488,48 @@ export function initDB() {
   }
 }
 
-export function getDB() {
+export async function initDB(): Promise<void> {
+  if (db) {
+    return;
+  }
+
+  const provider = resolveRuntimeProvider();
+  if (provider === 'postgres') {
+    const databaseUrl = getPostgresDatabaseUrl();
+    if (!databaseUrl) {
+      throw new Error('DATABASE_PROVIDER=postgres requires DATABASE_URL');
+    }
+
+    const schemaPath = path.join(process.cwd(), 'src', 'database', 'schema.sql');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    postgresBridge = new PostgresBridge();
+    postgresBridge.initialize(schemaSql);
+    db = new PostgresDatabaseAdapter(postgresBridge);
+    ensureConnectCodes(db);
+    return;
+  }
+
+  const sqlite = new Database(getSqliteDatabasePath());
+  initializeSqliteSchema(sqlite);
+  db = new SqliteDatabaseAdapter(sqlite);
+  ensureConnectCodes(db);
+}
+
+export function getDB(): RuntimeDatabase {
+  if (!db) {
+    throw new Error('Database has not been initialized. Call initDB() first.');
+  }
   return db;
+}
+
+export function getDatabaseProvider(): RuntimeProvider {
+  return resolveRuntimeProvider();
+}
+
+export function closeDB(): void {
+  if (postgresBridge) {
+    postgresBridge.close();
+    postgresBridge = null;
+  }
+  db = null;
 }

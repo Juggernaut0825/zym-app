@@ -29,6 +29,7 @@ RUN apt-get update \
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY --from=build /app/dist ./dist
+COPY src/database/schema.sql ./src/database/schema.sql
 COPY src/knowledge ./src/knowledge
 COPY src/agent ./src/agent
 COPY src/coach ./src/coach
@@ -36,4 +37,4 @@ COPY skills ./skills
 
 EXPOSE 3001 8080
 
-CMD ["npm", "run", "start"]
+CMD ["node", "dist/index.js"]

@@ -69,7 +69,7 @@ export class ModerationService {
       WHERE reporter_user_id = ?
       ORDER BY datetime(created_at) DESC
       LIMIT ?
-    `).all(userId, limit) as AbuseReport[];
+    `).all(userId, limit) as unknown as AbuseReport[];
   }
 
   private static targetExists(targetType: AbuseTargetType, targetId: number): boolean {

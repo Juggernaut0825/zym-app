@@ -10,6 +10,11 @@ import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js
 import { initializeRealtimeEventBus, shutdownRealtimeEventBus } from './realtime/realtime-event-bus.js';
 import { shutdownCoachReplyWorker, startCoachReplyWorker } from './jobs/coach-reply-worker.js';
 import { logger } from './utils/logger.js';
+import {
+  isApiServerEnabled,
+  isBackgroundCleanupEnabled,
+  isWebSocketServerEnabled,
+} from './config/runtime-flags.js';
 
 dotenv.config();
 
@@ -19,7 +24,6 @@ const uploadDir = path.join(dataDir, 'uploads');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-initDB();
 knowledgeService.init();
 
 const wsPort = parseInt(process.env.WEBSOCKET_PORT || '8080', 10);
@@ -47,14 +51,37 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
 }
 
 async function main() {
+  await initDB();
   await initializeRealtimeEventBus();
   await startCoachReplyWorker();
 
-  wsServer = new WSServer(wsPort);
-  startAPI(apiPort);
+  const apiEnabled = isApiServerEnabled();
+  const wsEnabled = isWebSocketServerEnabled();
+  const cleanupEnabled = isBackgroundCleanupEnabled();
 
-  mediaCleanup.start();
-  sessionCleanup.start();
+  if (!apiEnabled && !wsEnabled && !cleanupEnabled) {
+    throw new Error('At least one of ENABLE_API_SERVER, ENABLE_WEBSOCKET_SERVER, or ENABLE_BACKGROUND_CLEANUP must be enabled');
+  }
+
+  if (wsEnabled) {
+    wsServer = new WSServer(wsPort);
+  } else {
+    logger.info('[bootstrap] websocket server disabled by ENABLE_WEBSOCKET_SERVER');
+  }
+
+  if (apiEnabled) {
+    startAPI(apiPort);
+  } else {
+    logger.info('[bootstrap] API server disabled by ENABLE_API_SERVER');
+  }
+
+  if (cleanupEnabled) {
+    mediaCleanup.start();
+    sessionCleanup.start();
+    logger.info('[bootstrap] background cleanup schedulers enabled');
+  } else {
+    logger.info('[bootstrap] background cleanup schedulers disabled by ENABLE_BACKGROUND_CLEANUP');
+  }
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {

@@ -2,8 +2,6 @@ export interface PostgresFoundationTable {
   name: string;
   orderBy: string;
   identityColumn?: string;
-  jsonColumns?: string[];
-  booleanColumns?: string[];
 }
 
 export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
@@ -11,7 +9,6 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     name: 'users',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    booleanColumns: ['apple_health_enabled'],
   },
   {
     name: 'friendships',
@@ -31,13 +28,11 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     name: 'messages',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    jsonColumns: ['media_urls', 'mentions'],
   },
   {
     name: 'posts',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    jsonColumns: ['media_urls', 'metadata'],
   },
   {
     name: 'post_reactions',
@@ -67,7 +62,6 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     name: 'mention_notifications',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    booleanColumns: ['is_read'],
   },
   {
     name: 'abuse_reports',
@@ -78,24 +72,20 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     name: 'security_events',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    jsonColumns: ['metadata'],
   },
   {
     name: 'knowledge_ingestion_requests',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    jsonColumns: ['risk_flags'],
   },
   {
     name: 'knowledge_ingestion_audit',
     orderBy: 'id ASC',
     identityColumn: 'id',
-    jsonColumns: ['metadata'],
   },
   {
     name: 'media_assets',
     orderBy: 'created_at ASC, id ASC',
-    jsonColumns: ['metadata'],
   },
   {
     name: 'media_asset_attachments',

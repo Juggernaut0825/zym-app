@@ -17,6 +17,7 @@
     "prestart": "npm run rebuild:native",
     "start": "node dist/index.js",
     "start:worker": "node dist/worker.js",
+    "start:scheduler": "node dist/scheduler.js",
     "rebuild:native": "npm rebuild better-sqlite3",
     "postinstall": "npm run rebuild:native"
   },

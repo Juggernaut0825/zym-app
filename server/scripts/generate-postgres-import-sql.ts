@@ -47,32 +47,6 @@ function quoteLiteral(value: string): string {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function normalizeJsonLiteral(value: unknown): string {
-  if (value === null || value === undefined || value === '') {
-    return 'NULL';
-  }
-
-  try {
-    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-    return `${quoteLiteral(JSON.stringify(parsed))}::jsonb`;
-  } catch {
-    return `${quoteLiteral(JSON.stringify(String(value)))}::jsonb`;
-  }
-}
-
-function normalizeBooleanLiteral(value: unknown): string {
-  if (value === null || value === undefined || value === '') {
-    return 'NULL';
-  }
-  if (value === true || value === 1 || value === '1' || value === 'true') {
-    return 'TRUE';
-  }
-  if (value === false || value === 0 || value === '0' || value === 'false') {
-    return 'FALSE';
-  }
-  return 'NULL';
-}
-
 function normalizeScalarLiteral(value: unknown): string {
   if (value === null || value === undefined) {
     return 'NULL';
@@ -88,13 +62,7 @@ function normalizeScalarLiteral(value: unknown): string {
 }
 
 function formatValue(tableName: string, columnName: string, value: unknown): string {
-  const config = getFoundationTable(tableName);
-  if (config.jsonColumns?.includes(columnName)) {
-    return normalizeJsonLiteral(value);
-  }
-  if (config.booleanColumns?.includes(columnName)) {
-    return normalizeBooleanLiteral(value);
-  }
+  getFoundationTable(tableName);
   return normalizeScalarLiteral(value);
 }
 
