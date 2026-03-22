@@ -91,6 +91,17 @@ function resolvePgSslMode(databaseUrl: string): string {
   }
 }
 
+function normalizePostgresConnectionString(databaseUrl: string): string {
+  try {
+    const parsed = new URL(databaseUrl);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('uselibpqcompat');
+    return parsed.toString();
+  } catch {
+    return databaseUrl;
+  }
+}
+
 function resolvePgSslConfig(databaseUrl: string): false | { rejectUnauthorized: boolean } | undefined {
   const mode = resolvePgSslMode(databaseUrl);
   if (!mode) {
@@ -221,7 +232,7 @@ async function ensurePool(request: WorkerRequest): Promise<Pool> {
 
   const statementTimeoutMs = Number(request.statementTimeoutMs || 15_000);
   pool = new Pool({
-    connectionString: databaseUrl,
+    connectionString: normalizePostgresConnectionString(databaseUrl),
     max: getPostgresPoolMax(),
     statement_timeout: Number.isFinite(statementTimeoutMs) ? statementTimeoutMs : 15_000,
     ssl: resolvePgSslConfig(databaseUrl),
