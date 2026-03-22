@@ -7,12 +7,13 @@ import { SessionStore } from '../context/session-store.js';
 import { MediaStore } from '../context/media-store.js';
 import { AIService } from '../utils/ai-service.js';
 import { ToolManager } from '../tools/tool-manager.js';
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 import { Message, MessageContent, SessionState, ToolExecutionContext } from '../types/index.js';
 import { knowledgeService } from './knowledge-service.js';
 import { SecurityEventService } from './security-event-service.js';
 import { logger } from '../utils/logger.js';
 import { MediaAssetService } from './media-asset-service.js';
+import { resolveUploadsDir } from '../config/app-paths.js';
 
 function buildGuardrailPrompt() {
   return `[SAFETY GUARDRAILS]
@@ -229,7 +230,7 @@ function buildSessionPrompt(session: SessionState): string {
 const sessionStore = new SessionStore();
 const mediaStore = new MediaStore();
 const mediaAssetService = MediaAssetService.createFromEnvironment({
-  uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+  uploadsDir: resolveUploadsDir(),
 });
 const MAX_MEDIA_IDS_IN_PROMPT = 6;
 const MAX_MEDIA_URLS_IN_PROMPT = 3;

@@ -1,7 +1,5 @@
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-import { initDB } from './database/sqlite-db.js';
+import { initDB } from './database/runtime-db.js';
 import { knowledgeService } from './services/knowledge-service.js';
 import { initializeRealtimeEventBus, shutdownRealtimeEventBus } from './realtime/realtime-event-bus.js';
 import { shutdownCoachReplyWorker, startCoachReplyWorker } from './jobs/coach-reply-worker.js';
@@ -9,14 +7,12 @@ import { logger } from './utils/logger.js';
 import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
 import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
 import { isBackgroundCleanupEnabled } from './config/runtime-flags.js';
+import { ensureAppDataDirs } from './config/app-paths.js';
+import { shutdownRateLimiter } from './security/rate-limiter.js';
 
 dotenv.config();
 
-const dataDir = path.join(process.cwd(), 'data');
-const uploadDir = path.join(dataDir, 'uploads');
-
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+ensureAppDataDirs();
 
 knowledgeService.init();
 
@@ -32,6 +28,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
   await Promise.allSettled([
     shutdownCoachReplyWorker(),
     shutdownRealtimeEventBus(),
+    shutdownRateLimiter(),
   ]);
   mediaCleanup.stop();
   sessionCleanup.stop();

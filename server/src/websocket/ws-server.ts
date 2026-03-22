@@ -1,5 +1,5 @@
+import { createServer, type IncomingMessage, type Server as HTTPServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import path from 'path';
 import { AuthService } from '../services/auth-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
 import { MessageService } from '../services/message-service.js';
@@ -15,6 +15,8 @@ import { buildCoachReplyJob } from '../jobs/coach-reply-routing.js';
 import { enqueueCoachReply } from '../jobs/coach-reply-worker.js';
 import { publishRealtimeEvent, subscribeToRealtimeEvents } from '../realtime/realtime-event-bus.js';
 import type { RealtimeEvent, RealtimeCoachStatus } from '../realtime/realtime-events.js';
+import { resolveUploadsDir } from '../config/app-paths.js';
+import { getRuntimeHealthReport } from '../health/runtime-health.js';
 
 const ALLOWED_MEDIA_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -52,6 +54,7 @@ export class WSServer {
   }
 
   private wss: WebSocketServer;
+  private httpServer: HTTPServer;
   private clients = new Map<WebSocket, Client>();
   private heartbeatTimer: NodeJS.Timeout;
   private realtimeUnsubscribe: (() => void) | null = null;
@@ -61,16 +64,53 @@ export class WSServer {
   private readonly sessionValidationIntervalMs = 15_000;
   private readonly publicMediaOrigin: string | null = this.resolvePublicMediaOrigin();
   private readonly mediaAssetService = MediaAssetService.createFromEnvironment({
-    uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+    uploadsDir: resolveUploadsDir(),
   });
 
   constructor(port: number) {
-    this.wss = new WebSocketServer({ port, maxPayload: 128 * 1024 });
+    this.httpServer = createServer((req, res) => {
+      void this.handleHttpRequest(req, res);
+    });
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
+    this.httpServer.on('upgrade', (request, socket, head) => {
+      this.handleUpgrade(request, socket, head);
+    });
     this.wss.on('connection', this.handleConnection.bind(this));
+    this.httpServer.listen(port, () => {
+      console.log(`WebSocket server running on port ${port}`);
+    });
     this.heartbeatTimer = setInterval(() => this.heartbeat(), 30_000);
     WSServer.instanceRef = this;
     void this.attachRealtimeSubscription();
-    console.log(`WebSocket server running on port ${port}`);
+  }
+
+  private async handleHttpRequest(req: IncomingMessage, res: any): Promise<void> {
+    const method = String(req.method || 'GET').toUpperCase();
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+    if (method === 'GET' && url.pathname === '/health') {
+      const report = await getRuntimeHealthReport();
+      const body = JSON.stringify(report);
+      res.statusCode = report.ok ? 200 : 503;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Length', Buffer.byteLength(body));
+      res.end(body);
+      return;
+    }
+
+    res.statusCode = 426;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({
+      ok: false,
+      error: 'Upgrade Required',
+      hint: 'Connect with WebSocket or use GET /health for health checks.',
+    }));
+  }
+
+  private handleUpgrade(request: IncomingMessage, socket: any, head: Buffer) {
+    this.wss.handleUpgrade(request, socket, head, (ws) => {
+      this.wss.emit('connection', ws, request);
+    });
   }
 
   private resolvePublicMediaOrigin(): string | null {
@@ -329,7 +369,7 @@ export class WSServer {
       return;
     }
 
-    if (msg.type === 'send_message' && msg.topic) {
+    if ((msg.type === 'send_message' || msg.type === 'message') && msg.topic) {
       const topic = String(msg.topic);
       const userId = client.userId;
       if (userId === null) {
@@ -540,7 +580,9 @@ export class WSServer {
     }
 
     await new Promise<void>((resolve) => {
-      this.wss.close(() => resolve());
+      this.wss.close(() => {
+        this.httpServer.close(() => resolve());
+      });
     });
   }
 

@@ -102,10 +102,21 @@ def resolve_media(media_id: str) -> Dict[str, Any]:
 
 
 def resolve_stored_path(stored_path: str) -> Path:
-    candidate = Path(stored_path)
-    resolved = candidate if candidate.is_absolute() else (PROJECT_DIR / candidate)
-    resolved = resolved.resolve()
     media_root = (get_data_dir() / "media").resolve()
+
+    candidate = Path(stored_path)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        parts = [part for part in str(stored_path).replace("\\", "/").split("/") if part and part != "."]
+        if ".." in parts:
+            raise PermissionError("media path is outside allowed user media directory")
+        user_id = get_user_id()
+        if len(parts) >= 2 and parts[0] == "data" and parts[1] == user_id:
+            parts = parts[2:]
+        elif parts and parts[0] == user_id:
+            parts = parts[1:]
+        resolved = (get_data_dir() / Path(*parts)).resolve()
 
     if resolved != media_root and media_root not in resolved.parents:
         raise PermissionError("media path is outside allowed user media directory")

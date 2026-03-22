@@ -90,7 +90,9 @@ DerivedData/
 cats-company/
 
 # Local design/docs/reference assets not published
-docs/
+docs/*
+!docs/architecture.md
+!docs/aws-deployment.md
 stitch/
 server/src/knowledge/papers/
 

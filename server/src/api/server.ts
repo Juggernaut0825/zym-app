@@ -11,7 +11,7 @@ import { MediaService } from '../services/media-service.js';
 import { MessageService, buildP2PTopic } from '../services/message-service.js';
 import { FriendService } from '../services/friend-service.js';
 import { GroupService } from '../services/group-service.js';
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 import { FitnessSkills } from '../services/fitness-skills.js';
 import { CoachService } from '../services/coach-service.js';
 import { ModerationService } from '../services/moderation-service.js';
@@ -37,11 +37,11 @@ import { logger } from '../utils/logger.js';
 import { buildCoachReplyJob } from '../jobs/coach-reply-routing.js';
 import { enqueueCoachReply } from '../jobs/coach-reply-worker.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
+import { ensureAppDataDirs, resolveUploadsDir } from '../config/app-paths.js';
+import { getRuntimeHealthReport } from '../health/runtime-health.js';
 
-const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+ensureAppDataDirs();
+const uploadsDir = resolveUploadsDir();
 
 const ALLOWED_UPLOAD_MIME = new Set([
   'image/jpeg',
@@ -949,8 +949,20 @@ function isGroupOwner(groupId: number, userId: number): boolean {
   return Boolean(row);
 }
 
-app.get('/health', (_, res) => {
-  res.json({ ok: true, service: 'zym-server', time: new Date().toISOString() });
+app.get('/health', (_req, res) => {
+  void getRuntimeHealthReport()
+    .then((report) => {
+      const statusCode = report.ok ? 200 : 503;
+      res.status(statusCode).json(report);
+    })
+    .catch((error) => {
+      res.status(503).json({
+        ok: false,
+        service: 'zym-server',
+        time: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 });
 
 app.get('/', (_, res) => {

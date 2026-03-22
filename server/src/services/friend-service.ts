@@ -1,4 +1,4 @@
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 
 export class FriendService {
   static async addFriend(userId: string, friendId: string) {

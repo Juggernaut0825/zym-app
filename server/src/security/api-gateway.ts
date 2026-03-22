@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { getRateLimiter } from './rate-limiter.js';
 
 type PrimitiveType = 'string' | 'number' | 'boolean' | 'array' | 'object';
 
@@ -30,10 +31,6 @@ function matchesType(value: unknown, type: PrimitiveType): boolean {
 }
 
 export class APIGateway {
-  private static rateLimits = new Map<string, number[]>();
-  private static cleanupEvery = 500;
-  private static requestCount = 0;
-
   private static buildRateLimitKey(req: Request, scope: string): string {
     const authUserId = Number((req as Request & { authUserId?: number }).authUserId || 0);
     if (Number.isInteger(authUserId) && authUserId > 0) {
@@ -51,36 +48,30 @@ export class APIGateway {
   static rateLimit(maxRequests: number, windowMs: number, scope = 'global') {
     return (req: Request, res: Response, next: NextFunction) => {
       const key = this.buildRateLimitKey(req, scope);
-      const now = Date.now();
-      const requests = this.rateLimits.get(key) || [];
-      const recentRequests = requests.filter(t => now - t < windowMs);
+      void getRateLimiter()
+        .then((limiter) => limiter.consume(key, maxRequests, windowMs))
+        .then((decision) => {
+          res.setHeader('X-RateLimit-Limit', String(maxRequests));
+          res.setHeader('X-RateLimit-Remaining', String(decision.remaining));
+          res.setHeader('X-RateLimit-Provider', decision.provider);
+          res.setHeader('X-RateLimit-Reset', new Date(Date.now() + decision.retryAfterSeconds * 1000).toISOString());
 
-      this.requestCount += 1;
-      if (this.requestCount % this.cleanupEvery === 0 || this.rateLimits.size > 20_000) {
-        this.cleanupRateLimitBuckets(now);
-      }
-      
-      if (recentRequests.length >= maxRequests) {
-        return res.status(429).json({ error: 'Too many requests', scope });
-      }
-      
-      recentRequests.push(now);
-      this.rateLimits.set(key, recentRequests);
-      next();
+          if (!decision.allowed) {
+            res.setHeader('Retry-After', String(decision.retryAfterSeconds));
+            res.status(429).json({
+              error: 'Too many requests',
+              scope,
+              retryAfterSeconds: decision.retryAfterSeconds,
+            });
+            return;
+          }
+
+          next();
+        })
+        .catch((error) => {
+          next(error);
+        });
     };
-  }
-
-  private static cleanupRateLimitBuckets(nowMs: number): void {
-    // Keep a coarse 1-hour horizon to avoid unbounded key growth.
-    const horizonMs = 60 * 60 * 1000;
-    for (const [key, timestamps] of this.rateLimits.entries()) {
-      const recent = timestamps.filter((timestamp) => nowMs - timestamp < horizonMs);
-      if (recent.length === 0) {
-        this.rateLimits.delete(key);
-      } else {
-        this.rateLimits.set(key, recent);
-      }
-    }
   }
 
   static validateSchema(schema: SchemaDefinition) {

@@ -1,4 +1,4 @@
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 
 function parseMediaUrls(mediaUrls: unknown): string[] {
   if (typeof mediaUrls !== 'string' || !mediaUrls) return [];

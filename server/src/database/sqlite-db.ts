@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { Worker } from 'worker_threads';
+import { resolveAppDataRoot } from '../config/app-paths.js';
 
 type RunResult = {
   changes: number;
@@ -41,7 +42,7 @@ function getSqliteDatabasePath(): string {
       ? configured
       : path.join(process.cwd(), configured);
   }
-  return path.join(process.cwd(), 'data', 'zym.db');
+  return path.join(resolveAppDataRoot(), 'zym.db');
 }
 
 function getPostgresDatabaseUrl(): string {

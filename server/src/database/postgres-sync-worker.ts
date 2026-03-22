@@ -27,6 +27,7 @@ interface RunResultPayload {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const RESULT_BUFFER_BYTES = 16 * 1024 * 1024;
+const SCHEMA_INIT_LOCK_ID = 2_041_022_001;
 const RETURNING_ID_TABLES = new Set([
   'users',
   'friendships',
@@ -72,6 +73,11 @@ function writeResponse(request: WorkerRequest, payload: unknown, isError = false
   Atomics.store(header, 1, Math.min(bytes.length, buffer.byteLength));
   Atomics.store(header, 0, isError ? 2 : 1);
   Atomics.notify(header, 0, 1);
+}
+
+function getPostgresPoolMax(): number {
+  const parsed = Number(process.env.DB_POOL_MAX || 20);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 20;
 }
 
 function normalizeRowValue(value: unknown): unknown {
@@ -182,7 +188,7 @@ async function ensurePool(request: WorkerRequest): Promise<Pool> {
   const statementTimeoutMs = Number(request.statementTimeoutMs || 15_000);
   pool = new Pool({
     connectionString: databaseUrl,
-    max: 20,
+    max: getPostgresPoolMax(),
     statement_timeout: Number.isFinite(statementTimeoutMs) ? statementTimeoutMs : 15_000,
   });
 
@@ -195,7 +201,18 @@ async function initializeDatabase(request: WorkerRequest): Promise<void> {
   if (!schemaSql) {
     return;
   }
-  await clientPool.query(schemaSql);
+
+  const client = await clientPool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [SCHEMA_INIT_LOCK_ID]);
+    await client.query(schemaSql);
+  } finally {
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_INIT_LOCK_ID]);
+    } finally {
+      client.release();
+    }
+  }
 }
 
 async function runQuery(request: WorkerRequest) {

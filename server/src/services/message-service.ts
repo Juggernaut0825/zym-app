@@ -1,4 +1,4 @@
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 import { stripCoachMentions } from '../utils/coach-mention.js';
 
 export interface ParsedMessage {

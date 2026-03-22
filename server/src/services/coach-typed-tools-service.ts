@@ -8,8 +8,9 @@ import { MediaStore } from '../context/media-store.js';
 import { SessionStore } from '../context/session-store.js';
 import { MediaAssetService, type MediaAssetRecord } from './media-asset-service.js';
 import { knowledgeService } from './knowledge-service.js';
-import { resolveSkillRoot, resolveUserDataDir } from '../utils/path-resolver.js';
+import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
+import { resolveUploadsDir } from '../config/app-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -194,7 +195,7 @@ function getLocalDateTimeParts(date: Date, timeZone: string): { day: string; tim
 export class CoachTypedToolsService {
   private mediaStore = new MediaStore();
   private mediaAssetService = MediaAssetService.createFromEnvironment({
-    uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+    uploadsDir: resolveUploadsDir(),
   });
   private sessionStore = new SessionStore();
 
@@ -211,8 +212,7 @@ export class CoachTypedToolsService {
   }
 
   private assertMediaPathWithinUserRoot(userId: string, storedPath: string): string {
-    const skillRoot = resolveSkillRoot();
-    const candidate = path.resolve(skillRoot, storedPath);
+    const candidate = resolveUserScopedPath(userId, storedPath);
     const mediaRoot = path.resolve(this.getUserDataDir(userId), 'media');
     if (candidate !== mediaRoot && !candidate.startsWith(`${mediaRoot}${path.sep}`)) {
       throw new Error('Media path is outside allowed user media directory');

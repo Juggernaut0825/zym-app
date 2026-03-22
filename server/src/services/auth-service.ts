@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 
 dotenv.config();
 
@@ -72,7 +72,10 @@ function runSessionCleanupIfNeeded(force = false): number {
 export class AuthService {
   static async register(username: string, email: string, password: string) {
     const hash = await bcrypt.hash(password, 10);
-    const result = getDB().prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)').run(username, email, hash);
+    const normalizedEmail = String(email || '').trim().toLowerCase() || null;
+    const result = getDB()
+      .prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)')
+      .run(username, normalizedEmail, hash);
     return result.lastInsertRowid;
   }
 

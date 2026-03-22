@@ -1,4 +1,4 @@
-import { getDB } from '../database/sqlite-db.js';
+import { getDB } from '../database/runtime-db.js';
 import { resolveGroupCoachInvocation } from '../utils/coach-mention.js';
 import type { CoachId } from '../utils/coach-mention.js';
 import type { CoachReplyJobPayload } from './coach-reply-queue.js';

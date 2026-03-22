@@ -1,6 +1,7 @@
 import { MediaStore } from '../context/media-store.js';
 import path from 'path';
 import { MediaAssetService } from './media-asset-service.js';
+import { resolveUploadsDir } from '../config/app-paths.js';
 
 const DEFAULT_INTERVAL_MINUTES = 6 * 60;
 
@@ -14,7 +15,7 @@ export class MediaCleanupScheduler {
   constructor(mediaStore?: MediaStore, intervalMinutes?: number) {
     this.mediaStore = mediaStore || new MediaStore();
     this.mediaAssetService = MediaAssetService.createFromEnvironment({
-      uploadsDir: path.join(process.cwd(), 'data', 'uploads'),
+      uploadsDir: resolveUploadsDir(),
     });
     const minutes = Number(intervalMinutes || process.env.MEDIA_CLEANUP_INTERVAL_MINUTES || DEFAULT_INTERVAL_MINUTES);
     const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_INTERVAL_MINUTES;

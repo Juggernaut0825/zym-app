@@ -4,7 +4,7 @@ Community-first AI fitness product with:
 
 - Web app (`Next.js`)
 - iOS app (`SwiftUI`)
-- Backend (`Express + WebSocket + SQLite`)
+- Backend (`Express + WebSocket + Postgres/Redis runtime`)
 
 ## Core Features
 
@@ -18,7 +18,7 @@ Community-first AI fitness product with:
 
 ## Tech Stack
 
-- Backend: TypeScript, Express, ws, better-sqlite3
+- Backend: TypeScript, Express, ws, Postgres runtime adapter, Redis/BullMQ
 - AI: OpenRouter (`google/gemini-3-flash-preview` by default)
 - Web: Next.js 14, React 18
 - iOS: SwiftUI, HealthKit
@@ -85,11 +85,19 @@ For deployable examples, see:
 
 - `web/.env.development.example`
 - `web/.env.production.example`
+- `server/.env.production.api.example`
+- `server/.env.production.ws.example`
+- `server/.env.production.worker.example`
+- `server/.env.production.scheduler.example`
 
-## Production Notes
+## Runtime Notes
 
 - Backend Node requirement: `>=20 <23` (Node 20/22 are supported).
 - `server` now runs `postinstall` and automatically rebuilds `better-sqlite3` for the current Node ABI.
 - On Linux servers, if native rebuild fails, install build tools first (`python3`, `make`, `g++`).
 - Set a strong `JWT_SECRET` in production. If omitted, server uses an ephemeral runtime secret.
 - Serve backend behind TLS reverse proxy and update WebSocket URL to `wss://`.
+- Shared coach/session/media file state lives under `APP_DATA_ROOT` and should be mounted to shared storage in multi-instance deploys.
+- For a production-like local stack, run `docker compose -f docker-compose.local.yml up --build -d`.
+- Architecture details and runtime role split are documented in [`docs/architecture.md`](/Users/zijianwang/zym/zym-app/docs/architecture.md).
+- AWS deployment guidance is documented in [`docs/aws-deployment.md`](/Users/zijianwang/zym/zym-app/docs/aws-deployment.md).

@@ -13,6 +13,7 @@ function envInt(name: string, fallback: number): number {
 
 export type RealtimeBusProvider = 'local' | 'redis';
 export type CoachQueueProvider = 'local' | 'bullmq';
+export type RateLimitProvider = 'local' | 'redis';
 
 export function getRedisUrl(): string | null {
   const value = String(process.env.REDIS_URL || '').trim();
@@ -37,6 +38,14 @@ export function resolveCoachQueueProvider(): CoachQueueProvider {
     return configured;
   }
   return getRedisUrl() ? 'bullmq' : 'local';
+}
+
+export function resolveRateLimitProvider(): RateLimitProvider {
+  const configured = String(process.env.RATE_LIMIT_PROVIDER || 'auto').trim().toLowerCase();
+  if (configured === 'local' || configured === 'redis') {
+    return configured;
+  }
+  return getRedisUrl() ? 'redis' : 'local';
 }
 
 export function getCoachQueueName(): string {

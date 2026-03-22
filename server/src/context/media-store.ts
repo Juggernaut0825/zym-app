@@ -4,7 +4,8 @@ import path from 'path';
 import axios from 'axios';
 import heicConvert from 'heic-convert';
 import { MediaIndex, MediaKind, MediaRef } from '../types/index.js';
-import { resolveSkillRoot, resolveUserDataDir, sanitizeUserId } from '../utils/path-resolver.js';
+import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
+import { resolveAppDataRoot } from '../config/app-paths.js';
 
 export interface IncomingMediaAttachment {
   url: string;
@@ -66,15 +67,29 @@ async function writeJsonAtomic(filePath: string, payload: unknown): Promise<void
   await fs.rename(tmpPath, filePath);
 }
 
-export class MediaStore {
-  readonly skillRoot: string;
+async function looksLikeUserDataDir(dirPath: string): Promise<boolean> {
+  const markers = [
+    'profile.json',
+    'daily.json',
+    path.join('context', 'session.json'),
+    path.join('media', 'index.json'),
+    'analyses',
+  ];
 
-  constructor(
-    private retentionDays = 7,
-    skillRoot?: string,
-  ) {
-    this.skillRoot = skillRoot || resolveSkillRoot();
+  for (const marker of markers) {
+    try {
+      await fs.access(path.join(dirPath, marker));
+      return true;
+    } catch {
+      // Keep checking.
+    }
   }
+
+  return false;
+}
+
+export class MediaStore {
+  constructor(private retentionDays = 7) {}
 
   getUserDataDir(userId: string): string {
     return resolveUserDataDir(userId);
@@ -219,7 +234,7 @@ export class MediaStore {
   }
 
   async cleanupExpiredForAllUsers(): Promise<{ userCount: number; removedCount: number }> {
-    const rootDataDir = path.join(this.skillRoot, 'data');
+    const rootDataDir = resolveAppDataRoot();
     let entries: import('fs').Dirent[] = [];
     try {
       entries = await fs.readdir(rootDataDir, { withFileTypes: true });
@@ -235,7 +250,12 @@ export class MediaStore {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const userId = sanitizeUserId(entry.name);
+      const userDir = path.join(rootDataDir, entry.name);
+      if (!await looksLikeUserDataDir(userDir)) {
+        continue;
+      }
+
+      const userId = entry.name;
       userCount += 1;
       const result = await this.cleanupExpiredForUser(userId);
       removedCount += result.removedCount;
@@ -274,8 +294,6 @@ export class MediaStore {
     await fs.writeFile(absolutePath, buffer);
 
     const relativePath = path.join(
-      'data',
-      sanitizeUserId(userId),
       'media',
       createdAt.slice(0, 10),
       finalName,
@@ -335,8 +353,6 @@ export class MediaStore {
     await fs.writeFile(finalAbsolutePath, buffer);
 
     const relativePath = path.join(
-      'data',
-      sanitizeUserId(userId),
       'media',
       createdAt.slice(0, 10),
       finalName,
@@ -365,9 +381,10 @@ export class MediaStore {
   }
 
   private async removeStoredMediaFile(media: MediaRef): Promise<void> {
-    const absolutePath = path.resolve(this.skillRoot, media.storedPath);
-    const allowedRoot = path.resolve(path.join(this.skillRoot, 'data')) + path.sep;
-    if (!absolutePath.startsWith(allowedRoot)) {
+    let absolutePath: string;
+    try {
+      absolutePath = resolveUserScopedPath(media.userId, media.storedPath);
+    } catch {
       return;
     }
 

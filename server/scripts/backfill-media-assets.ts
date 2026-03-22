@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
-import { initDB, getDB } from '../src/database/sqlite-db.js';
+import { initDB, getDB } from '../src/database/runtime-db.js';
 import { MediaStore } from '../src/context/media-store.js';
 import { MediaAssetRecord, MediaAssetService } from '../src/services/media-asset-service.js';
 import { fileNameFromMediaPath, normalizeMediaStorageValue } from '../src/security/media-url.js';

@@ -1,18 +1,13 @@
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-import { initDB } from './database/sqlite-db.js';
+import { initDB } from './database/runtime-db.js';
 import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
 import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
 import { logger } from './utils/logger.js';
+import { ensureAppDataDirs } from './config/app-paths.js';
 
 dotenv.config();
 
-const dataDir = path.join(process.cwd(), 'data');
-const uploadDir = path.join(dataDir, 'uploads');
-
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+ensureAppDataDirs();
 
 const mediaCleanup = new MediaCleanupScheduler();
 const sessionCleanup = new SessionCleanupScheduler();
