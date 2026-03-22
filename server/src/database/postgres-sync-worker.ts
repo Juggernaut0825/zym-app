@@ -80,6 +80,40 @@ function getPostgresPoolMax(): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 20;
 }
 
+function resolvePgSslMode(databaseUrl: string): string {
+  const envMode = String(process.env.PGSSLMODE || '').trim().toLowerCase();
+  try {
+    const parsed = new URL(databaseUrl);
+    const urlMode = String(parsed.searchParams.get('sslmode') || '').trim().toLowerCase();
+    return urlMode || envMode;
+  } catch {
+    return envMode;
+  }
+}
+
+function resolvePgSslConfig(databaseUrl: string): false | { rejectUnauthorized: boolean } | undefined {
+  const mode = resolvePgSslMode(databaseUrl);
+  if (!mode) {
+    return undefined;
+  }
+
+  if (mode === 'disable' || mode === 'allow' || mode === 'prefer') {
+    return false;
+  }
+
+  if (mode === 'require' || mode === 'no-verify') {
+    // RDS commonly terminates with a managed cert chain that isn't bundled in
+    // minimal runtime images. "require" should still encrypt the connection.
+    return { rejectUnauthorized: false };
+  }
+
+  if (mode === 'verify-ca' || mode === 'verify-full') {
+    return { rejectUnauthorized: true };
+  }
+
+  return undefined;
+}
+
 function normalizeRowValue(value: unknown): unknown {
   if (value instanceof Date) {
     return value.toISOString();
@@ -190,6 +224,7 @@ async function ensurePool(request: WorkerRequest): Promise<Pool> {
     connectionString: databaseUrl,
     max: getPostgresPoolMax(),
     statement_timeout: Number.isFinite(statementTimeoutMs) ? statementTimeoutMs : 15_000,
+    ssl: resolvePgSslConfig(databaseUrl),
   });
 
   return pool;
