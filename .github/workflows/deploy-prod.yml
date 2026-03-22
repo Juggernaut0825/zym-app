@@ -1,0 +1,163 @@
+name: Deploy Production ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional image tag. Defaults to the selected ref short SHA."
+        required: false
+        type: string
+      deploy_web:
+        description: "Deploy the web service"
+        required: true
+        default: true
+        type: boolean
+      deploy_backend:
+        description: "Deploy api/ws/worker/scheduler"
+        required: true
+        default: true
+        type: boolean
+      wait_for_stable:
+        description: "Wait for ECS services to become stable"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  ECS_CLUSTER: zym-prod
+  WEB_REPOSITORY: zym-web
+  SERVER_REPOSITORY: zym-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate GitHub OIDC role variable
+        run: |
+          if [ -z "${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}" ]; then
+            echo "Repository variable AWS_GITHUB_ACTIONS_ROLE_ARN is required." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve deploy tag and image URIs
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG="$SHORT_SHA"
+          fi
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "web_image=${ECR_REGISTRY}/${WEB_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "server_image=${ECR_REGISTRY}/${SERVER_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy web service
+        if: ${{ github.event.inputs.deploy_web == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./infra/scripts/deploy-ecs-service.sh \
+            "${AWS_REGION}" \
+            "${ECS_CLUSTER}" \
+            "zym-web-service" \
+            "zym-web-task" \
+            "zym-web" \
+            "${{ steps.meta.outputs.web_image }}"
+
+      - name: Deploy backend services
+        if: ${{ github.event.inputs.deploy_backend == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ./infra/scripts/deploy-ecs-service.sh \
+            "${AWS_REGION}" \
+            "${ECS_CLUSTER}" \
+            "zym-api-service" \
+            "zym-api-task" \
+            "zym-api" \
+            "${{ steps.meta.outputs.server_image }}"
+
+          ./infra/scripts/deploy-ecs-service.sh \
+            "${AWS_REGION}" \
+            "${ECS_CLUSTER}" \
+            "zym-ws-service" \
+            "zym-ws-task" \
+            "zym-ws" \
+            "${{ steps.meta.outputs.server_image }}"
+
+          ./infra/scripts/deploy-ecs-service.sh \
+            "${AWS_REGION}" \
+            "${ECS_CLUSTER}" \
+            "zym-worker-service" \
+            "zym-worker-task" \
+            "zym-worker" \
+            "${{ steps.meta.outputs.server_image }}"
+
+          ./infra/scripts/deploy-ecs-service.sh \
+            "${AWS_REGION}" \
+            "${ECS_CLUSTER}" \
+            "zym-scheduler-service" \
+            "zym-scheduler-task" \
+            "zym-scheduler" \
+            "${{ steps.meta.outputs.server_image }}"
+
+      - name: Wait for ECS services to stabilize
+        if: ${{ github.event.inputs.wait_for_stable == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SERVICES=()
+          if [ "${{ github.event.inputs.deploy_web }}" = "true" ]; then
+            SERVICES+=("zym-web-service")
+          fi
+          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
+            SERVICES+=("zym-api-service" "zym-ws-service" "zym-worker-service" "zym-scheduler-service")
+          fi
+
+          if [ "${#SERVICES[@]}" -gt 0 ]; then
+            aws ecs wait services-stable \
+              --region "${AWS_REGION}" \
+              --cluster "${ECS_CLUSTER}" \
+              --services "${SERVICES[@]}"
+          fi
+
+      - name: Publish workflow summary
+        run: |
+          {
+            echo "## Production deploy submitted"
+            echo
+            echo "- Image tag: \`${{ steps.meta.outputs.image_tag }}\`"
+            echo "- Web image: \`${{ steps.meta.outputs.web_image }}\`"
+            echo "- Server image: \`${{ steps.meta.outputs.server_image }}\`"
+            echo "- Web deployed: \`${{ github.event.inputs.deploy_web }}\`"
+            echo "- Backend deployed: \`${{ github.event.inputs.deploy_backend }}\`"
+            echo "- Waited for stable: \`${{ github.event.inputs.wait_for_stable }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
