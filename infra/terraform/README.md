@@ -43,6 +43,7 @@ Workflows:
 Shared deploy helper:
 
 - [`infra/scripts/deploy-ecs-service.sh`](/Users/zijianwang/zym/zym-app/infra/scripts/deploy-ecs-service.sh)
+- [`infra/scripts/configure-github-environment.sh`](/Users/zijianwang/zym/zym-app/infra/scripts/configure-github-environment.sh)
 
 ## GitHub Actions prerequisites
 
@@ -59,6 +60,10 @@ The remaining GitHub-side setup is:
 
 - add repository variable `AWS_GITHUB_ACTIONS_ROLE_ARN=arn:aws:iam::529814743482:role/GitHubActionsZymDeployRole`
 - create a GitHub Environment named `production` and add required reviewers if you want manual approval on deploys
+
+That environment can be configured with:
+
+- `GITHUB_TOKEN=... ./infra/scripts/configure-github-environment.sh Juggernaut0825/zym-app production <reviewer-username>`
 
 Recommended permission scope for the GitHub OIDC role:
 

@@ -103,3 +103,7 @@ Recommended settings:
 - environment name: `production`
 - environment URL: `https://app.zym8.com`
 - required reviewers: the maintainer who should approve production rollouts
+
+If a future session has a GitHub API token, it can configure this with:
+
+- [`infra/scripts/configure-github-environment.sh`](/Users/zijianwang/zym/zym-app/infra/scripts/configure-github-environment.sh)
