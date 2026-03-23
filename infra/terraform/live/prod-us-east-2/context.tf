@@ -19,6 +19,12 @@ locals {
   aws_region   = "us-east-2"
   aws_account  = "529814743482"
 
+  github = {
+    repository_full_name = "Juggernaut0825/zym-app"
+    oidc_provider_arn    = "arn:aws:iam::529814743482:oidc-provider/token.actions.githubusercontent.com"
+    oidc_provider_url    = "https://token.actions.githubusercontent.com"
+  }
+
   vpc_id   = "vpc-0566a1f4790c7561a"
   vpc_name = "zym-prod-vpc"
 
@@ -73,11 +79,11 @@ locals {
   }
 
   ecs = {
-    cluster_name   = "zym-prod"
-    cluster_arn    = "arn:aws:ecs:us-east-2:529814743482:cluster/zym-prod"
-    namespace_arn  = "arn:aws:servicediscovery:us-east-2:529814743482:namespace/ns-yqotrp2uughvhvfx"
-    task_exec_role = "arn:aws:iam::529814743482:role/ecsTaskExecutionRole"
-    task_role      = "arn:aws:iam::529814743482:role/zymEcsTaskRole"
+    cluster_name        = "zym-prod"
+    cluster_arn         = "arn:aws:ecs:us-east-2:529814743482:cluster/zym-prod"
+    namespace_arn       = "arn:aws:servicediscovery:us-east-2:529814743482:namespace/ns-yqotrp2uughvhvfx"
+    task_exec_role      = "arn:aws:iam::529814743482:role/ecsTaskExecutionRole"
+    task_role           = "arn:aws:iam::529814743482:role/zymEcsTaskRole"
     github_actions_role = "arn:aws:iam::529814743482:role/GitHubActionsZymDeployRole"
 
     services = {

@@ -36,6 +36,7 @@ env:
   ECS_CLUSTER: zym-prod
   WEB_REPOSITORY: zym-web
   SERVER_REPOSITORY: zym-server
+  PROD_ALB_DNS_NAME: zym-app-alb-1098890527.us-east-2.elb.amazonaws.com
 
 jobs:
   deploy:
@@ -149,7 +150,38 @@ jobs:
               --services "${SERVICES[@]}"
           fi
 
+      - name: Smoke check production entrypoints
+        id: smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          TMPDIR="$(mktemp -d)"
+          trap 'rm -rf "$TMPDIR"' EXIT
+
+          api_status="skipped"
+          ws_status="skipped"
+          web_status="skipped"
+
+          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
+            curl -skf -H "Host: api.zym8.com" "https://${PROD_ALB_DNS_NAME}/health" > "$TMPDIR/api-health.json"
+            curl -skf -H "Host: ws.zym8.com" "https://${PROD_ALB_DNS_NAME}/health" > "$TMPDIR/ws-health.json"
+
+            api_status="$(jq -r '.ok as $ok | "ok=\($ok) database=\(.runtime.providers.database) redis=\(.dependencies.redis.ok) rateLimit=\(.runtime.providers.rateLimit)"' "$TMPDIR/api-health.json")"
+            ws_status="$(jq -r '.ok as $ok | "ok=\($ok) websocket=\(.runtime.roles.websocket) redis=\(.dependencies.redis.ok)"' "$TMPDIR/ws-health.json")"
+          fi
+
+          if [ "${{ github.event.inputs.deploy_web }}" = "true" ]; then
+            curl -skf -H "Host: app.zym8.com" "https://${PROD_ALB_DNS_NAME}/" -o "$TMPDIR/app.html"
+            grep -qi "<!DOCTYPE html" "$TMPDIR/app.html"
+            web_status="ok html_bytes=$(wc -c < "$TMPDIR/app.html" | tr -d ' ')"
+          fi
+
+          echo "api_status=${api_status}" >> "$GITHUB_OUTPUT"
+          echo "ws_status=${ws_status}" >> "$GITHUB_OUTPUT"
+          echo "web_status=${web_status}" >> "$GITHUB_OUTPUT"
+
       - name: Publish workflow summary
+        if: always()
         run: |
           {
             echo "## Production deploy submitted"
@@ -160,4 +192,10 @@ jobs:
             echo "- Web deployed: \`${{ github.event.inputs.deploy_web }}\`"
             echo "- Backend deployed: \`${{ github.event.inputs.deploy_backend }}\`"
             echo "- Waited for stable: \`${{ github.event.inputs.wait_for_stable }}\`"
+            echo
+            echo "## Smoke checks"
+            echo
+            echo "- API: \`${{ steps.smoke.outputs.api_status }}\`"
+            echo "- WS: \`${{ steps.smoke.outputs.ws_status }}\`"
+            echo "- Web: \`${{ steps.smoke.outputs.web_status }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

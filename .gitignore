@@ -128,3 +128,5 @@ server/src/knowledge/papers/
 /server/PROGRESS.md
 /web/CURRENT_STATUS.md
 /web/IMPLEMENTATION_STATUS.md
+# Terraform working directories
+**/.terraform/

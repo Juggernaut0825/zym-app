@@ -26,6 +26,7 @@ env:
   SERVER_REPOSITORY: zym-server
   NEXT_PUBLIC_API_BASE_URL: https://api.zym8.com
   NEXT_PUBLIC_WS_URL: wss://ws.zym8.com
+  IMAGE_PLATFORM: linux/arm64
 
 jobs:
   build-and-push:
@@ -49,6 +50,12 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
@@ -71,29 +78,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build \
-            -t "${{ steps.meta.outputs.web_image }}" \
+          docker buildx build \
+            --platform "${IMAGE_PLATFORM}" \
+            --tag "${{ steps.meta.outputs.web_image }}" \
             --build-arg NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL}" \
             --build-arg NEXT_PUBLIC_WS_URL="${NEXT_PUBLIC_WS_URL}" \
+            --push \
             ./web
-          docker push "${{ steps.meta.outputs.web_image }}"
 
       - name: Build and push server image
         shell: bash
         run: |
           set -euo pipefail
-          docker build \
-            -t "${{ steps.meta.outputs.server_image }}" \
+          docker buildx build \
+            --platform "${IMAGE_PLATFORM}" \
+            --tag "${{ steps.meta.outputs.server_image }}" \
+            --push \
             ./server
-          docker push "${{ steps.meta.outputs.server_image }}"
 
       - name: Publish workflow summary
+        if: always()
         run: |
           {
             echo "## Images pushed"
             echo
             echo "- Web: \`${{ steps.meta.outputs.web_image }}\`"
             echo "- Server: \`${{ steps.meta.outputs.server_image }}\`"
+            echo "- Platform: \`${IMAGE_PLATFORM}\`"
             echo
             echo "Deploy these images with the manual \`Deploy Production ECS\` workflow."
           } >> "$GITHUB_STEP_SUMMARY"

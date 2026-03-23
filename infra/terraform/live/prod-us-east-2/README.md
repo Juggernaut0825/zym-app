@@ -31,6 +31,7 @@ Normal release flow:
 
 The workflow does not rebuild infrastructure.
 It only rolls application services to new images.
+The image build step targets Linux `arm64` because the live ECS task definitions run on `ARM64`.
 
 ## GitHub OIDC role
 
@@ -73,10 +74,17 @@ Import-first candidates:
 - ECS task definitions and services
 - CloudWatch log groups
 
+The first concrete import-first resources already live in this directory:
+
+- [`ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
+- [`ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
+- [`github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
+- [`imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
+
 ## What is not represented here yet
 
 - full Terraform resources for the existing stack
-- GitHub OIDC IAM role resources
 - Cloudflare DNS resources
 
 Those are still external to this directory and should be added gradually through imports.

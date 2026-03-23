@@ -33,6 +33,8 @@ This repo now uses a half-automatic deployment model:
 4. the deploy workflow updates ECS task definitions from the current AWS task families
 5. ECS rolls the services to the new image tag
 
+GitHub Actions builds Linux `arm64` images because the live ECS Fargate task definitions use `ARM64`.
+
 Workflows:
 
 - [`.github/workflows/build-and-push-images.yml`](/Users/zijianwang/zym/zym-app/.github/workflows/build-and-push-images.yml)
@@ -94,6 +96,18 @@ Recommended import order:
 10. RDS
 11. Redis
 12. Secrets Manager metadata
+
+## First importable foundation resources
+
+The first production-safe Terraform resources now live in:
+
+- [`live/prod-us-east-2/ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
+- [`live/prod-us-east-2/ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`live/prod-us-east-2/cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
+- [`live/prod-us-east-2/github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
+- [`live/prod-us-east-2/imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
+
+Those files are meant to be imported before any plan/apply cycle is trusted.
 
 ## Important deployment truths
 
