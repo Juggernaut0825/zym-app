@@ -2,11 +2,11 @@
   "name": "zym-web",
   "version": "1.0.0",
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
-    "predev": "npm run clean",
+    "clean": "node -e \"['.next','.next-prod'].forEach((dir)=>require('fs').rmSync(dir,{recursive:true,force:true}))\"",
+    "predev": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
     "dev": "next dev",
-    "build": "next build",
-    "start": "node .next/standalone/server.js"
+    "build": "NEXT_DIST_DIR=.next-prod next build",
+    "start": "NEXT_DIST_DIR=.next-prod node .next-prod/standalone/server.js"
   },
   "dependencies": {
     "next": "15.5.14",

@@ -27,11 +27,29 @@ const SESSION_TTL_SECONDS = clampNumber(process.env.SESSION_TTL_SECONDS, 24 * 60
 const MAX_ACTIVE_SESSIONS_PER_USER = clampNumber(process.env.MAX_ACTIVE_SESSIONS_PER_USER, 1, 24, 8);
 const SESSION_CLEANUP_INTERVAL_SECONDS = clampNumber(process.env.SESSION_CLEANUP_INTERVAL_SECONDS, 60, 24 * 60 * 60, 15 * 60);
 const REVOKED_SESSION_RETENTION_DAYS = clampNumber(process.env.REVOKED_SESSION_RETENTION_DAYS, 1, 365, 30);
+const EMAIL_VERIFICATION_TTL_SECONDS = clampNumber(process.env.EMAIL_VERIFICATION_TTL_SECONDS, 15 * 60, 7 * 24 * 60 * 60, 24 * 60 * 60);
+const PASSWORD_RESET_TTL_SECONDS = clampNumber(process.env.PASSWORD_RESET_TTL_SECONDS, 15 * 60, 24 * 60 * 60, 60 * 60);
 let lastSessionCleanupAt = 0;
+
+type EmailActionType = 'verify_email' | 'reset_password';
 
 interface AuthTokenPayload {
   userId: string | number;
   sid: string;
+}
+
+interface EmailActionLookupRow {
+  user_id?: number;
+  username?: string;
+  email?: string | null;
+}
+
+function normalizeEmail(email: unknown): string | null {
+  return String(email || '').trim().toLowerCase() || null;
+}
+
+function isEmailVerified(value: unknown): boolean {
+  return String(value || '').trim().length > 0;
 }
 
 function createAccessToken(userId: number, sessionId: string): string {
@@ -46,12 +64,28 @@ function createRefreshToken(): string {
   return `rt_${crypto.randomBytes(48).toString('base64url')}`;
 }
 
+function createEmailActionToken(tokenType: EmailActionType): string {
+  const prefix = tokenType === 'verify_email' ? 'verify' : 'reset';
+  return `${prefix}_${crypto.randomBytes(32).toString('base64url')}`;
+}
+
 function hashRefreshToken(refreshToken: string): string {
   return crypto.createHash('sha256').update(refreshToken).digest('hex');
 }
 
+function hashEmailActionToken(token: string): string {
+  return crypto.createHash('sha256').update(String(token || '').trim()).digest('hex');
+}
+
 function createSessionExpiryIso(): string {
   return new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+}
+
+function createEmailActionExpiryIso(tokenType: EmailActionType): string {
+  const ttlSeconds = tokenType === 'verify_email'
+    ? EMAIL_VERIFICATION_TTL_SECONDS
+    : PASSWORD_RESET_TTL_SECONDS;
+  return new Date(Date.now() + ttlSeconds * 1000).toISOString();
 }
 
 function runSessionCleanupIfNeeded(force = false): number {
@@ -69,14 +103,150 @@ function runSessionCleanupIfNeeded(force = false): number {
     .run(REVOKED_SESSION_RETENTION_DAYS).changes;
 }
 
+export class EmailVerificationRequiredError extends Error {
+  readonly email: string;
+
+  constructor(email: string) {
+    super('Please verify your email before signing in.');
+    this.name = 'EmailVerificationRequiredError';
+    this.email = email;
+  }
+}
+
 export class AuthService {
   static async register(username: string, email: string, password: string) {
     const hash = await bcrypt.hash(password, 10);
-    const normalizedEmail = String(email || '').trim().toLowerCase() || null;
+    const normalizedEmail = normalizeEmail(email);
     const result = getDB()
       .prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)')
       .run(username, normalizedEmail, hash);
     return result.lastInsertRowid;
+  }
+
+  static findUserByEmail(email: string) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) return null;
+    const user = getDB()
+      .prepare('SELECT id, username, email, email_verified_at FROM users WHERE lower(email) = ? LIMIT 1')
+      .get(normalizedEmail) as {
+        id?: number;
+        username?: string;
+        email?: string | null;
+        email_verified_at?: string | null;
+      } | undefined;
+
+    const userId = Number(user?.id || 0);
+    const safeEmail = normalizeEmail(user?.email);
+    if (!Number.isInteger(userId) || userId <= 0 || !safeEmail) return null;
+    return {
+      id: userId,
+      username: String(user?.username || ''),
+      email: safeEmail,
+      emailVerifiedAt: String(user?.email_verified_at || '').trim() || null,
+    };
+  }
+
+  static createEmailActionToken(userId: number, email: string, tokenType: EmailActionType): string {
+    const normalizedEmail = normalizeEmail(email);
+    if (!Number.isInteger(userId) || userId <= 0 || !normalizedEmail) {
+      throw new Error('A valid user and email are required to create an auth email token.');
+    }
+
+    const rawToken = createEmailActionToken(tokenType);
+    const tokenHash = hashEmailActionToken(rawToken);
+    const expiresAt = createEmailActionExpiryIso(tokenType);
+
+    getDB()
+      .prepare(`
+        UPDATE auth_email_tokens
+        SET consumed_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND token_type = ? AND consumed_at IS NULL
+      `)
+      .run(userId, tokenType);
+
+    getDB()
+      .prepare(`
+        INSERT INTO auth_email_tokens (user_id, email, token_hash, token_type, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      .run(userId, normalizedEmail, tokenHash, tokenType, expiresAt);
+
+    return rawToken;
+  }
+
+  private static lookupEmailActionToken(token: string, tokenType: EmailActionType): { userId: number; username: string; email: string } | null {
+    const normalizedToken = String(token || '').trim();
+    if (!normalizedToken) return null;
+
+    const row = getDB()
+      .prepare(`
+        SELECT t.user_id, t.email, u.username
+        FROM auth_email_tokens t
+        JOIN users u ON u.id = t.user_id
+        WHERE t.token_hash = ?
+          AND t.token_type = ?
+          AND t.consumed_at IS NULL
+          AND datetime(t.expires_at) > datetime('now')
+        LIMIT 1
+      `)
+      .get(hashEmailActionToken(normalizedToken), tokenType) as EmailActionLookupRow | undefined;
+
+    const userId = Number(row?.user_id || 0);
+    const email = normalizeEmail(row?.email);
+    if (!Number.isInteger(userId) || userId <= 0 || !email) return null;
+
+    return {
+      userId,
+      username: String(row?.username || ''),
+      email,
+    };
+  }
+
+  static verifyEmailWithToken(token: string): { userId: number; username: string; email: string } | null {
+    const match = this.lookupEmailActionToken(token, 'verify_email');
+    if (!match) return null;
+
+    getDB()
+      .prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE id = ?')
+      .run(match.userId);
+
+    getDB()
+      .prepare(`
+        UPDATE auth_email_tokens
+        SET consumed_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND token_type = 'verify_email' AND consumed_at IS NULL
+      `)
+      .run(match.userId);
+
+    return match;
+  }
+
+  static async resetPasswordWithToken(token: string, nextPassword: string): Promise<{ userId: number; email: string } | null> {
+    if (String(nextPassword || '').length < 8) {
+      throw new Error('Password must be at least 8 characters.');
+    }
+
+    const match = this.lookupEmailActionToken(token, 'reset_password');
+    if (!match) return null;
+
+    const passwordHash = await bcrypt.hash(nextPassword, 10);
+    getDB()
+      .prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+      .run(passwordHash, match.userId);
+
+    getDB()
+      .prepare(`
+        UPDATE auth_email_tokens
+        SET consumed_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND token_type = 'reset_password' AND consumed_at IS NULL
+      `)
+      .run(match.userId);
+
+    this.revokeAllSessions(match.userId);
+    return {
+      userId: match.userId,
+      email: match.email,
+    };
   }
 
   static async login(
@@ -85,8 +255,12 @@ export class AuthService {
     context: { deviceName?: string; ipAddress?: string } = {},
   ) {
     runSessionCleanupIfNeeded();
-    const user = getDB().prepare('SELECT id, password_hash FROM users WHERE username = ?').get(username) as any;
+    const user = getDB().prepare('SELECT id, password_hash, email, email_verified_at FROM users WHERE username = ?').get(username) as any;
     if (!user || !(await bcrypt.compare(password, user.password_hash))) return null;
+    const normalizedEmail = normalizeEmail(user.email);
+    if (normalizedEmail && !isEmailVerified(user.email_verified_at)) {
+      throw new EmailVerificationRequiredError(normalizedEmail);
+    }
     const sessionId = crypto.randomUUID();
     const expiresAt = createSessionExpiryIso();
     const refreshToken = createRefreshToken();

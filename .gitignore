@@ -61,6 +61,7 @@ dist/
 build/
 coverage/
 .next/
+.next-prod/
 .run/
 *.log
 
@@ -74,6 +75,7 @@ server/skills/z/data/
 server/skills/z/scripts/__pycache__/
 server/src/knowledge/local-vector-index.json
 web/.next/
+web/.next-prod/
 
 # Dependencies
 server/node_modules/

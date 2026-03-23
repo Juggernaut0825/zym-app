@@ -164,6 +164,34 @@ export async function register(username: string, email: string, password: string
   });
 }
 
+export async function requestEmailVerification(email: string): Promise<{ ok: boolean; message?: string }> {
+  return request<{ ok: boolean; message?: string }>('/auth/verify-email/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyEmail(token: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/auth/verify-email/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function requestPasswordReset(email: string): Promise<{ ok: boolean; message?: string }> {
+  return request<{ ok: boolean; message?: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(token: string, password: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  });
+}
+
 export async function selectCoach(userId: number, coach: 'zj' | 'lc'): Promise<void> {
   await request('/coach/select', {
     method: 'POST',

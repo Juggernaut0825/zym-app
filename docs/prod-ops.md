@@ -186,7 +186,7 @@ If you only want to tweak frontend UI quickly, the fastest loop is:
 Commands:
 
 ```bash
-cp server/.env.example server/.env
+cp server/.env.development.example server/.env
 cp web/.env.development.example web/.env.local
 
 cd server
@@ -207,6 +207,8 @@ Then open:
 - web: `http://localhost:3000`
 - api: `http://localhost:3001`
 - ws: `ws://localhost:8080`
+
+This path uses local SQLite by default and does not require Postgres.
 
 If you want the full production-like local stack instead:
 

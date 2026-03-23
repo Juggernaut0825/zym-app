@@ -228,6 +228,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE,
       password_hash TEXT,
+      email_verified_at DATETIME,
       selected_coach TEXT DEFAULT 'zj',
       avatar_url TEXT,
       background_url TEXT,
@@ -317,6 +318,17 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       expires_at DATETIME NOT NULL,
       revoked_at DATETIME,
       last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_email_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      email TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_type TEXT NOT NULL,
+      expires_at DATETIME NOT NULL,
+      consumed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS message_reads (
@@ -438,6 +450,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   if (!userColumns.some((column) => column.name === 'timezone')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN timezone TEXT');
   }
+  if (!userColumns.some((column) => column.name === 'email_verified_at')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN email_verified_at DATETIME');
+  }
   if (!sessionColumns.some((column) => column.name === 'ip_address')) {
     sqlite.exec('ALTER TABLE user_sessions ADD COLUMN ip_address TEXT');
   }
@@ -448,10 +463,21 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
     sqlite.exec("ALTER TABLE posts ADD COLUMN visibility TEXT DEFAULT 'friends'");
   }
 
+  sqlite.exec(`
+    UPDATE users
+    SET email_verified_at = COALESCE(email_verified_at, created_at)
+    WHERE email IS NOT NULL
+      AND TRIM(COALESCE(email, '')) != ''
+      AND email_verified_at IS NULL
+  `);
+
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_user_type ON auth_email_tokens(user_id, token_type, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_email_type ON auth_email_tokens(email, token_type, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_expires_at ON auth_email_tokens(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');

@@ -50,6 +50,11 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     identityColumn: 'id',
   },
   {
+    name: 'auth_email_tokens',
+    orderBy: 'id ASC',
+    identityColumn: 'id',
+  },
+  {
     name: 'message_reads',
     orderBy: 'user_id ASC, topic ASC',
   },

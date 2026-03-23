@@ -32,8 +32,9 @@ cd server && npm install
 cd ../web && npm install
 cd ..
 
-cp server/.env.example server/.env
-# set OPENROUTER_API_KEY in server/.env (minimum required)
+cp server/.env.development.example server/.env
+cp web/.env.development.example web/.env.local
+# set OPENROUTER_API_KEY in server/.env if you want real AI replies locally
 ```
 
 ### 2) Start backend
@@ -80,6 +81,54 @@ For API/manual regression, keep `server` and `web` dev servers running and test 
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
 NEXT_PUBLIC_WS_URL=ws://localhost:8080
 ```
+
+## Local Modes
+
+### Fast frontend loop with local SQLite backend
+
+Use this when you want to tweak UI quickly without starting Postgres/Redis:
+
+```bash
+cp server/.env.development.example server/.env
+cp web/.env.development.example web/.env.local
+
+cd server
+npm install
+npm run dev
+```
+
+In another terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+### Production-like local stack
+
+Use this when you need Postgres + Redis + worker + websocket + chroma:
+
+```bash
+docker compose -f docker-compose.local.yml up --build -d
+```
+
+### Frontend-only against deployed backend
+
+If you only want to touch presentation and do not want a local backend, point Next.js at production:
+
+```bash
+cat > web/.env.local <<'EOF'
+NEXT_PUBLIC_API_BASE_URL=https://api.zym8.com
+NEXT_PUBLIC_WS_URL=wss://ws.zym8.com
+EOF
+
+cd web
+npm install
+npm run dev
+```
+
+Be careful: this mode talks to real production services and data.
 
 For deployable examples, see:
 

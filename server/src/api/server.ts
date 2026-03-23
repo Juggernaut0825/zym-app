@@ -5,7 +5,8 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
-import { AuthService } from '../services/auth-service.js';
+import { AuthService, EmailVerificationRequiredError } from '../services/auth-service.js';
+import { authEmailService } from '../services/auth-email-service.js';
 import { CommunityService } from '../services/community-service.js';
 import { MediaService } from '../services/media-service.js';
 import { MessageService, buildP2PTopic } from '../services/message-service.js';
@@ -970,7 +971,16 @@ app.get('/', (_, res) => {
     service: 'zym-server',
     ok: true,
     requiresAuth: true,
-    publicEndpoints: ['/health', '/auth/register', '/auth/login', '/auth/refresh'],
+    publicEndpoints: [
+      '/health',
+      '/auth/register',
+      '/auth/login',
+      '/auth/refresh',
+      '/auth/verify-email/request',
+      '/auth/verify-email/confirm',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+    ],
     note: 'Use Authorization: Bearer <token> for protected endpoints.',
   });
 });
@@ -979,7 +989,7 @@ app.post('/auth/register',
   APIGateway.rateLimit(18, 10 * 60_000, 'auth-register'),
   APIGateway.validateSchema({
     username: { required: true, type: 'string', minLength: 3, maxLength: 32, pattern: /^[a-zA-Z0-9_]+$/ },
-    email: { type: 'string', minLength: 3, maxLength: 120, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+    email: { required: true, type: 'string', minLength: 3, maxLength: 120, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
     password: { required: true, type: 'string', minLength: 8, maxLength: 200 },
   }),
   async (req, res) => {
@@ -988,14 +998,139 @@ app.post('/auth/register',
     const email = String(req.body.email || '').trim();
     const password = String(req.body.password || '');
 
-    if (!username || password.length < 8) {
-      return res.status(400).json({ error: 'Username and password(>=8) are required' });
+    if (!username || !email || password.length < 8) {
+      return res.status(400).json({ error: 'Username, email, and password(>=8) are required' });
     }
 
     const userId = await AuthService.register(username, email, password);
-    res.json({ userId });
+    const registeredUser = AuthService.findUserByEmail(email);
+    if (!registeredUser) {
+      throw new Error('Registered account could not be loaded.');
+    }
+
+    try {
+      await authEmailService.sendVerificationEmail(registeredUser);
+    } catch (mailError) {
+      getDB().prepare('DELETE FROM users WHERE id = ?').run(userId);
+      throw mailError;
+    }
+
+    trackSecurityEvent(req, 'auth_register_success', {
+      userId: Number(userId),
+      metadata: {
+        username: username.slice(0, 64),
+        email: registeredUser.email.slice(0, 120),
+      },
+    });
+
+    res.json({ userId, verificationRequired: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/auth/verify-email/request',
+  APIGateway.rateLimit(12, 10 * 60_000, 'auth-verify-email-request'),
+  APIGateway.validateSchema({
+    email: { required: true, type: 'string', minLength: 3, maxLength: 120, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+  }),
+  async (req, res) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const user = AuthService.findUserByEmail(email);
+    if (user && !user.emailVerifiedAt) {
+      await authEmailService.sendVerificationEmail(user);
+      trackSecurityEvent(req, 'auth_verification_email_sent', {
+        userId: user.id,
+        metadata: {
+          email: user.email.slice(0, 120),
+        },
+      });
+    }
+
+    res.json({ ok: true, message: 'If the account exists, a verification email has been sent.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to send verification email.' });
+  }
+});
+
+app.post('/auth/verify-email/confirm',
+  APIGateway.rateLimit(30, 10 * 60_000, 'auth-verify-email-confirm'),
+  APIGateway.validateSchema({
+    token: { required: true, type: 'string', minLength: 12, maxLength: 512 },
+  }),
+  async (req, res) => {
+  try {
+    const token = String(req.body.token || '').trim();
+    const verified = AuthService.verifyEmailWithToken(token);
+    if (!verified) {
+      return res.status(400).json({ error: 'This verification link is invalid or expired.' });
+    }
+
+    trackSecurityEvent(req, 'auth_email_verified', {
+      userId: verified.userId,
+      metadata: {
+        email: verified.email.slice(0, 120),
+      },
+    });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to verify email.' });
+  }
+});
+
+app.post('/auth/forgot-password',
+  APIGateway.rateLimit(12, 10 * 60_000, 'auth-forgot-password'),
+  APIGateway.validateSchema({
+    email: { required: true, type: 'string', minLength: 3, maxLength: 120, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+  }),
+  async (req, res) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const user = AuthService.findUserByEmail(email);
+    if (user && user.emailVerifiedAt) {
+      await authEmailService.sendPasswordResetEmail(user);
+      trackSecurityEvent(req, 'auth_password_reset_requested', {
+        userId: user.id,
+        metadata: {
+          email: user.email.slice(0, 120),
+        },
+      });
+    }
+
+    res.json({ ok: true, message: 'If the account exists, a password reset email has been sent.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to request password reset.' });
+  }
+});
+
+app.post('/auth/reset-password',
+  APIGateway.rateLimit(18, 10 * 60_000, 'auth-reset-password'),
+  APIGateway.validateSchema({
+    token: { required: true, type: 'string', minLength: 12, maxLength: 512 },
+    password: { required: true, type: 'string', minLength: 8, maxLength: 200 },
+  }),
+  async (req, res) => {
+  try {
+    const token = String(req.body.token || '').trim();
+    const password = String(req.body.password || '');
+    const reset = await AuthService.resetPasswordWithToken(token, password);
+    if (!reset) {
+      return res.status(400).json({ error: 'This reset link is invalid or expired.' });
+    }
+
+    WSServer.getInstance()?.disconnectUserSessions(reset.userId);
+    trackSecurityEvent(req, 'auth_password_reset_completed', {
+      userId: reset.userId,
+      metadata: {
+        email: reset.email.slice(0, 120),
+      },
+    });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to reset password.' });
   }
 });
 
@@ -1068,6 +1203,16 @@ app.post('/auth/login',
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
+    if (err instanceof EmailVerificationRequiredError) {
+      trackSecurityEvent(req, 'auth_login_blocked_unverified', {
+        severity: 'info',
+        metadata: {
+          username: String(req.body.username || '').trim().slice(0, 64),
+          email: err.email.slice(0, 120),
+        },
+      });
+      return res.status(403).json({ error: 'Please verify your email before signing in.' });
+    }
     res.status(400).json({ error: err.message });
   }
 });
