@@ -65,6 +65,7 @@ Import-first candidates:
 - VPC and networking
 - security groups
 - EFS and access points
+- ECS service autoscaling and production alarms
 - RDS
 - Redis parameter groups and replication group
 - ECR repositories
@@ -79,6 +80,8 @@ The first concrete import-first resources already live in this directory:
 - [`ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
 - [`ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
 - [`alb.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alb.tf)
+- [`autoscaling.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/autoscaling.tf)
+- [`alarms.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alarms.tf)
 - [`runtime-iam.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/runtime-iam.tf)
 - [`cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
 - [`github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
