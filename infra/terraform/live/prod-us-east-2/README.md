@@ -78,13 +78,28 @@ The first concrete import-first resources already live in this directory:
 
 - [`ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
 - [`ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`alb.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alb.tf)
+- [`runtime-iam.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/runtime-iam.tf)
 - [`cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
 - [`github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
 - [`imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
 
 ## What is not represented here yet
 
-- full Terraform resources for the existing stack
+- VPC, subnets, route tables, and security groups
+- EFS, RDS, Redis, ECS task definitions, and ECS services
 - Cloudflare DNS resources
 
 Those are still external to this directory and should be added gradually through imports.
+
+## GitHub production approval gate
+
+The deploy workflow already targets the `production` environment. The only remaining GitHub-side protection is to create that environment and add required reviewers.
+
+This cannot be managed from AWS or Terraform. It requires GitHub repository admin access through the GitHub UI or GitHub API.
+
+Recommended settings:
+
+- environment name: `production`
+- environment URL: `https://app.zym8.com`
+- required reviewers: the maintainer who should approve production rollouts

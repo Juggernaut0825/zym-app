@@ -58,6 +58,7 @@ The AWS-side OIDC role has already been created for this repo:
 The remaining GitHub-side setup is:
 
 - add repository variable `AWS_GITHUB_ACTIONS_ROLE_ARN=arn:aws:iam::529814743482:role/GitHubActionsZymDeployRole`
+- create a GitHub Environment named `production` and add required reviewers if you want manual approval on deploys
 
 Recommended permission scope for the GitHub OIDC role:
 
@@ -103,6 +104,8 @@ The first production-safe Terraform resources now live in:
 
 - [`live/prod-us-east-2/ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
 - [`live/prod-us-east-2/ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`live/prod-us-east-2/alb.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alb.tf)
+- [`live/prod-us-east-2/runtime-iam.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/runtime-iam.tf)
 - [`live/prod-us-east-2/cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
 - [`live/prod-us-east-2/github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
 - [`live/prod-us-east-2/imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)

@@ -79,12 +79,15 @@ locals {
   }
 
   ecs = {
-    cluster_name        = "zym-prod"
-    cluster_arn         = "arn:aws:ecs:us-east-2:529814743482:cluster/zym-prod"
-    namespace_arn       = "arn:aws:servicediscovery:us-east-2:529814743482:namespace/ns-yqotrp2uughvhvfx"
-    task_exec_role      = "arn:aws:iam::529814743482:role/ecsTaskExecutionRole"
-    task_role           = "arn:aws:iam::529814743482:role/zymEcsTaskRole"
-    github_actions_role = "arn:aws:iam::529814743482:role/GitHubActionsZymDeployRole"
+    cluster_name             = "zym-prod"
+    cluster_arn              = "arn:aws:ecs:us-east-2:529814743482:cluster/zym-prod"
+    namespace_arn            = "arn:aws:servicediscovery:us-east-2:529814743482:namespace/ns-yqotrp2uughvhvfx"
+    task_exec_role_name      = "ecsTaskExecutionRole"
+    task_exec_role           = "arn:aws:iam::529814743482:role/ecsTaskExecutionRole"
+    task_role_name           = "zymEcsTaskRole"
+    task_role                = "arn:aws:iam::529814743482:role/zymEcsTaskRole"
+    github_actions_role_name = "GitHubActionsZymDeployRole"
+    github_actions_role      = "arn:aws:iam::529814743482:role/GitHubActionsZymDeployRole"
 
     services = {
       web       = "zym-web-service"
@@ -106,16 +109,23 @@ locals {
   }
 
   alb = {
-    name            = "zym-app-alb"
-    dns_name        = "zym-app-alb-1098890527.us-east-2.elb.amazonaws.com"
-    arn             = "arn:aws:elasticloadbalancing:us-east-2:529814743482:loadbalancer/app/zym-app-alb/ae38cf2ad9a4410a"
-    certificate_arn = "arn:aws:acm:us-east-2:529814743482:certificate/75b80304-cd61-49fd-b0d9-6b3039719fe9"
+    name               = "zym-app-alb"
+    dns_name           = "zym-app-alb-1098890527.us-east-2.elb.amazonaws.com"
+    arn                = "arn:aws:elasticloadbalancing:us-east-2:529814743482:loadbalancer/app/zym-app-alb/ae38cf2ad9a4410a"
+    https_listener_arn = "arn:aws:elasticloadbalancing:us-east-2:529814743482:listener/app/zym-app-alb/ae38cf2ad9a4410a/f02dd07849d96325"
+    certificate_arn    = "arn:aws:acm:us-east-2:529814743482:certificate/75b80304-cd61-49fd-b0d9-6b3039719fe9"
   }
 
   target_groups = {
     web = "arn:aws:elasticloadbalancing:us-east-2:529814743482:targetgroup/zym-web-tg/0bd010c4b846a84d"
     api = "arn:aws:elasticloadbalancing:us-east-2:529814743482:targetgroup/zym-api-tg/053048099da22134"
     ws  = "arn:aws:elasticloadbalancing:us-east-2:529814743482:targetgroup/zym-ws-tg/6e1e2a5c752c4bbd"
+  }
+
+  listener_rules = {
+    app = "arn:aws:elasticloadbalancing:us-east-2:529814743482:listener-rule/app/zym-app-alb/ae38cf2ad9a4410a/f02dd07849d96325/954d765a93343145"
+    api = "arn:aws:elasticloadbalancing:us-east-2:529814743482:listener-rule/app/zym-app-alb/ae38cf2ad9a4410a/f02dd07849d96325/2402f18298f5c10c"
+    ws  = "arn:aws:elasticloadbalancing:us-east-2:529814743482:listener-rule/app/zym-app-alb/ae38cf2ad9a4410a/f02dd07849d96325/dba7e4442967b981"
   }
 
   secrets = {
