@@ -93,6 +93,7 @@ cats-company/
 docs/*
 !docs/architecture.md
 !docs/aws-deployment.md
+!docs/prod-ops.md
 stitch/
 server/src/knowledge/papers/
 

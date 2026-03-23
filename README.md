@@ -101,3 +101,4 @@ For deployable examples, see:
 - For a production-like local stack, run `docker compose -f docker-compose.local.yml up --build -d`.
 - Architecture details and runtime role split are documented in [`docs/architecture.md`](/Users/zijianwang/zym/zym-app/docs/architecture.md).
 - AWS deployment guidance is documented in [`docs/aws-deployment.md`](/Users/zijianwang/zym/zym-app/docs/aws-deployment.md).
+- Production operations, pause/resume, and local frontend workflow are documented in [`docs/prod-ops.md`](/Users/zijianwang/zym/zym-app/docs/prod-ops.md).

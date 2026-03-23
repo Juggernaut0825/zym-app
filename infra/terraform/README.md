@@ -63,7 +63,7 @@ The remaining GitHub-side setup is:
 
 That environment can be configured with:
 
-- `GITHUB_TOKEN=... ./infra/scripts/configure-github-environment.sh Juggernaut0825/zym-app production <reviewer-username>`
+- `GITHUB_TOKEN=... bash ./infra/scripts/configure-github-environment.sh Juggernaut0825/zym-app production <reviewer-username>`
 
 Recommended permission scope for the GitHub OIDC role:
 
