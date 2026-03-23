@@ -102,3 +102,4 @@ For deployable examples, see:
 - Architecture details and runtime role split are documented in [`docs/architecture.md`](/Users/zijianwang/zym/zym-app/docs/architecture.md).
 - AWS deployment guidance is documented in [`docs/aws-deployment.md`](/Users/zijianwang/zym/zym-app/docs/aws-deployment.md).
 - Production operations, pause/resume, and local frontend workflow are documented in [`docs/prod-ops.md`](/Users/zijianwang/zym/zym-app/docs/prod-ops.md).
+- Production release/rollback helpers live under [`infra/scripts/`](/Users/zijianwang/zym/zym-app/infra/scripts).

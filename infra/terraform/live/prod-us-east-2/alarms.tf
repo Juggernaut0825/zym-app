@@ -1,25 +1,52 @@
 locals {
-  production_alarm_topic_name = "${local.project_name}-${local.environment}-alarms"
+  production_alarm_topic_name = local.monitoring.sns_topic_name
+
+  ecs_service_alarm_thresholds = {
+    web = {
+      cpu    = 80
+      memory = 80
+    }
+    api = {
+      cpu    = 80
+      memory = 80
+    }
+    ws = {
+      cpu    = 80
+      memory = 80
+    }
+    worker = {
+      cpu    = 80
+      memory = 80
+    }
+    scheduler = {
+      cpu    = 80
+      memory = 80
+    }
+    chroma = {
+      cpu    = 80
+      memory = 80
+    }
+  }
 
   alb_alarm_definitions = {
     alb_5xx = {
-      alarm_name          = "${local.project_name}-${local.environment}-alb-5xx"
+      alarm_name          = "zym-prod-alb-5xx"
       metric_name         = "HTTPCode_ELB_5XX_Count"
       namespace           = "AWS/ApplicationELB"
       statistic           = "Sum"
       period              = 60
-      evaluation_periods  = 1
-      datapoints_to_alarm = 1
-      threshold           = 1
+      evaluation_periods  = 5
+      datapoints_to_alarm = 3
+      threshold           = 5
       comparison_operator = "GreaterThanOrEqualToThreshold"
       dimensions = {
         LoadBalancer = aws_lb.app.arn_suffix
       }
-      alarm_description = "ALB-originated 5xx errors for app.zym8.com, api.zym8.com, or ws.zym8.com"
+      alarm_description = "ALB 5xx responses are elevated in production"
     }
 
     web_unhealthy_hosts = {
-      alarm_name          = "${local.project_name}-${local.environment}-web-targets-unhealthy"
+      alarm_name          = "zym-prod-zym-web-tg-unhealthy-hosts"
       metric_name         = "UnHealthyHostCount"
       namespace           = "AWS/ApplicationELB"
       statistic           = "Maximum"
@@ -32,11 +59,11 @@ locals {
         LoadBalancer = aws_lb.app.arn_suffix
         TargetGroup  = aws_lb_target_group.web.arn_suffix
       }
-      alarm_description = "At least one web target is unhealthy"
+      alarm_description = "Unhealthy hosts detected in zym-web-tg"
     }
 
     api_unhealthy_hosts = {
-      alarm_name          = "${local.project_name}-${local.environment}-api-targets-unhealthy"
+      alarm_name          = "zym-prod-zym-api-tg-unhealthy-hosts"
       metric_name         = "UnHealthyHostCount"
       namespace           = "AWS/ApplicationELB"
       statistic           = "Maximum"
@@ -49,11 +76,11 @@ locals {
         LoadBalancer = aws_lb.app.arn_suffix
         TargetGroup  = aws_lb_target_group.api.arn_suffix
       }
-      alarm_description = "At least one api target is unhealthy"
+      alarm_description = "Unhealthy hosts detected in zym-api-tg"
     }
 
     ws_unhealthy_hosts = {
-      alarm_name          = "${local.project_name}-${local.environment}-ws-targets-unhealthy"
+      alarm_name          = "zym-prod-zym-ws-tg-unhealthy-hosts"
       metric_name         = "UnHealthyHostCount"
       namespace           = "AWS/ApplicationELB"
       statistic           = "Maximum"
@@ -66,107 +93,105 @@ locals {
         LoadBalancer = aws_lb.app.arn_suffix
         TargetGroup  = aws_lb_target_group.ws.arn_suffix
       }
-      alarm_description = "At least one websocket target is unhealthy"
+      alarm_description = "Unhealthy hosts detected in zym-ws-tg"
     }
   }
 
   rds_alarm_definitions = {
-    cpu = {
-      alarm_name          = "${local.project_name}-${local.environment}-rds-cpu"
+    high_cpu = {
+      alarm_name          = "zym-prod-rds-high-cpu"
       metric_name         = "CPUUtilization"
       namespace           = "AWS/RDS"
       statistic           = "Average"
       period              = 300
-      evaluation_periods  = 2
+      evaluation_periods  = 3
       datapoints_to_alarm = 2
       threshold           = 80
       comparison_operator = "GreaterThanOrEqualToThreshold"
       dimensions = {
         DBInstanceIdentifier = local.rds.identifier
       }
-      alarm_description = "PostgreSQL CPU is sustained above 80 percent"
+      alarm_description = "RDS CPU is sustained above 80%"
     }
 
-    connections = {
-      alarm_name          = "${local.project_name}-${local.environment}-rds-connections"
+    high_connections = {
+      alarm_name          = "zym-prod-rds-high-connections"
       metric_name         = "DatabaseConnections"
       namespace           = "AWS/RDS"
       statistic           = "Average"
       period              = 300
-      evaluation_periods  = 2
+      evaluation_periods  = 3
       datapoints_to_alarm = 2
-      threshold           = 100
+      threshold           = 45
       comparison_operator = "GreaterThanOrEqualToThreshold"
       dimensions = {
         DBInstanceIdentifier = local.rds.identifier
       }
-      alarm_description = "PostgreSQL connection count is sustained above the soft threshold"
+      alarm_description = "RDS connections are sustained above the early-warning threshold"
     }
 
-    free_storage = {
-      alarm_name          = "${local.project_name}-${local.environment}-rds-free-storage"
+    low_storage = {
+      alarm_name          = "zym-prod-rds-low-storage"
       metric_name         = "FreeStorageSpace"
       namespace           = "AWS/RDS"
-      statistic           = "Average"
+      statistic           = "Minimum"
       period              = 300
       evaluation_periods  = 1
-      datapoints_to_alarm = 1
       threshold           = 5368709120
-      comparison_operator = "LessThanThreshold"
+      comparison_operator = "LessThanOrEqualToThreshold"
       dimensions = {
         DBInstanceIdentifier = local.rds.identifier
       }
-      alarm_description = "PostgreSQL free storage dropped below 5 GiB"
+      alarm_description = "RDS free storage is below 5 GiB"
     }
   }
 
   redis_alarm_definitions = {
-    cpu = {
-      alarm_name          = "${local.project_name}-${local.environment}-redis-cpu"
+    high_cpu = {
+      alarm_name          = "zym-prod-redis-high-cpu"
       metric_name         = "CPUUtilization"
       namespace           = "AWS/ElastiCache"
       statistic           = "Average"
-      period              = 60
-      evaluation_periods  = 2
+      period              = 300
+      evaluation_periods  = 3
       datapoints_to_alarm = 2
       threshold           = 80
       comparison_operator = "GreaterThanOrEqualToThreshold"
       dimensions = {
-        CacheClusterId = "${local.redis.replication_group_id}-001"
+        CacheClusterId = local.redis.cache_cluster_id
       }
-      alarm_description = "Redis host CPU is sustained above 80 percent"
+      alarm_description = "Redis CPU is sustained above 80%"
     }
 
-    memory = {
-      alarm_name          = "${local.project_name}-${local.environment}-redis-memory"
-      metric_name         = "DatabaseMemoryUsageCountedForEvictPercentage"
+    low_memory = {
+      alarm_name          = "zym-prod-redis-low-memory"
+      metric_name         = "FreeableMemory"
       namespace           = "AWS/ElastiCache"
-      statistic           = "Average"
-      period              = 60
-      evaluation_periods  = 2
+      statistic           = "Minimum"
+      period              = 300
+      evaluation_periods  = 3
       datapoints_to_alarm = 2
-      threshold           = 80
-      comparison_operator = "GreaterThanOrEqualToThreshold"
+      threshold           = 209715200
+      comparison_operator = "LessThanOrEqualToThreshold"
       dimensions = {
-        ReplicationGroupId = local.redis.replication_group_id
+        CacheClusterId = local.redis.cache_cluster_id
       }
-      alarm_description = "Redis memory usage counted for evict is sustained above 80 percent"
+      alarm_description = "Redis freeable memory is below 200 MiB"
     }
 
     evictions = {
-      alarm_name          = "${local.project_name}-${local.environment}-redis-evictions"
+      alarm_name          = "zym-prod-redis-evictions"
       metric_name         = "Evictions"
       namespace           = "AWS/ElastiCache"
       statistic           = "Sum"
       period              = 60
       evaluation_periods  = 1
-      datapoints_to_alarm = 1
       threshold           = 1
       comparison_operator = "GreaterThanOrEqualToThreshold"
       dimensions = {
-        CacheClusterId = "${local.redis.replication_group_id}-001"
+        CacheClusterId = local.redis.cache_cluster_id
       }
-      alarm_description = "Redis evictions are happening"
+      alarm_description = "Redis evictions are non-zero"
     }
   }
 }
@@ -183,15 +208,25 @@ resource "aws_sns_topic_policy" "production_alerts" {
   arn = aws_sns_topic.production_alerts.arn
 
   policy = jsonencode({
-    Version = "2012-10-17"
+    Version = "2008-10-17"
+    Id      = "__default_policy_ID"
     Statement = [
       {
-        Sid    = "AllowCloudWatchAlarmsPublish"
+        Sid    = "__default_statement_ID"
         Effect = "Allow"
         Principal = {
-          Service = "cloudwatch.amazonaws.com"
+          AWS = "*"
         }
-        Action   = "sns:Publish"
+        Action = [
+          "SNS:GetTopicAttributes",
+          "SNS:SetTopicAttributes",
+          "SNS:AddPermission",
+          "SNS:RemovePermission",
+          "SNS:DeleteTopic",
+          "SNS:Subscribe",
+          "SNS:ListSubscriptionsByTopic",
+          "SNS:Publish",
+        ]
         Resource = aws_sns_topic.production_alerts.arn
         Condition = {
           StringEquals = {
@@ -210,17 +245,63 @@ resource "aws_cloudwatch_metric_alarm" "alb" {
   alarm_description   = each.value.alarm_description
   comparison_operator = each.value.comparison_operator
   evaluation_periods  = each.value.evaluation_periods
-  datapoints_to_alarm = each.value.datapoints_to_alarm
+  datapoints_to_alarm = lookup(each.value, "datapoints_to_alarm", null)
   threshold           = each.value.threshold
   namespace           = each.value.namespace
   metric_name         = each.value.metric_name
   statistic           = each.value.statistic
   period              = each.value.period
   treat_missing_data  = "notBreaching"
-  actions_enabled     = true
   alarm_actions       = [aws_sns_topic.production_alerts.arn]
+  ok_actions          = [aws_sns_topic.production_alerts.arn]
 
   dimensions = each.value.dimensions
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_service_cpu" {
+  for_each = local.ecs_service_alarm_thresholds
+
+  alarm_name          = "zym-prod-${local.ecs.services[each.key]}-high-cpu"
+  alarm_description   = "ECS service ${local.ecs.services[each.key]} CPU is sustained above ${each.value.cpu}%"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = each.value.cpu
+  namespace           = "AWS/ECS"
+  metric_name         = "CPUUtilization"
+  statistic           = "Average"
+  period              = 300
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.production_alerts.arn]
+  ok_actions          = [aws_sns_topic.production_alerts.arn]
+
+  dimensions = {
+    ClusterName = local.ecs.cluster_name
+    ServiceName = local.ecs.services[each.key]
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_service_memory" {
+  for_each = local.ecs_service_alarm_thresholds
+
+  alarm_name          = "zym-prod-${local.ecs.services[each.key]}-high-memory"
+  alarm_description   = "ECS service ${local.ecs.services[each.key]} memory is sustained above ${each.value.memory}%"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = each.value.memory
+  namespace           = "AWS/ECS"
+  metric_name         = "MemoryUtilization"
+  statistic           = "Average"
+  period              = 300
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.production_alerts.arn]
+  ok_actions          = [aws_sns_topic.production_alerts.arn]
+
+  dimensions = {
+    ClusterName = local.ecs.cluster_name
+    ServiceName = local.ecs.services[each.key]
+  }
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds" {
@@ -230,15 +311,15 @@ resource "aws_cloudwatch_metric_alarm" "rds" {
   alarm_description   = each.value.alarm_description
   comparison_operator = each.value.comparison_operator
   evaluation_periods  = each.value.evaluation_periods
-  datapoints_to_alarm = each.value.datapoints_to_alarm
+  datapoints_to_alarm = lookup(each.value, "datapoints_to_alarm", null)
   threshold           = each.value.threshold
   namespace           = each.value.namespace
   metric_name         = each.value.metric_name
   statistic           = each.value.statistic
   period              = each.value.period
   treat_missing_data  = "notBreaching"
-  actions_enabled     = true
   alarm_actions       = [aws_sns_topic.production_alerts.arn]
+  ok_actions          = [aws_sns_topic.production_alerts.arn]
 
   dimensions = each.value.dimensions
 }
@@ -250,15 +331,15 @@ resource "aws_cloudwatch_metric_alarm" "redis" {
   alarm_description   = each.value.alarm_description
   comparison_operator = each.value.comparison_operator
   evaluation_periods  = each.value.evaluation_periods
-  datapoints_to_alarm = each.value.datapoints_to_alarm
+  datapoints_to_alarm = lookup(each.value, "datapoints_to_alarm", null)
   threshold           = each.value.threshold
   namespace           = each.value.namespace
   metric_name         = each.value.metric_name
   statistic           = each.value.statistic
   period              = each.value.period
   treat_missing_data  = "notBreaching"
-  actions_enabled     = true
   alarm_actions       = [aws_sns_topic.production_alerts.arn]
+  ok_actions          = [aws_sns_topic.production_alerts.arn]
 
   dimensions = each.value.dimensions
 }

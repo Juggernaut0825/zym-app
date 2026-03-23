@@ -86,6 +86,7 @@ The first concrete import-first resources already live in this directory:
 - [`cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
 - [`github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
 - [`imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
+- [`imports-ops.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-ops.tf)
 
 ## What is not represented here yet
 
@@ -106,6 +107,10 @@ Recommended settings:
 - environment name: `production`
 - environment URL: `https://app.zym8.com`
 - required reviewers: the maintainer who should approve production rollouts
+
+## Notifications caveat
+
+The SNS topic `zym-prod-alerts` exists and Terraform now models it, but the topic still needs at least one real subscription before alarms become human-visible.
 
 If a future session has a GitHub API token, it can configure this with:
 

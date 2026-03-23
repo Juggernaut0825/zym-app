@@ -65,6 +65,7 @@ locals {
   redis = {
     replication_group_id = "zym-prod-redis"
     primary_endpoint     = "master.zym-prod-redis.yfqary.use2.cache.amazonaws.com"
+    cache_cluster_id     = "zym-prod-redis-001"
     parameter_group_name = "zym-redis7"
   }
 
@@ -131,6 +132,11 @@ locals {
   secrets = {
     server_secret_name = "zym/prod/server"
     server_secret_arn  = "arn:aws:secretsmanager:us-east-2:529814743482:secret:zym/prod/server-6uVGWX"
+  }
+
+  monitoring = {
+    sns_topic_name = "zym-prod-alerts"
+    sns_topic_arn  = "arn:aws:sns:us-east-2:529814743482:zym-prod-alerts"
   }
 
   cloudwatch_log_groups = {

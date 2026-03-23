@@ -5,10 +5,19 @@ This is the short operational guide for the live `us-east-2` stack.
 ## Current truth
 
 - Production is running on ECS Fargate behind one ALB.
-- ECS service autoscaling is **not configured yet**.
-- Every service is currently a fixed desired count.
+- ECS service autoscaling is now configured for `web`, `api`, `ws`, and `worker`.
+- CloudWatch alarms now exist for:
+  - ALB `5xx`
+  - unhealthy target groups
+  - ECS CPU and memory across all live services
+  - RDS pressure
+  - Redis pressure
+- An SNS topic named `zym-prod-alerts` now exists for alarm fanout.
+- `zym-prod-alerts` currently has no subscriptions yet, so notifications still need an email/Slack/webhook subscriber.
+- RDS deletion protection is enabled.
+- Redis snapshot retention is set to `7` days.
 
-That means the stack is healthy, but it is **not yet automatically scaling out** when CPU or memory spikes.
+That means the stack is much closer to a real operations baseline, but it still has one GitHub-side manual gap: the `production` environment reviewer gate needs GitHub admin/API access.
 
 ## What autoscaling should do
 
@@ -38,20 +47,13 @@ Recommended first targets:
 
 Priority 1:
 
-- ECS service autoscaling
-- CloudWatch alarms for:
-  - ALB `5XX`
-  - target group unhealthy host count
-  - ECS CPU/memory
-  - RDS CPU, free storage, connections
-  - Redis CPU, memory, evictions
 - GitHub `production` environment required reviewer gate
-- at least one deploy/runbook check that says how to roll back to the previous image tag
+- at least one real subscriber on `zym-prod-alerts`
 
 Priority 2:
 
-- RDS backups and restore drill
-- Redis snapshot/restore policy review
+- RDS restore drill
+- Redis restore drill
 - log retention review
 - on-call style dashboard for health, queue depth, and error rate
 - S3 lifecycle policies for uploaded media
@@ -118,6 +120,61 @@ bash ./infra/scripts/prod-stack.sh pause --dry-run
 bash ./infra/scripts/prod-stack.sh pause --skip-db
 bash ./infra/scripts/prod-stack.sh resume --dry-run
 ```
+
+## Roll forward / rollback by image tag
+
+Use:
+
+```bash
+bash ./infra/scripts/deploy-prod-image-tag.sh <image-tag>
+```
+
+Example rollback:
+
+```bash
+bash ./infra/scripts/deploy-prod-image-tag.sh 559dbb8
+```
+
+That command:
+
+- verifies the tag exists in ECR
+- rolls `web`
+- rolls `api/ws/worker/scheduler`
+- waits for ECS services to stabilize
+
+GitHub-side equivalent:
+
+- run `Deploy Production ECS`
+- set `image_tag` to the previous known-good tag
+
+## Backup and restore runbook
+
+Current policy:
+
+- RDS automated backups are enabled
+- RDS deletion protection is enabled
+- Redis snapshot retention is `7` days
+
+What still needs a deliberate human drill:
+
+- restore RDS to a point-in-time or fresh instance
+- validate restored relational data and shared `/app/data` expectations before failover
+- restore Redis from snapshot only when you intentionally accept losing post-snapshot cache state
+
+RDS restore entrypoint:
+
+```bash
+aws rds restore-db-instance-to-point-in-time \
+  --region us-east-2 \
+  --source-db-instance-identifier zym-prod-postgres \
+  --target-db-instance-identifier zym-prod-postgres-restore-test \
+  --use-latest-restorable-time
+```
+
+Redis backup truth:
+
+- Redis is supporting runtime state here, not the canonical source of relational history
+- snapshot restore is mainly for operational recovery, not message/database truth
 
 ## Local frontend workflow
 
