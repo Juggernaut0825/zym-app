@@ -2655,9 +2655,10 @@ export default function AppPage() {
                   <span className="material-symbols-outlined">add_circle</span>
                 </button>
                 {composerActionsOpen ? (
-                  <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[200px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
-                    <label className="btn btn-ghost" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
-                      Photo / Video
+                  <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[240px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
+                    <label className="btn btn-ghost flex-col items-start gap-0.5" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
+                      <span>Photo / Video</span>
+                      <span className="text-xs font-normal text-slate-400">Up to 50MB each</span>
                       <input
                         hidden
                         type="file"
@@ -2724,9 +2725,11 @@ export default function AppPage() {
               </div>
             </div>
 
-            <p className="mt-3 text-xs text-slate-500">
-              {attachments.length > 0 ? `${attachments.length}/${MAX_MEDIA_ATTACHMENTS} file(s) ready` : 'Supports images and videos up to 50MB each'}
-            </p>
+            {attachments.length > 0 ? (
+              <p className="mt-3 text-xs text-slate-500">
+                {attachments.length}/{MAX_MEDIA_ATTACHMENTS} file(s) ready
+              </p>
+            ) : null}
             {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
           </footer>
         </section>
