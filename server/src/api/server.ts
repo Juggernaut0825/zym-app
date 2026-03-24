@@ -1025,6 +1025,13 @@ app.post('/auth/register',
 
     res.json({ userId, verificationRequired: true });
   } catch (err: any) {
+    const message = String(err.message || '');
+    if (message.includes('users_username_key') || message.includes('UNIQUE constraint failed: users.username')) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
+    if (message.includes('users_email_key') || message.includes('UNIQUE constraint failed: users.email')) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
     res.status(400).json({ error: err.message });
   }
 });
