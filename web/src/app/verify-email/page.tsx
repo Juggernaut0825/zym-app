@@ -8,6 +8,7 @@ function VerifyEmailScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = String(searchParams.get('token') || '').trim();
+  const redirect = String(searchParams.get('redirect') || '').trim();
   const [pending, setPending] = useState(Boolean(token));
   const [verified, setVerified] = useState(false);
   const [message, setMessage] = useState(
@@ -29,7 +30,14 @@ function VerifyEmailScreen() {
       .then(() => {
         if (cancelled) return;
         setVerified(true);
-        setMessage('Your email has been verified. You can sign in now.');
+        setMessage('Your email has been verified. Redirecting...');
+        setTimeout(() => {
+          if (redirect === 'coach-select') {
+            router.push('/coach-select');
+          } else {
+            router.push('/login');
+          }
+        }, 1500);
       })
       .catch((err: any) => {
         if (cancelled) return;
@@ -57,8 +65,8 @@ function VerifyEmailScreen() {
 
         {verified && (
           <div className="mt-6 grid gap-3">
-            <button className="btn btn-primary text-sm" type="button" onClick={() => router.push('/login')}>
-              Back to login
+            <button className="btn btn-primary text-sm" type="button" onClick={() => router.push(redirect === 'coach-select' ? '/coach-select' : '/login')}>
+              {redirect === 'coach-select' ? 'Choose your coach' : 'Back to login'}
             </button>
           </div>
         )}
