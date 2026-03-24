@@ -118,16 +118,6 @@ export default function LoginPage() {
                 Register today
               </button>
             </p>
-            <p className="mt-3 text-xs text-[color:var(--ink-300)]">
-              Need a verification email?{' '}
-              <button
-                type="button"
-                className="font-semibold text-[color:var(--coach-zj)] transition hover:underline"
-                onClick={() => router.push('/verify-email')}
-              >
-                Send again
-              </button>
-            </p>
           </div>
         </section>
 
