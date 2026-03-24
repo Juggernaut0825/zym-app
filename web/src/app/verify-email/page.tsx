@@ -1,20 +1,19 @@
 'use client';
 
-import { FormEvent, Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { requestEmailVerification, verifyEmail } from '@/lib/api';
+import { verifyEmail } from '@/lib/api';
 
 function VerifyEmailScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = String(searchParams.get('token') || '').trim();
-  const [email, setEmail] = useState(String(searchParams.get('email') || '').trim());
   const [pending, setPending] = useState(Boolean(token));
   const [verified, setVerified] = useState(false);
   const [message, setMessage] = useState(
     searchParams.get('sent') === '1'
       ? 'Check your inbox for a verification email. Once you verify, you can sign in.'
-      : 'Enter your email to get a new verification link.',
+      : 'Verifying your email...',
   );
   const [error, setError] = useState('');
 
@@ -35,7 +34,7 @@ function VerifyEmailScreen() {
       .catch((err: any) => {
         if (cancelled) return;
         setError(err.message || 'This verification link is invalid or expired.');
-        setMessage('Need a new verification email?');
+        setMessage('');
       })
       .finally(() => {
         if (!cancelled) setPending(false);
@@ -45,27 +44,6 @@ function VerifyEmailScreen() {
       cancelled = true;
     };
   }, [token]);
-
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const normalizedEmail = email.trim().toLowerCase();
-    setError('');
-
-    if (!normalizedEmail) {
-      setError('Please enter your email address.');
-      return;
-    }
-
-    try {
-      setPending(true);
-      await requestEmailVerification(normalizedEmail);
-      setMessage('If the account exists, a new verification email has been sent.');
-    } catch (err: any) {
-      setError(err.message || 'Failed to send verification email.');
-    } finally {
-      setPending(false);
-    }
-  };
 
   return (
     <main className="grid min-h-dvh place-items-center px-5 py-8">
@@ -77,29 +55,12 @@ function VerifyEmailScreen() {
         <p className="mt-3 text-sm leading-6 text-[color:var(--ink-500)]">{message}</p>
         {error ? <p className="mt-3 text-sm text-[color:var(--danger)]">{error}</p> : null}
 
-        {verified ? (
+        {verified && (
           <div className="mt-6 grid gap-3">
             <button className="btn btn-primary text-sm" type="button" onClick={() => router.push('/login')}>
               Back to login
             </button>
           </div>
-        ) : (
-          <form onSubmit={onSubmit} className="mt-6 grid gap-3">
-            <input
-              className="input-shell text-sm"
-              placeholder="Email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            <button className="btn btn-primary text-sm" disabled={pending} type="submit">
-              {pending ? 'Sending...' : 'Send verification email'}
-            </button>
-            <button className="btn btn-ghost text-sm" type="button" onClick={() => router.push('/login')}>
-              Back to login
-            </button>
-          </form>
         )}
       </section>
     </main>
