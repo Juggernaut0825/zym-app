@@ -31,7 +31,7 @@ export default function RegisterPage() {
     try {
       setPending(true);
       await register(normalizedUsername, normalizedEmail, password);
-      router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}&sent=1`);
+      router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}&sent=1&redirect=coach-select`);
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
     } finally {

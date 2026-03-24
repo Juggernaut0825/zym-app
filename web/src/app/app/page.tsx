@@ -108,7 +108,6 @@ const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const COMMUNITY_POST_VISIBILITY = 'friends' as const;
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
 const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
 const POST_DRAFT_STORAGE_KEY_PREFIX = 'zym.web.postDraft.v2.user';
@@ -496,6 +495,7 @@ export default function AppPage() {
   const [feedLoading, setFeedLoading] = useState(false);
   const [communityQuery, setCommunityQuery] = useState('');
   const [postText, setPostText] = useState('');
+  const [postVisibility, setPostVisibility] = useState<'public' | 'friends'>('friends');
   const [postFiles, setPostFiles] = useState<File[]>([]);
   const [postFilePreviews, setPostFilePreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
   const [postPending, setPostPending] = useState(false);
@@ -1905,7 +1905,7 @@ export default function AppPage() {
       const uploadedMedia = postFiles.length > 0
         ? await Promise.all(postFiles.map((file) => uploadFile(file, {
             source: 'web_community_post',
-            visibility: COMMUNITY_POST_VISIBILITY,
+            visibility: postVisibility,
           })))
         : [];
       const mediaUrls = uploadedMedia.map((item) => item.url);
@@ -1918,11 +1918,12 @@ export default function AppPage() {
         content: postText.trim(),
         mediaUrls,
         mediaIds,
-        visibility: COMMUNITY_POST_VISIBILITY,
+        visibility: postVisibility,
       });
 
       setPostText('');
       setPostFiles([]);
+      setPostVisibility('friends');
       showNotice('Post published.');
       await loadFeed();
     } catch (err: any) {
@@ -2274,17 +2275,17 @@ export default function AppPage() {
     searchRef?: { current: HTMLInputElement | null },
     trailing?: JSX.Element,
   ) => (
-    <header className="flex flex-col gap-5 border-b border-slate-200/50 bg-white/20 px-5 py-5 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
+    <header className="flex flex-col gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h1>
-        <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+        <h1 className="text-lg font-bold tracking-tight text-slate-900">{title}</h1>
+        <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
       </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <label className="relative block min-w-[240px] md:min-w-[280px]">
-          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
           <input
             ref={searchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
             value={searchValue}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={searchPlaceholder}
@@ -2293,19 +2294,27 @@ export default function AppPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
             onClick={() => void loadMentions(authUserId)}
             title="Refresh notifications"
           >
-            <span className="material-symbols-outlined">notifications</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
           </button>
           <button
             type="button"
-            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            onClick={() => router.push('/friends')}
+            title="Friends"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>group</span>
+          </button>
+          <button
+            type="button"
+            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
             onClick={() => setTab('profile')}
             title="Open profile"
           >
-            <span className="material-symbols-outlined">tune</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>tune</span>
           </button>
           {trailing}
         </div>
@@ -2315,13 +2324,13 @@ export default function AppPage() {
 
   const renderMessagePage = () => (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-4 backdrop-blur-sm md:px-8">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Message</h1>
+      <header className="flex items-center justify-between gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
+        <h1 className="text-lg font-bold tracking-tight text-slate-900">Message</h1>
         <label className="relative block w-full max-w-[320px]">
-          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
+          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
           <input
             ref={conversationSearchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
             value={conversationQuery}
             onChange={(event) => setConversationQuery(event.target.value)}
             placeholder="Search conversation..."
@@ -2331,6 +2340,22 @@ export default function AppPage() {
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 p-4 md:p-6 xl:flex-row">
         <section className="flex w-full flex-col gap-3 xl:w-[320px]">
+          <button
+            type="button"
+            className="flex items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-4 py-3 text-sm font-semibold text-[color:var(--coach-zj)] transition hover:bg-white/75"
+            onClick={() => {
+              const name = window.prompt('Group name:');
+              if (!name?.trim()) return;
+              const members = window.prompt('Add members (comma-separated usernames):');
+              if (!members?.trim()) return;
+              setGroupName(name.trim());
+              setGroupMembers(members.trim());
+              void handleCreateGroup(new Event('submit') as any);
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add</span>
+            Create Group
+          </button>
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
             {filteredConversations.length === 0 ? (
               <div className="rounded-[28px] border border-dashed border-slate-300/80 bg-white/25 p-5 text-sm text-slate-500">
@@ -2351,8 +2376,8 @@ export default function AppPage() {
           </div>
         </section>
 
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[32px] border border-white/60 bg-white/35 backdrop-blur-xl">
-          <header className="flex items-center gap-3 border-b border-slate-200/50 bg-white/35 px-5 py-3 md:px-6">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[28px] border border-white/60 bg-white/35 backdrop-blur-xl">
+          <header className="flex items-center gap-3 border-b border-slate-200/50 bg-white/25 px-5 py-3 md:px-6 rounded-t-[28px]">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
@@ -2741,7 +2766,7 @@ export default function AppPage() {
     <div className="flex h-full flex-col">
       {renderAppHeader(
         'Community Feed',
-        'Share workouts, meals, and wins with your accountability circle.',
+        '',
         communityQuery,
         setCommunityQuery,
         'Search community posts...',
@@ -2763,7 +2788,7 @@ export default function AppPage() {
                     placeholder="What's on your mind?"
                     onChange={(event) => setPostText(event.target.value)}
                   />
-                  <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/60 pt-4 md:flex-row md:items-center md:justify-between">
+                  <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/60 pt-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="flex cursor-pointer items-center gap-2 rounded-full bg-[rgba(105,121,247,0.1)] px-4 py-2 text-sm font-medium text-[color:var(--coach-zj)] transition hover:bg-[rgba(105,121,247,0.16)]">
                         <span className="material-symbols-outlined text-lg">image</span>
@@ -2777,9 +2802,27 @@ export default function AppPage() {
                         </button>
                       ) : null}
                     </div>
-                    <button className="btn btn-zj" disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
-                      {postPending ? 'Posting...' : 'Post'}
-                    </button>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'public' ? 'bg-[rgba(105,121,247,0.16)] text-[color:var(--coach-zj)]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          type="button"
+                          onClick={() => setPostVisibility('public')}
+                        >
+                          Public
+                        </button>
+                        <button
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'friends' ? 'bg-[rgba(105,121,247,0.16)] text-[color:var(--coach-zj)]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          type="button"
+                          onClick={() => setPostVisibility('friends')}
+                        >
+                          Friends only
+                        </button>
+                      </div>
+                      <button className="btn btn-zj" disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
+                        {postPending ? 'Posting...' : 'Post'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2930,107 +2973,6 @@ export default function AppPage() {
         </section>
 
         <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Suggested Communities</h2>
-            <div className="mt-4 space-y-4">
-              {suggestedCommunities.map((item) => (
-                <div key={item.name} className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.1)] text-[color:var(--coach-zj)]">
-                      <span className="material-symbols-outlined">{item.icon}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{item.name}</p>
-                      <p className="text-xs text-slate-500">{item.meta}</p>
-                    </div>
-                  </div>
-                  <button type="button" className="text-xs font-bold text-[color:var(--coach-zj)]">Join</button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Social Graph</h2>
-            <div className="mt-4 rounded-[22px] border border-[rgba(105,121,247,0.12)] bg-[rgba(105,121,247,0.06)] p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">Your connect ID</p>
-              <p className="mt-2 text-2xl font-bold tracking-[0.18em] text-slate-900">{connectId || '------'}</p>
-              <p className="mt-2 text-xs leading-5 text-slate-500">{connectCodeMeta}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    if (!connectCode) return;
-                    void navigator.clipboard.writeText(connectCode);
-                    showNotice('Connect code copied.');
-                  }}
-                >
-                  Copy code
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => void loadConnectInfo()}>
-                  Refresh
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <input
-                className="input-shell"
-                value={friendQuery}
-                onChange={(event) => setFriendQuery(event.target.value)}
-                placeholder="Search people by username"
-              />
-              <div className="mt-3 space-y-2">
-                {friendSearchResult.slice(0, 3).map((user) => (
-                  <div key={user.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/65 px-3 py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{user.username}</p>
-                      <p className="text-xs text-slate-500">ID: {user.id}</p>
-                    </div>
-                    <button className="btn btn-zj" type="button" onClick={() => void handleAddFriend(user)}>
-                      Add
-                    </button>
-                  </div>
-                ))}
-                {friendQuery.trim() && friendSearchResult.length === 0 ? (
-                  <p className="text-sm text-slate-500">No matching users.</p>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Pending Requests</h2>
-              <span className="text-xs font-semibold text-slate-400">{requests.length}</span>
-            </div>
-            <div className="mt-4 space-y-3">
-              {requests.length === 0 ? <p className="text-sm text-slate-500">No pending requests right now.</p> : null}
-              {requests.slice(0, 3).map((friend) => (
-                <div key={friend.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/65 px-3 py-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{friend.username}</p>
-                    <p className="text-xs text-slate-500">Unlock DM and profile sharing</p>
-                  </div>
-                  <button className="btn btn-zj" type="button" onClick={() => void handleAcceptFriend(friend.id)}>
-                    Accept
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-slate-500">Trending Topics</h2>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {trendingTopics.map((topic) => (
-                <span key={topic} className="rounded-full border border-slate-200/80 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600">
-                  {topic}
-                </span>
-              ))}
-            </div>
-          </section>
         </aside>
       </div>
     </div>
@@ -3163,34 +3105,34 @@ export default function AppPage() {
 
   const renderProfilePage = () => (
     <div className="flex h-full flex-col overflow-y-auto">
-      <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-4 backdrop-blur-sm md:px-8">
+      <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]">
-            <span className="material-symbols-outlined">account_circle</span>
+          <div className="flex size-9 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]">
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_circle</span>
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">Unified Profile</h1>
-            <p className="text-sm text-slate-500">Tune your coach, stats, and account details.</p>
+            <h1 className="text-lg font-bold tracking-tight text-slate-900">Unified Profile</h1>
+            <p className="text-xs text-slate-500">Tune your coach, stats, and account details.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
             onClick={() => void loadAbuseReports()}
             title="Notifications"
           >
-            <span className="material-symbols-outlined">notifications</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
           </button>
           <button
             type="button"
-            className="flex size-10 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
             onClick={() => void loadSecurityEvents()}
             title="Settings"
           >
-            <span className="material-symbols-outlined">settings</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>settings</span>
           </button>
-          <button className="btn btn-danger-soft" type="button" onClick={() => void handleLogout()}>
+          <button className="btn btn-danger-soft text-sm" type="button" onClick={() => void handleLogout()}>
             Logout
           </button>
         </div>
@@ -3269,20 +3211,17 @@ export default function AppPage() {
               </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
-                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">fitness_center</span>
-                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{leaderboard.length}</strong>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Ranked peers</span>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                  <label className="text-xs font-semibold text-slate-500">Bio</label>
+                  <p className="mt-2 text-sm text-slate-800">{profile?.bio || 'Not set'}</p>
                 </article>
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
-                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">shield</span>
-                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{authSessions.length}</strong>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Active sessions</span>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                  <label className="text-xs font-semibold text-slate-500">Fitness Goal</label>
+                  <p className="mt-2 text-sm text-slate-800">{profile?.fitness_goal || 'Not set'}</p>
                 </article>
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4 text-center">
-                  <span className="material-symbols-outlined text-[color:var(--coach-zj)]">bolt</span>
-                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{securityEvents.length}</strong>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Security events</span>
+                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                  <label className="text-xs font-semibold text-slate-500">Hobbies</label>
+                  <p className="mt-2 text-sm text-slate-800">{profile?.hobbies || 'Not set'}</p>
                 </article>
               </div>
             </div>
@@ -3300,18 +3239,6 @@ export default function AppPage() {
                   placeholder="Bio"
                   value={profileDraft.bio}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
-                />
-                <input
-                  className="input-shell"
-                  placeholder="Avatar URL (optional)"
-                  value={profileDraft.avatar_url}
-                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, avatar_url: event.target.value }))}
-                />
-                <input
-                  className="input-shell"
-                  placeholder="Background URL (optional)"
-                  value={profileDraft.background_url}
-                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, background_url: event.target.value }))}
                 />
                 <input
                   className="input-shell"
@@ -3380,109 +3307,6 @@ export default function AppPage() {
           </div>
 
           <div className="flex flex-col gap-6">
-            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">Device Sessions</h2>
-                  <p className="mt-1 text-sm text-slate-500">Manage where your account is signed in.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button className="btn btn-ghost" onClick={() => void loadAuthSessions()} disabled={authSessionsLoading}>
-                    {authSessionsLoading ? 'Refreshing...' : 'Refresh'}
-                  </button>
-                  <button className="btn btn-danger-soft" onClick={() => void handleLogoutAllSessions()} disabled={logoutAllSessionsPending}>
-                    {logoutAllSessionsPending ? 'Processing...' : 'Logout others'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {authSessionsLoading && authSessions.length === 0 ? <p className="text-sm text-slate-500">Loading sessions...</p> : null}
-                {authSessions.map((session) => (
-                  <article key={session.sessionId} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <strong className="text-slate-900">{session.deviceName || 'Unknown device'}</strong>
-                        <p className="mt-1 text-xs text-slate-500">{session.ipAddress || 'IP unavailable'} • Last seen {formatSessionDate(session.lastSeenAt)}</p>
-                        <p className="mt-1 text-xs text-slate-500">Created {formatSessionDate(session.createdAt)} • Expires {formatSessionDate(session.expiresAt)}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {session.current ? <span className="rounded-full bg-[rgba(105,121,247,0.12)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">Current</span> : null}
-                        {!session.current ? (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => void handleRevokeSession(session.sessionId)}
-                            disabled={authSessionPendingId === session.sessionId || Boolean(session.revokedAt)}
-                          >
-                            {authSessionPendingId === session.sessionId ? 'Revoking...' : (session.revokedAt ? 'Revoked' : 'Revoke')}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">Security Timeline</h2>
-                  <p className="mt-1 text-sm text-slate-500">Recent auth and moderation events for your account.</p>
-                </div>
-                <button className="btn btn-ghost" onClick={() => void loadSecurityEvents()} disabled={securityEventsLoading}>
-                  {securityEventsLoading ? 'Refreshing...' : 'Refresh'}
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {!securityEventsLoading && securityEvents.length === 0 ? <p className="text-sm text-slate-500">No security events yet.</p> : null}
-                {securityEvents.slice(0, 5).map((event) => (
-                  <article key={event.id} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <strong className="text-slate-900">{eventLabel(event.event_type)}</strong>
-                        <p className="mt-1 text-xs text-slate-500">{(event.ip_address || 'IP unavailable')} • {(event.user_agent || 'Unknown client').slice(0, 64)}</p>
-                        <p className="mt-1 text-xs text-slate-500">{formatSessionDate(event.created_at)}</p>
-                      </div>
-                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
-                        event.severity === 'high'
-                          ? 'bg-red-100 text-red-600'
-                          : event.severity === 'warn'
-                            ? 'bg-amber-100 text-amber-600'
-                            : 'bg-slate-100 text-slate-500'
-                      }`}
-                      >
-                        {event.severity}
-                      </span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">Safety Center</h2>
-                  <p className="mt-1 text-sm text-slate-500">Your latest moderation reports.</p>
-                </div>
-                <button className="btn btn-ghost" onClick={() => void loadAbuseReports()} disabled={abuseReportsLoading}>
-                  {abuseReportsLoading ? 'Refreshing...' : 'Refresh'}
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {abuseReports.length === 0 ? <p className="text-sm text-slate-500">No reports submitted yet.</p> : null}
-                {abuseReports.slice(0, 5).map((report) => (
-                  <article key={report.id} className="rounded-[22px] border border-white/70 bg-white/70 p-4">
-                    <strong className="text-slate-900">{report.target_type} #{report.target_id}</strong>
-                    <p className="mt-1 text-sm text-slate-600">{report.reason}</p>
-                    <p className="mt-2 text-xs text-slate-500">{formatSessionDate(report.created_at)} • {report.status}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
           </div>
         </div>
 
@@ -3558,14 +3382,6 @@ export default function AppPage() {
             </nav>
 
             <div className="mt-auto flex flex-col items-center gap-4">
-              <button
-                type="button"
-                onClick={() => setTab('profile')}
-                className="flex size-12 items-center justify-center rounded-2xl text-slate-500 transition hover:bg-white/55 hover:text-slate-800"
-                title={selectedTabLabel}
-              >
-                <span className="material-symbols-outlined">settings</span>
-              </button>
               <button
                 type="button"
                 onClick={() => setTab('profile')}

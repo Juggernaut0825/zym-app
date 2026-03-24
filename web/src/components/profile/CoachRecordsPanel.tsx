@@ -249,30 +249,30 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
   }
 
   return (
-    <section className="flow-card form-grid coach-records-section">
-      <div className="flow-card-head coach-records-head">
+    <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 style={{ fontSize: 18 }}>Coach Records Details</h3>
-          <p>Visualized agent records for profile, meals, and training. Edit here if the logged timeline is incorrect.</p>
+          <h2 className="text-lg font-bold text-slate-900">Coach Records Details</h2>
+          <p className="mt-1 text-sm text-slate-500">Visualized agent records for profile, meals, and training. Edit here if the logged timeline is incorrect.</p>
         </div>
         <button className="btn btn-ghost" type="button" onClick={() => void loadData()} disabled={loading || saving}>
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
-      <p className="entity-sub">
+      <p className="mt-3 text-xs text-slate-500">
         This panel is the canonical source for agent log corrections. Inputs are format-restricted and length-limited.
       </p>
 
       {records ? (
-        <div className="coach-records-stats">
+        <div className="mt-4 flex gap-4 text-sm text-slate-600">
           <span>Days: {records.stats.days}</span>
           <span>Meals: {records.stats.mealCount}</span>
           <span>Training entries: {records.stats.trainingCount}</span>
         </div>
       ) : null}
 
-      <div className="coach-records-profile-grid">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
         <input
           className="input-shell"
           inputMode="decimal"
@@ -348,14 +348,14 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
         />
       </div>
 
-      <div className="coach-records-actions">
-        <button className="btn btn-primary" type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>
+      <div className="mt-4 flex gap-3">
+        <button className="btn btn-zj" type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>
           {saving ? 'Saving...' : 'Save coach profile records'}
         </button>
       </div>
 
       {!records && !loading ? (
-        <p className="entity-sub">No coach records available yet.</p>
+        <p className="mt-3 text-sm text-slate-500">No coach records available yet.</p>
       ) : null}
 
       {records?.records.map((day) => (
