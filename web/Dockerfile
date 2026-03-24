@@ -22,10 +22,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+ENV NEXT_DIST_DIR=.next-prod
 
 COPY --from=build /app/public ./public
 COPY --from=build /app/.next-prod/standalone ./
-COPY --from=build /app/.next-prod/static ./.next/static
+COPY --from=build /app/.next-prod/static ./.next-prod/static
 
 EXPOSE 3000
 
