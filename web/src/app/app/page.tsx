@@ -2074,6 +2074,7 @@ export default function AppPage() {
   }
 
   async function handleUploadProfileAsset(file: File, kind: 'avatar' | 'background') {
+    if (!profile) return;
     try {
       if (kind === 'avatar') setProfileAvatarUploading(true);
       if (kind === 'background') setProfileBackgroundUploading(true);
@@ -2096,10 +2097,22 @@ export default function AppPage() {
 
       if (kind === 'avatar') {
         setProfileDraft((prev) => ({ ...prev, avatar_url: uploaded.url }));
-        showNotice('Avatar uploaded. Save profile to apply.');
+        await updateProfile({
+          userId: profile.id,
+          avatar_url: uploaded.url,
+          avatar_visibility: 'public',
+        });
+        await loadProfile();
+        showNotice('Avatar updated.');
       } else {
         setProfileDraft((prev) => ({ ...prev, background_url: uploaded.url }));
-        showNotice('Cover uploaded. Save profile to apply.');
+        await updateProfile({
+          userId: profile.id,
+          background_url: uploaded.url,
+          background_visibility: 'friends',
+        });
+        await loadProfile();
+        showNotice('Cover updated.');
       }
     } catch (err: any) {
       setError(err.message || `Failed to upload ${kind}.`);
@@ -3228,12 +3241,11 @@ export default function AppPage() {
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="flex flex-col gap-6">
-            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-              <h2 className="text-xl font-bold text-slate-900">Edit Profile</h2>
-              <p className="mt-1 text-sm text-slate-500">Changes sync to iOS and web for the same account.</p>
-              <div className="mt-5 grid gap-3">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <h2 className="text-xl font-bold text-slate-900">Edit Profile</h2>
+            <p className="mt-1 text-sm text-slate-500">Changes sync to iOS and web for the same account.</p>
+            <div className="mt-5 grid gap-3">
                 <textarea
                   className="input-shell"
                   placeholder="Bio"
@@ -3258,10 +3270,10 @@ export default function AppPage() {
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">Coach Style</h2>
+          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Coach Style</h2>
                   <p className="mt-1 text-sm text-slate-500">Choose the energy that fits your workflow.</p>
                 </div>
               </div>
@@ -3304,10 +3316,6 @@ export default function AppPage() {
                 })}
               </div>
             </section>
-          </div>
-
-          <div className="flex flex-col gap-6">
-          </div>
         </div>
 
         <CoachRecordsPanel
