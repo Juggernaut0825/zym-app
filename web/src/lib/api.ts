@@ -571,14 +571,18 @@ export async function getCoachRecords(userId: number, days = 21): Promise<CoachR
 
 export async function updateCoachRecordProfile(payload: {
   userId: number;
+  height?: string;
+  weight?: string;
   height_cm?: number;
   weight_kg?: number;
   age?: number;
   body_fat_pct?: number;
   training_days?: number;
-  gender?: 'male' | 'female';
-  activity_level?: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
-  goal?: 'cut' | 'maintain' | 'bulk';
+  gender?: string;
+  activity_level?: string;
+  goal?: string;
+  experience_level?: string;
+  notes?: string;
   timezone?: string;
 }): Promise<void> {
   await request('/coach/records/profile/update', {

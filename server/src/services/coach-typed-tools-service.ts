@@ -150,6 +150,97 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
+function normalizeFreeformProfileText(value: unknown, maxLength = 120): string {
+  return String(value || '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function parseHeightCm(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const text = normalizeFreeformProfileText(value, 40).toLowerCase();
+  if (!text) return null;
+
+  const feetInches = text.match(/^(\d{1,2})\s*'\s*(\d{1,2})(?:\s*(?:"|in|inch|inches))?$/);
+  if (feetInches) {
+    const feet = Number(feetInches[1]);
+    const inches = Number(feetInches[2]);
+    const totalInches = feet * 12 + inches;
+    return Math.round(totalInches * 2.54 * 10) / 10;
+  }
+
+  const meters = text.match(/^(\d(?:\.\d+)?)\s*m$/);
+  if (meters) {
+    return Math.round(Number(meters[1]) * 100 * 10) / 10;
+  }
+
+  const centimeters = text.match(/^(\d{2,3}(?:\.\d+)?)\s*(?:cm|centimeter|centimeters)?$/);
+  if (centimeters) {
+    const parsed = Number(centimeters[1]);
+    return parsed >= 80 && parsed <= 260 ? Math.round(parsed * 10) / 10 : null;
+  }
+
+  return null;
+}
+
+function parseWeightKg(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const text = normalizeFreeformProfileText(value, 40).toLowerCase();
+  if (!text) return null;
+
+  const pounds = text.match(/^(\d{2,3}(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)$/);
+  if (pounds) {
+    return Math.round(Number(pounds[1]) * 0.45359237 * 100) / 100;
+  }
+
+  const kilograms = text.match(/^(\d{2,3}(?:\.\d+)?)\s*(?:kg|kgs|kilogram|kilograms)?$/);
+  if (kilograms) {
+    const parsed = Number(kilograms[1]);
+    return parsed >= 20 && parsed <= 350 ? Math.round(parsed * 100) / 100 : null;
+  }
+
+  return null;
+}
+
+function inferGender(value: unknown): 'male' | 'female' | null {
+  const text = normalizeFreeformProfileText(value, 40).toLowerCase();
+  if (!text) return null;
+  if (/\b(male|man|men)\b/.test(text)) return 'male';
+  if (/\b(female|woman|women)\b/.test(text)) return 'female';
+  return null;
+}
+
+function inferActivityLevel(value: unknown): 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active' | null {
+  const text = normalizeFreeformProfileText(value, 60).toLowerCase();
+  if (!text) return null;
+  if (text.includes('very active')) return 'very_active';
+  if (text.includes('sedentary')) return 'sedentary';
+  if (/\blight\b/.test(text)) return 'light';
+  if (/\bmoderate\b/.test(text)) return 'moderate';
+  if (/\bactive\b/.test(text)) return 'active';
+  return null;
+}
+
+function inferGoal(value: unknown): 'cut' | 'bulk' | 'maintain' | null {
+  const text = normalizeFreeformProfileText(value, 120).toLowerCase();
+  if (!text) return null;
+  if (/\b(cut|fat loss|lose fat|lean out|slim)\b/.test(text)) return 'cut';
+  if (/\b(bulk|gain|muscle gain|size)\b/.test(text)) return 'bulk';
+  if (/\b(maintain|maintenance|recomp|recomposition)\b/.test(text)) return 'maintain';
+  return null;
+}
+
+function inferExperienceLevel(value: unknown): 'beginner' | 'intermediate' | 'advanced' | null {
+  const text = normalizeFreeformProfileText(value, 40).toLowerCase();
+  if (!text) return null;
+  if (text.includes('beginner')) return 'beginner';
+  if (text.includes('intermediate')) return 'intermediate';
+  if (text.includes('advanced')) return 'advanced';
+  return null;
+}
+
 function isValidTimeZone(value: string): boolean {
   const tz = String(value || '').trim();
   if (!tz) return false;
@@ -222,27 +313,49 @@ export class CoachTypedToolsService {
 
   private sanitizeProfilePatch(raw: Record<string, unknown>): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    const gender = safeString(raw.gender, 20).toLowerCase();
-    const activity = safeString(raw.activity_level ?? raw.activity, 40).toLowerCase();
-    const goal = safeString(raw.goal, 20).toLowerCase();
-    const experience = safeString(raw.experience_level ?? raw.experience, 30).toLowerCase();
+    const height = normalizeFreeformProfileText(raw.height ?? raw.height_cm, 40);
+    const weight = normalizeFreeformProfileText(raw.weight ?? raw.weight_kg, 40);
+    const gender = normalizeFreeformProfileText(raw.gender, 40);
+    const activity = normalizeFreeformProfileText(raw.activity_level ?? raw.activity, 60);
+    const goal = normalizeFreeformProfileText(raw.goal, 120);
+    const experience = normalizeFreeformProfileText(raw.experience_level ?? raw.experience, 40);
     const timezone = safeString(raw.timezone ?? raw.tz, 120).replace(/\s+/g, '');
 
-    const heightCm = toNumber(raw.height_cm ?? raw.height, 80, 260);
-    const weightKg = toNumber(raw.weight_kg ?? raw.weight, 20, 350);
+    const heightCm = parseHeightCm(height);
+    const weightKg = parseWeightKg(weight);
     const age = toNumber(raw.age, 10, 100, true);
     const bodyFat = toNumber(raw.body_fat_pct ?? raw.body_fat, 2, 70);
     const trainingDays = toNumber(raw.training_days, 1, 7, true);
 
-    if (heightCm !== null) out.height_cm = heightCm;
-    if (weightKg !== null) out.weight_kg = weightKg;
+    if (height) {
+      out.height = height;
+      out.height_cm = heightCm;
+    } else if (raw.height_cm !== undefined) {
+      const numericHeight = toNumber(raw.height_cm, 80, 260);
+      if (numericHeight !== null) {
+        out.height_cm = numericHeight;
+        out.height = String(numericHeight);
+      }
+    }
+
+    if (weight) {
+      out.weight = weight;
+      out.weight_kg = weightKg;
+    } else if (raw.weight_kg !== undefined) {
+      const numericWeight = toNumber(raw.weight_kg, 20, 350);
+      if (numericWeight !== null) {
+        out.weight_kg = numericWeight;
+        out.weight = String(numericWeight);
+      }
+    }
+
     if (age !== null) out.age = age;
     if (bodyFat !== null) out.body_fat_pct = bodyFat;
     if (trainingDays !== null) out.training_days = trainingDays;
-    if (gender === 'male' || gender === 'female') out.gender = gender;
-    if (['sedentary', 'light', 'moderate', 'active', 'very_active'].includes(activity)) out.activity_level = activity;
-    if (['cut', 'bulk', 'maintain'].includes(goal)) out.goal = goal;
-    if (['beginner', 'intermediate', 'advanced'].includes(experience)) out.experience_level = experience;
+    if (gender) out.gender = gender;
+    if (activity) out.activity_level = activity;
+    if (goal) out.goal = goal;
+    if (experience) out.experience_level = experience;
     if (timezone && isValidTimeZone(timezone)) out.timezone = timezone;
 
     const notes = safeString(raw.notes, 2000);
@@ -262,11 +375,15 @@ export class CoachTypedToolsService {
   }
 
   private recomputeProfileDerived(profile: Record<string, unknown>): void {
-    const h = Number(profile.height_cm || 0);
-    const w = Number(profile.weight_kg || 0);
+    delete profile.bmr;
+    delete profile.tdee;
+    delete profile.daily_target;
+
+    const h = parseHeightCm(profile.height ?? profile.height_cm) ?? Number(profile.height_cm || 0);
+    const w = parseWeightKg(profile.weight ?? profile.weight_kg) ?? Number(profile.weight_kg || 0);
     const a = Number(profile.age || 0);
-    const g = safeString(profile.gender, 12).toLowerCase() || 'male';
-    const activity = safeString(profile.activity_level, 20).toLowerCase() || 'moderate';
+    const g = inferGender(profile.gender) || 'male';
+    const activity = inferActivityLevel(profile.activity_level) || 'moderate';
     const bf = Number(profile.body_fat_pct || 0);
 
     if (!Number.isFinite(h) || !Number.isFinite(w) || !Number.isFinite(a) || h <= 0 || w <= 0 || a <= 0) {
@@ -291,13 +408,15 @@ export class CoachTypedToolsService {
       very_active: 1.9,
     };
     const tdee = Math.round(bmr * (activityFactors[activity] || 1.55));
-    const goal = safeString(profile.goal, 20).toLowerCase() || 'maintain';
+    const goal = inferGoal(profile.goal) || 'maintain';
     const dailyTarget = goal === 'cut'
       ? Math.round(tdee - 500)
       : goal === 'bulk'
         ? Math.round(tdee + 300)
         : tdee;
 
+    profile.height_cm = Number.isFinite(h) && h > 0 ? Math.round(h * 10) / 10 : null;
+    profile.weight_kg = Number.isFinite(w) && w > 0 ? Math.round(w * 100) / 100 : null;
     profile.bmr = bmr;
     profile.tdee = tdee;
     profile.daily_target = dailyTarget;

@@ -54,18 +54,18 @@ function summarizeMessages(messages: CompactMessage[]): string {
 function buildPinnedFacts(profile: Record<string, unknown>): string[] {
   const facts: string[] = [];
 
-  const height = profile.height_cm;
-  const weight = profile.weight_kg;
+  const height = profile.height ?? profile.height_cm;
+  const weight = profile.weight ?? profile.weight_kg;
   const age = profile.age;
   const goal = profile.goal;
   const dailyTarget = profile.daily_target;
 
   if (height && weight) {
-    facts.push(`Height ${height}cm, weight ${weight}kg`);
+    facts.push(`Height ${height}, weight ${weight}`);
   } else if (height) {
-    facts.push(`Height ${height}cm`);
+    facts.push(`Height ${height}`);
   } else if (weight) {
-    facts.push(`Weight ${weight}kg`);
+    facts.push(`Weight ${weight}`);
   }
 
   if (age) {

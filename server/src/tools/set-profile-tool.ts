@@ -5,13 +5,13 @@ import { requireUserId, toJson } from './base-tool-helpers.js';
 export class SetProfileTool implements Tool {
   definition: ToolDefinition = {
     name: 'set_profile',
-    description: 'Update user profile fields such as height, weight, age, goal, and timezone with validation.',
+    description: 'Update user profile fields such as height, weight, goal, gender, and activity with validation.',
     parameters: {
       type: 'object',
       properties: {
         profile: {
           type: 'object',
-          description: 'Profile patch object with allowed keys like height_cm, weight_kg, age, gender, activity_level, goal, timezone.',
+          description: 'Profile patch object with keys like height, weight, age, gender, activity_level, goal, experience_level, notes, or timezone.',
         },
       },
       required: ['profile'],

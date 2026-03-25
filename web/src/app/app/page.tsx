@@ -414,6 +414,14 @@ function parseDisplayDate(value?: string | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function detectLocalTimezone(): string {
+  try {
+    return String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 function TabGlyph({ icon, active }: { icon: TabIcon; active: boolean }) {
   return (
     <span
@@ -1092,6 +1100,25 @@ export default function AppPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!ready || !authUserId) return;
+
+    const syncTimezone = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const timezone = detectLocalTimezone();
+      if (!timezone) return;
+      void updateProfile({ userId: authUserId, timezone }).catch(() => {});
+    };
+
+    syncTimezone();
+    window.addEventListener('focus', syncTimezone);
+    document.addEventListener('visibilitychange', syncTimezone);
+    return () => {
+      window.removeEventListener('focus', syncTimezone);
+      document.removeEventListener('visibilitychange', syncTimezone);
+    };
+  }, [ready, authUserId]);
 
   useEffect(() => {
     const onAuthExpired = () => forceReauth('Invalid or expired token.');
@@ -2690,6 +2717,8 @@ export default function AppPage() {
               onRemove={(index) => removeAttachmentAt(index, setAttachments)}
               wrapperClassName="chat-preview-grid"
               itemClassName="chat-preview-item"
+              mediaHeight={128}
+              showVideoControls={false}
             />
 
             <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 md:flex-row md:items-end">

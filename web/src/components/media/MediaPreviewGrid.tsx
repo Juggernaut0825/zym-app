@@ -14,6 +14,7 @@ interface MediaPreviewGridProps {
   wrapperClassName: string;
   itemClassName: string;
   mediaHeight?: number;
+  showVideoControls?: boolean;
 }
 
 function MediaPreviewGridComponent({
@@ -22,6 +23,7 @@ function MediaPreviewGridComponent({
   wrapperClassName,
   itemClassName,
   mediaHeight = 96,
+  showVideoControls = true,
 }: MediaPreviewGridProps) {
   if (items.length === 0) return null;
 
@@ -32,7 +34,9 @@ function MediaPreviewGridComponent({
           {preview.isVideo ? (
             <video
               src={preview.url}
-              controls
+              controls={showVideoControls}
+              muted={!showVideoControls}
+              playsInline
               preload="metadata"
               style={{ width: '100%', height: mediaHeight, objectFit: 'cover', borderRadius: 10, border: '1px solid var(--line)' }}
             />

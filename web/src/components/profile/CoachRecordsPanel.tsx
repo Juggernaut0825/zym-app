@@ -17,15 +17,16 @@ interface CoachRecordsPanelProps {
 }
 
 interface CoachProfileDraft {
-  height_cm: string;
-  weight_kg: string;
+  height: string;
+  weight: string;
   age: string;
   body_fat_pct: string;
   training_days: string;
-  gender: 'male' | 'female' | '';
-  activity_level: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active' | '';
-  goal: 'cut' | 'maintain' | 'bulk' | '';
-  timezone: string;
+  gender: string;
+  activity_level: string;
+  goal: string;
+  experience_level: string;
+  notes: string;
 }
 
 interface MealEditDraft {
@@ -37,7 +38,6 @@ interface MealEditDraft {
   carbs_g: string;
   fat_g: string;
   time: string;
-  timezone: string;
 }
 
 interface TrainingEditDraft {
@@ -49,7 +49,6 @@ interface TrainingEditDraft {
   weight_kg: string;
   notes: string;
   time: string;
-  timezone: string;
 }
 
 function toText(value: unknown): string {
@@ -78,21 +77,16 @@ function formatDay(day: string): string {
 
 function buildProfileDraft(profile: CoachProfileData): CoachProfileDraft {
   return {
-    height_cm: toText(profile.height_cm),
-    weight_kg: toText(profile.weight_kg),
+    height: toText(profile.height ?? profile.height_cm),
+    weight: toText(profile.weight ?? profile.weight_kg),
     age: toText(profile.age),
     body_fat_pct: toText(profile.body_fat_pct),
     training_days: toText(profile.training_days),
-    gender: (profile.gender === 'male' || profile.gender === 'female') ? profile.gender : '',
-    activity_level: (
-      profile.activity_level === 'sedentary'
-      || profile.activity_level === 'light'
-      || profile.activity_level === 'moderate'
-      || profile.activity_level === 'active'
-      || profile.activity_level === 'very_active'
-    ) ? profile.activity_level : '',
-    goal: (profile.goal === 'cut' || profile.goal === 'maintain' || profile.goal === 'bulk') ? profile.goal : '',
-    timezone: toText(profile.timezone).slice(0, 80),
+    gender: toText(profile.gender).slice(0, 40),
+    activity_level: toText(profile.activity_level).slice(0, 60),
+    goal: toText(profile.goal).slice(0, 120),
+    experience_level: toText(profile.experience_level).slice(0, 40),
+    notes: toText(profile.notes).slice(0, 2000),
   };
 }
 
@@ -106,7 +100,6 @@ function buildMealEditDraft(day: string, meal: CoachMealRecord): MealEditDraft {
     carbs_g: toText(meal.carbs_g),
     fat_g: toText(meal.fat_g),
     time: toText(meal.time).slice(0, 5),
-    timezone: toText(meal.timezone).slice(0, 80),
   };
 }
 
@@ -120,7 +113,6 @@ function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): Traini
     weight_kg: toText(entry.weight_kg),
     notes: toText(entry.notes).slice(0, 500),
     time: toText(entry.time).slice(0, 5),
-    timezone: toText(entry.timezone).slice(0, 80),
   };
 }
 
@@ -130,15 +122,16 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<CoachRecordsResponse | null>(null);
   const [profileDraft, setProfileDraft] = useState<CoachProfileDraft>({
-    height_cm: '',
-    weight_kg: '',
+    height: '',
+    weight: '',
     age: '',
     body_fat_pct: '',
     training_days: '',
     gender: '',
     activity_level: '',
     goal: '',
-    timezone: '',
+    experience_level: '',
+    notes: '',
   });
   const [mealDraft, setMealDraft] = useState<MealEditDraft | null>(null);
   const [trainingDraft, setTrainingDraft] = useState<TrainingEditDraft | null>(null);
@@ -177,15 +170,16 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
       setSaving(true);
       await updateCoachRecordProfile({
         userId,
-        height_cm: toNumberOrUndefined(profileDraft.height_cm),
-        weight_kg: toNumberOrUndefined(profileDraft.weight_kg),
+        height: profileDraft.height.trim() || undefined,
+        weight: profileDraft.weight.trim() || undefined,
         age: toIntOrUndefined(profileDraft.age),
         body_fat_pct: toNumberOrUndefined(profileDraft.body_fat_pct),
         training_days: toIntOrUndefined(profileDraft.training_days),
         gender: profileDraft.gender || undefined,
         activity_level: profileDraft.activity_level || undefined,
         goal: profileDraft.goal || undefined,
-        timezone: profileDraft.timezone.trim() || undefined,
+        experience_level: profileDraft.experience_level || undefined,
+        notes: profileDraft.notes.trim() || undefined,
       });
       await loadData();
       onNotice('Coach profile records updated.');
@@ -210,7 +204,6 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
         carbs_g: toNumberOrUndefined(mealDraft.carbs_g),
         fat_g: toNumberOrUndefined(mealDraft.fat_g),
         time: mealDraft.time.trim() || undefined,
-        timezone: mealDraft.timezone.trim() || undefined,
       });
       await loadData();
       setMealDraft(null);
@@ -236,7 +229,6 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
         weight_kg: toNumberOrUndefined(trainingDraft.weight_kg),
         notes: trainingDraft.notes.trim().slice(0, 500),
         time: trainingDraft.time.trim() || undefined,
-        timezone: trainingDraft.timezone.trim() || undefined,
       });
       await loadData();
       setTrainingDraft(null);
@@ -253,39 +245,24 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Coach Records Details</h2>
-          <p className="mt-1 text-sm text-slate-500">Visualized agent records for profile, meals, and training. Edit here if the logged timeline is incorrect.</p>
         </div>
         <button className="btn btn-ghost" type="button" onClick={() => void loadData()} disabled={loading || saving}>
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
-        This panel is the canonical source for agent log corrections. Inputs are format-restricted and length-limited.
-      </p>
-
-      {records ? (
-        <div className="mt-4 flex gap-4 text-sm text-slate-600">
-          <span>Days: {records.stats.days}</span>
-          <span>Meals: {records.stats.mealCount}</span>
-          <span>Training entries: {records.stats.trainingCount}</span>
-        </div>
-      ) : null}
-
       <div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
         <input
           className="input-shell"
-          inputMode="decimal"
-          placeholder="Height (cm)"
-          value={profileDraft.height_cm}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, height_cm: event.target.value.slice(0, 6) }))}
+          placeholder="Height"
+          value={profileDraft.height}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))}
         />
         <input
           className="input-shell"
-          inputMode="decimal"
-          placeholder="Weight (kg)"
-          value={profileDraft.weight_kg}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, weight_kg: event.target.value.slice(0, 6) }))}
+          placeholder="Weight"
+          value={profileDraft.weight}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))}
         />
         <input
           className="input-shell"
@@ -308,45 +285,39 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
           value={profileDraft.training_days}
           onChange={(event) => setProfileDraft((prev) => ({ ...prev, training_days: event.target.value.slice(0, 2) }))}
         />
-        <select
-          className="input-shell"
-          value={profileDraft.gender}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, gender: event.target.value as CoachProfileDraft['gender'] }))}
-        >
-          <option value="">Gender</option>
-          <option value="male">Male</option>
-          <option value="female">Female</option>
-        </select>
-        <select
-          className="input-shell"
-          value={profileDraft.activity_level}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, activity_level: event.target.value as CoachProfileDraft['activity_level'] }))}
-        >
-          <option value="">Activity level</option>
-          <option value="sedentary">Sedentary</option>
-          <option value="light">Light</option>
-          <option value="moderate">Moderate</option>
-          <option value="active">Active</option>
-          <option value="very_active">Very active</option>
-        </select>
-        <select
-          className="input-shell"
-          value={profileDraft.goal}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, goal: event.target.value as CoachProfileDraft['goal'] }))}
-        >
-          <option value="">Goal</option>
-          <option value="cut">Cut</option>
-          <option value="maintain">Maintain</option>
-          <option value="bulk">Bulk</option>
-        </select>
         <input
           className="input-shell"
-          placeholder="Timezone (IANA)"
-          maxLength={80}
-          value={profileDraft.timezone}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, timezone: event.target.value.slice(0, 80) }))}
+          placeholder="Gender"
+          value={profileDraft.gender}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, gender: event.target.value.slice(0, 40) }))}
+        />
+        <input
+          className="input-shell"
+          placeholder="Activity level"
+          value={profileDraft.activity_level}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, activity_level: event.target.value.slice(0, 60) }))}
+        />
+        <input
+          className="input-shell"
+          placeholder="Goal"
+          value={profileDraft.goal}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, goal: event.target.value.slice(0, 120) }))}
+        />
+        <input
+          className="input-shell"
+          placeholder="Experience level"
+          value={profileDraft.experience_level}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, experience_level: event.target.value.slice(0, 40) }))}
         />
       </div>
+
+      <textarea
+        className="input-shell mt-3"
+        maxLength={2000}
+        placeholder="Notes"
+        value={profileDraft.notes}
+        onChange={(event) => setProfileDraft((prev) => ({ ...prev, notes: event.target.value.slice(0, 2000) }))}
+      />
 
       <div className="mt-4 flex gap-3">
         <button className="btn btn-zj" type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>
@@ -436,7 +407,6 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
             <input className="input-shell" inputMode="decimal" placeholder="Carbs (g)" value={mealDraft.carbs_g} onChange={(event) => setMealDraft((prev) => (prev ? { ...prev, carbs_g: event.target.value.slice(0, 8) } : prev))} />
             <input className="input-shell" inputMode="decimal" placeholder="Fat (g)" value={mealDraft.fat_g} onChange={(event) => setMealDraft((prev) => (prev ? { ...prev, fat_g: event.target.value.slice(0, 8) } : prev))} />
             <input className="input-shell" maxLength={5} placeholder="Time HH:mm" value={mealDraft.time} onChange={(event) => setMealDraft((prev) => (prev ? { ...prev, time: event.target.value.slice(0, 5) } : prev))} />
-            <input className="input-shell" maxLength={80} placeholder="Timezone" value={mealDraft.timezone} onChange={(event) => setMealDraft((prev) => (prev ? { ...prev, timezone: event.target.value.slice(0, 80) } : prev))} />
           </div>
           <div className="coach-records-actions">
             <button className="btn btn-primary" type="button" onClick={() => void handleSaveMeal()} disabled={saving}>
@@ -461,7 +431,6 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
             <input className="input-shell" maxLength={20} placeholder="Reps" value={trainingDraft.reps} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, reps: event.target.value.slice(0, 20) } : prev))} />
             <input className="input-shell" inputMode="decimal" placeholder="Weight kg" value={trainingDraft.weight_kg} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, weight_kg: event.target.value.slice(0, 8) } : prev))} />
             <input className="input-shell" maxLength={5} placeholder="Time HH:mm" value={trainingDraft.time} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, time: event.target.value.slice(0, 5) } : prev))} />
-            <input className="input-shell" maxLength={80} placeholder="Timezone" value={trainingDraft.timezone} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, timezone: event.target.value.slice(0, 80) } : prev))} />
           </div>
           <textarea
             className="input-shell"

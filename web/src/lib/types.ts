@@ -250,14 +250,18 @@ export interface PublicProfileResponse {
 }
 
 export interface CoachProfileData {
-  height_cm?: number;
-  weight_kg?: number;
+  height?: string | null;
+  weight?: string | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
   age?: number;
   body_fat_pct?: number;
   training_days?: number;
-  gender?: 'male' | 'female';
-  activity_level?: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
-  goal?: 'cut' | 'maintain' | 'bulk';
+  gender?: string | null;
+  activity_level?: string | null;
+  goal?: string | null;
+  experience_level?: string | null;
+  notes?: string | null;
   timezone?: string;
   bmr?: number;
   tdee?: number;
