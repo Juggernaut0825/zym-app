@@ -142,15 +142,6 @@ function buildRecordsDetailsReminder(messages: Message[]): string {
   return 'If any logged profile, meal, or training record looks wrong, you can edit it in the Details page.';
 }
 
-function shouldCarryForwardMediaContext(message: string): boolean {
-  const text = String(message || '').trim().toLowerCase();
-  if (!text) return false;
-  const hasVisualNoun = /\b(photo|video|image|picture|pic|screenshot|clip|upload|media|form|meal|plate|lift|jump|squat|deadlift|bench)\b/.test(text);
-  const hasReference = /\b(this|that|it|these|those|above|before|earlier|previous|last)\b/.test(text);
-  const hasVisualVerb = /\b(check|look|see|show|review|analy[sz]e|inspect|compare|rate|judge|feedback)\b/.test(text);
-  return (hasVisualNoun && (hasReference || hasVisualVerb)) || (hasReference && hasVisualVerb);
-}
-
 function sanitizeCoachResponseText(text: string): string {
   return String(text || '')
     .replace(/\*\*/g, '')
@@ -358,7 +349,6 @@ export class CoachService {
     message: string,
     mediaUrls: string[],
     mediaIds: string[],
-    hasCurrentTurnMedia = false,
   ): MessageContent {
     const cleanMessage = sanitizePromptText(message, 8_000);
     const pickedUrls = Array.from(new Set(mediaUrls.map(item => String(item || '').trim()).filter(Boolean))).slice(0, MAX_MEDIA_URLS_IN_PROMPT);
@@ -370,16 +360,12 @@ export class CoachService {
 
     const lines: string[] = [];
     if (pickedIds.length > 0) {
-      lines.push(`${hasCurrentTurnMedia ? '[ATTACHED_MEDIA_IDS]' : '[RELATED_MEDIA_IDS]'} ${pickedIds.join(', ')}`);
+      lines.push(`[ATTACHED_MEDIA_IDS] ${pickedIds.join(', ')}`);
     }
     if (pickedUrls.length > 0) {
       lines.push(`[ATTACHED_MEDIA_URLS] ${pickedUrls.join(', ')}`);
     }
-    lines.push(
-      hasCurrentTurnMedia || pickedUrls.length > 0
-        ? 'If visual evidence from the current attachments matters, inspect media before making specific claims.'
-        : 'Only use related media if it is genuinely relevant to this turn. Do not assume the user is still talking about older uploads.',
-    );
+    lines.push('If visual evidence from the current attachments matters, inspect media before making specific claims.');
 
     return [`[USER_MESSAGE]\n${cleanMessage}`, ...lines].filter(Boolean).join('\n\n').trim();
   }
@@ -397,7 +383,7 @@ export class CoachService {
       : [];
     if (incomingMediaIds.length > 0) {
       session.activeMediaIds = await pruneActiveMediaIds(userId, incomingMediaIds);
-    } else if (!shouldCarryForwardMediaContext(normalizedMessage)) {
+    } else {
       session.activeMediaIds = [];
     }
 
@@ -448,7 +434,6 @@ export class CoachService {
       normalizedMessage,
       Array.isArray(options.mediaUrls) ? options.mediaUrls : [],
       session.activeMediaIds,
-      incomingMediaIds.length > 0,
     );
 
     const aiService = new AIService();
