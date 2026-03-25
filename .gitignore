@@ -93,9 +93,6 @@ cats-company/
 
 # Local design/docs/reference assets not published
 docs/*
-!docs/architecture.md
-!docs/aws-deployment.md
-!docs/prod-ops.md
 stitch/
 server/src/knowledge/papers/
 
