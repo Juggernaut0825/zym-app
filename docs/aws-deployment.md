@@ -623,11 +623,11 @@ Secrets mapping:
 - `MEDIA_URL_SIGNING_SECRET`
 - `DATABASE_URL`
 - `REDIS_URL`
-- `SMTP_HOST`
+- `SMTP_HOST` (`smtp.postmarkapp.com`)
 - `SMTP_PORT`
 - `SMTP_SECURE`
-- `SMTP_USER`
-- `SMTP_PASS`
+- `SMTP_USER` (Postmark Server API token)
+- `SMTP_PASS` (same Postmark Server API token)
 
 ### `zym-ws-task`
 
