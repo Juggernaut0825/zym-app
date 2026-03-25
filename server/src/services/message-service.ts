@@ -1,6 +1,8 @@
 import { getDB } from '../database/runtime-db.js';
 import { stripCoachMentions } from '../utils/coach-mention.js';
 
+type CoachId = 'zj' | 'lc';
+
 export interface ParsedMessage {
   id: number;
   topic: string;
@@ -53,11 +55,31 @@ function parseP2PTopic(topic: string): { userA: number; userB: number } | null {
   return { userA, userB };
 }
 
-function parseCoachTopic(topic: string): { userId: number } | null {
-  if (!topic.startsWith('coach_')) return null;
-  const userId = Number(topic.replace('coach_', ''));
+function normalizeCoachId(value: unknown): CoachId {
+  return value === 'lc' ? 'lc' : 'zj';
+}
+
+export function buildCoachTopic(userId: number, coachId: CoachId = 'zj'): string {
+  return coachId === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
+}
+
+export function parseCoachTopic(topic: string): { userId: number; coachId: CoachId } | null {
+  const normalized = String(topic || '').trim();
+  const explicitMatch = normalized.match(/^coach_(zj|lc)_(\d+)$/);
+  if (explicitMatch) {
+    const userId = Number(explicitMatch[2]);
+    if (!Number.isInteger(userId)) return null;
+    return {
+      userId,
+      coachId: normalizeCoachId(explicitMatch[1]),
+    };
+  }
+
+  const legacyMatch = normalized.match(/^coach_(\d+)$/);
+  if (!legacyMatch) return null;
+  const userId = Number(legacyMatch[1]);
   if (!Number.isInteger(userId)) return null;
-  return { userId };
+  return { userId, coachId: 'zj' };
 }
 
 function parseGroupTopic(topic: string): { groupId: number } | null {
@@ -136,6 +158,10 @@ export class MessageService {
   static async getInbox(userId: string) {
     const db = getDB();
     const currentUserId = Number(userId);
+    const selectedCoachRow = db
+      .prepare('SELECT selected_coach FROM users WHERE id = ?')
+      .get(currentUserId) as { selected_coach?: string | null } | undefined;
+    const activeCoach = normalizeCoachId(selectedCoachRow?.selected_coach);
     const unreadCountStmt = db.prepare(`
       SELECT COUNT(1) AS count
       FROM messages
@@ -207,7 +233,7 @@ export class MessageService {
       };
     });
 
-    const coachTopic = `coach_${currentUserId}`;
+    const coachTopic = buildCoachTopic(currentUserId, activeCoach);
     const coachLast = db.prepare('SELECT MAX(created_at) as last_message_at FROM messages WHERE topic = ?').get(coachTopic) as any;
     const coachPreview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
     const coachUnread = unreadCountStmt.get(coachTopic, currentUserId, coachTopic, currentUserId) as { count?: number } | undefined;

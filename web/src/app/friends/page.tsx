@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { acceptFriend, addFriend, getFriendConnectCode, getFriendRequests, searchUsers } from '@/lib/api';
+import { getAuth } from '@/lib/auth-storage';
 
 interface User {
   id: number;
@@ -11,6 +12,7 @@ interface User {
 
 export default function FriendsPage() {
   const router = useRouter();
+  const [authUserId, setAuthUserId] = useState(0);
   const [connectCode, setConnectCode] = useState('');
   const [connectId, setConnectId] = useState('');
   const [connectCodeMeta, setConnectCodeMeta] = useState('Share this code with friends to connect.');
@@ -21,8 +23,9 @@ export default function FriendsPage() {
   const [error, setError] = useState('');
 
   async function loadConnectInfo() {
+    if (!authUserId) return;
     try {
-      const info = await getFriendConnectCode(0);
+      const info = await getFriendConnectCode(authUserId);
       setConnectCode(info.connectCode);
       setConnectId(info.connectId);
     } catch (err: any) {
@@ -31,8 +34,9 @@ export default function FriendsPage() {
   }
 
   async function loadRequests() {
+    if (!authUserId) return;
     try {
-      const result = await getFriendRequests(0);
+      const result = await getFriendRequests(authUserId);
       setRequests(result.requests);
     } catch (err: any) {
       setError(err?.message || 'Failed to load friend requests.');
@@ -40,9 +44,19 @@ export default function FriendsPage() {
   }
 
   useEffect(() => {
+    const auth = getAuth();
+    if (!auth) {
+      router.replace('/login');
+      return;
+    }
+    setAuthUserId(auth.userId);
+  }, [router]);
+
+  useEffect(() => {
+    if (!authUserId) return;
     void loadConnectInfo();
     void loadRequests();
-  }, []);
+  }, [authUserId]);
 
   useEffect(() => {
     const query = friendQuery.trim();
@@ -60,8 +74,9 @@ export default function FriendsPage() {
   }, [friendQuery]);
 
   async function handleAddFriend(user: User) {
+    if (!authUserId) return;
     try {
-      await addFriend({ userId: 0, friendId: user.id });
+      await addFriend({ userId: authUserId, friendId: user.id });
       setNotice(`Friend request sent to ${user.username}.`);
       setTimeout(() => setNotice(''), 3000);
     } catch (err: any) {
@@ -71,8 +86,9 @@ export default function FriendsPage() {
   }
 
   async function handleAcceptFriend(friendId: number) {
+    if (!authUserId) return;
     try {
-      await acceptFriend(0, friendId);
+      await acceptFriend(authUserId, friendId);
       setNotice('Friend request accepted.');
       setTimeout(() => setNotice(''), 3000);
       await loadRequests();

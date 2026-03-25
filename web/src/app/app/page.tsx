@@ -76,6 +76,8 @@ const tabs = [
   { key: 'profile', label: 'Profile', icon: 'person' },
 ] as const;
 
+const visibleTabs = tabs.filter((item) => item.key !== 'leaderboard');
+
 type VisibleTabKey = (typeof tabs)[number]['key'];
 type TabKey = VisibleTabKey | 'friends';
 type TabIcon = (typeof tabs)[number]['icon'];
@@ -350,6 +352,10 @@ function isPotentialConnectCode(input: string): boolean {
 
 function coachDisplayName(coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? 'LC Coach' : 'ZJ Coach';
+}
+
+function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
+  return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
 
 function coachTheme(coach: 'zj' | 'lc') {
@@ -1037,7 +1043,7 @@ export default function AppPage() {
     setAuthUsername(auth.username);
     setSelectedCoach(auth.selectedCoach);
     const bootstrapCoachName = coachDisplayName(auth.selectedCoach);
-    const defaultCoachTopic = `coach_${auth.userId}`;
+    const defaultCoachTopic = buildCoachTopic(auth.userId, auth.selectedCoach);
     messageDraftsRef.current = loadMessageDrafts(auth.userId);
     setConversations([
       {
@@ -2102,7 +2108,13 @@ export default function AppPage() {
           avatar_url: uploaded.url,
           avatar_visibility: 'public',
         });
-        await loadProfile();
+        const nextFriends = await loadFriendsData();
+        await Promise.all([
+          loadProfile(),
+          loadFeed(),
+          loadLeaderboard(),
+        ]);
+        await loadInbox(authUserId, undefined, nextFriends);
         showNotice('Avatar updated.');
       } else {
         setProfileDraft((prev) => ({ ...prev, background_url: uploaded.url }));
@@ -2263,6 +2275,8 @@ export default function AppPage() {
     ? (activeConversation.name.toLowerCase().includes('lc') ? 'lc' : 'zj')
     : selectedCoach;
   const activeConversationTheme = coachTheme(activeConversationCoach);
+  const selectedCoachTheme = coachTheme(selectedCoach);
+  const selectedCoachButtonClass = selectedCoach === 'lc' ? 'btn btn-lc' : 'btn btn-zj';
   const selectedTabLabel = tabs.find((item) => item.key === activeTab)?.label || 'Message';
   const topLeaderboardMetric = Math.max(
     ...filteredLeaderboard.map((entry) => (
@@ -2282,37 +2296,35 @@ export default function AppPage() {
   const renderAppHeader = (
     title: string,
     subtitle: string,
-    searchValue: string,
-    onSearchChange: (value: string) => void,
-    searchPlaceholder: string,
+    searchValue?: string,
+    onSearchChange?: (value: string) => void,
+    searchPlaceholder?: string,
     searchRef?: { current: HTMLInputElement | null },
     trailing?: JSX.Element,
   ) => (
     <header className="flex flex-col gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
       <div>
         <h1 className="text-lg font-bold tracking-tight text-slate-900">{title}</h1>
-        <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
+        {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
       </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        <label className="relative block min-w-[240px] md:min-w-[280px]">
-          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
-          <input
-            ref={searchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
-            value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={searchPlaceholder}
-          />
-        </label>
+        {onSearchChange ? (
+          <label className="relative block min-w-[240px] md:min-w-[280px]">
+            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
+            <input
+              ref={searchRef}
+              className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition"
+              style={{
+                borderColor: selectedCoach === 'lc' ? 'rgba(242,138,58,0.18)' : undefined,
+                boxShadow: 'none',
+              }}
+              value={searchValue || ''}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder={searchPlaceholder || 'Search'}
+            />
+          </label>
+        ) : null}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
-            onClick={() => void loadMentions(authUserId)}
-            title="Refresh notifications"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
-          </button>
           <button
             type="button"
             className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
@@ -2320,14 +2332,6 @@ export default function AppPage() {
             title="Friends"
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>group</span>
-          </button>
-          <button
-            type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
-            onClick={() => setTab('profile')}
-            title="Open profile"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>tune</span>
           </button>
           {trailing}
         </div>
@@ -2791,7 +2795,13 @@ export default function AppPage() {
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
             <section className="rounded-[30px] border border-white/70 bg-white/55 p-5 shadow-[0_24px_60px_rgba(105,121,247,0.06)] backdrop-blur-xl">
               <div className="flex gap-4">
-                <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] text-lg font-semibold text-[color:var(--coach-zj)]">
+                <div
+                  className="flex size-12 shrink-0 items-center justify-center rounded-full text-lg font-semibold"
+                  style={{
+                    background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                    color: selectedCoachTheme.ink,
+                  }}
+                >
                   {avatarInitial(authUsername || profile?.username || 'U')}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -2803,7 +2813,13 @@ export default function AppPage() {
                   />
                   <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/60 pt-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="flex cursor-pointer items-center gap-2 rounded-full bg-[rgba(105,121,247,0.1)] px-4 py-2 text-sm font-medium text-[color:var(--coach-zj)] transition hover:bg-[rgba(105,121,247,0.16)]">
+                      <label
+                        className="flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition"
+                        style={{
+                          background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.1)' : 'rgba(105,121,247,0.1)',
+                          color: selectedCoachTheme.ink,
+                        }}
+                      >
                         <span className="material-symbols-outlined text-lg">image</span>
                         Add media
                         <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
@@ -2818,21 +2834,33 @@ export default function AppPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <button
-                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'public' ? 'bg-[rgba(105,121,247,0.16)] text-[color:var(--coach-zj)]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'public' ? '' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          style={postVisibility === 'public'
+                            ? {
+                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.16)' : 'rgba(105,121,247,0.16)',
+                              color: selectedCoachTheme.ink,
+                            }
+                            : undefined}
                           type="button"
                           onClick={() => setPostVisibility('public')}
                         >
                           Public
                         </button>
                         <button
-                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'friends' ? 'bg-[rgba(105,121,247,0.16)] text-[color:var(--coach-zj)]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'friends' ? '' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          style={postVisibility === 'friends'
+                            ? {
+                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.16)' : 'rgba(105,121,247,0.16)',
+                              color: selectedCoachTheme.ink,
+                            }
+                            : undefined}
                           type="button"
                           onClick={() => setPostVisibility('friends')}
                         >
                           Friends only
                         </button>
                       </div>
-                      <button className="btn btn-zj" disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
+                      <button className={selectedCoachButtonClass} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
                         {postPending ? 'Posting...' : 'Post'}
                       </button>
                     </div>
@@ -2995,10 +3023,10 @@ export default function AppPage() {
     <div className="flex h-full flex-col">
       {renderAppHeader(
         'Global Rankings',
-        'Real-time activity tracking across the ZYM network.',
-        leaderboardQuery,
-        setLeaderboardQuery,
-        'Find user...',
+        '',
+        undefined,
+        undefined,
+        undefined,
         undefined,
       )}
 
@@ -3124,27 +3152,10 @@ export default function AppPage() {
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_circle</span>
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-900">Unified Profile</h1>
-            <p className="text-xs text-slate-500">Tune your coach, stats, and account details.</p>
+            <h1 className="text-lg font-bold tracking-tight text-slate-900">Profile</h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
-            onClick={() => void loadAbuseReports()}
-            title="Notifications"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
-          </button>
-          <button
-            type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
-            onClick={() => void loadSecurityEvents()}
-            title="Settings"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>settings</span>
-          </button>
           <button className="btn btn-danger-soft text-sm" type="button" onClick={() => void handleLogout()}>
             Logout
           </button>
@@ -3190,7 +3201,7 @@ export default function AppPage() {
                   <p className="mt-2 text-sm text-slate-500">ID: {authUserId} • Coach {selectedCoach.toUpperCase()} • Premium loop</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <label className="btn btn-zj" style={{ cursor: 'pointer' }}>
+                  <label className={selectedCoachButtonClass} style={{ cursor: 'pointer' }}>
                     {profileAvatarUploading ? 'Uploading avatar...' : 'Upload avatar'}
                     <input
                       hidden
@@ -3264,7 +3275,7 @@ export default function AppPage() {
                   value={profileDraft.hobbies}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, hobbies: event.target.value }))}
                 />
-                <button className="btn btn-zj" disabled={profilePending} onClick={() => void handleSaveProfile()}>
+                <button className={selectedCoachButtonClass} disabled={profilePending} onClick={() => void handleSaveProfile()}>
                   {profilePending ? 'Saving...' : 'Save profile'}
                 </button>
               </div>
@@ -3284,9 +3295,8 @@ export default function AppPage() {
                   return (
                     <article
                       key={coach}
-                      className={`rounded-[24px] border-2 bg-white p-5 shadow-sm transition ${
-                        activeCoach ? 'border-[rgba(105,121,247,0.4)]' : 'border-slate-100'
-                      }`}
+                      className={`rounded-[24px] border-2 bg-white p-5 shadow-sm transition ${activeCoach ? '' : 'border-slate-100'}`}
+                      style={activeCoach ? { borderColor: theme.borderColor } : undefined}
                     >
                       <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
@@ -3296,16 +3306,21 @@ export default function AppPage() {
                           </p>
                         </div>
                         {activeCoach ? (
-                          <span className="rounded-full bg-[rgba(105,121,247,0.12)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">
+                          <span
+                            className="rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+                            style={{
+                              background: coach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                              color: theme.ink,
+                            }}
+                          >
                             Active
                           </span>
                         ) : null}
                       </div>
                       <p className="text-sm leading-7 text-slate-600">{theme.description}</p>
                       <button
-                        className={`mt-5 w-full rounded-2xl px-4 py-3 font-semibold transition ${
-                          activeCoach ? 'bg-[color:var(--coach-zj)] text-white' : 'bg-slate-100 text-slate-700'
-                        }`}
+                        className={`mt-5 w-full rounded-2xl px-4 py-3 font-semibold transition ${activeCoach ? '' : 'bg-slate-100 text-slate-700'}`}
+                        style={activeCoach ? { background: theme.gradient, color: '#fff' } : undefined}
                         type="button"
                         onClick={() => void handleSwitchCoach(coach)}
                       >
@@ -3365,7 +3380,7 @@ export default function AppPage() {
             </button>
 
             <nav className="mt-8 flex flex-col gap-4">
-              {tabs.map((item) => {
+              {visibleTabs.map((item) => {
                 const active = activeTab === item.key;
                 return (
                   <button
@@ -3374,9 +3389,11 @@ export default function AppPage() {
                     onClick={() => setTab(item.key)}
                     aria-label={item.label}
                     title={item.label}
-                    className={`relative flex size-12 items-center justify-center rounded-2xl text-slate-500 transition ${
-                      active ? 'bg-[rgba(105,121,247,0.14)] text-[color:var(--coach-zj)]' : 'hover:bg-white/55 hover:text-slate-800'
-                    }`}
+                    className={`relative flex size-12 items-center justify-center rounded-2xl text-slate-500 transition ${active ? '' : 'hover:bg-white/55 hover:text-slate-800'}`}
+                    style={active ? {
+                      background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.14)',
+                      color: selectedCoachTheme.ink,
+                    } : undefined}
                   >
                     <TabGlyph icon={item.icon} active={active} />
                     {item.key === 'messages' && unreadMentionCount > 0 ? (
@@ -3393,7 +3410,11 @@ export default function AppPage() {
               <button
                 type="button"
                 onClick={() => setTab('profile')}
-                className="flex size-11 items-center justify-center overflow-hidden rounded-full border-2 border-[rgba(105,121,247,0.18)] bg-white/70 text-sm font-bold text-[color:var(--coach-zj)]"
+                className="flex size-11 items-center justify-center overflow-hidden rounded-full border-2 bg-white/70 text-sm font-bold"
+                style={{
+                  borderColor: selectedCoach === 'lc' ? 'rgba(242,138,58,0.18)' : 'rgba(105,121,247,0.18)',
+                  color: selectedCoachTheme.ink,
+                }}
                 title={authUsername || 'Profile'}
               >
                 {profileDraft.avatar_url ? (

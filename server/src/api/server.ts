@@ -732,7 +732,7 @@ function buildPublicMediaDelivery(asset: { objectKey: string; visibility: MediaA
 }
 
 function buildAssetDelivery(req: Request, asset: { fileName: string; objectKey: string; visibility: MediaAssetVisibility; storageProvider?: string | null }): { path: string; url: string } {
-  return buildPublicMediaDelivery(asset) || buildMediaDelivery(req, asset.fileName);
+  return buildMediaDelivery(req, asset.fileName);
 }
 
 function inferUploadMimeType(fileName: string, fallback: string): string {
@@ -840,12 +840,11 @@ function mediaUrlForClient(req: Request, mediaUrl: unknown): string | null {
   if (!value) return null;
 
   const asset = mediaAssetService.getByStorageValue(value);
-  const publicDelivery = asset ? buildPublicMediaDelivery({
-    objectKey: asset.objectKey,
-    visibility: asset.visibility,
-    storageProvider: asset.storageProvider,
-  }) : null;
-  const delivered = publicDelivery?.url || resolveMediaForDelivery(value);
+  if (asset) {
+    return buildMediaDelivery(req, asset.fileName).url;
+  }
+
+  const delivered = resolveMediaForDelivery(value);
   if (!delivered) return null;
 
   if (!delivered.startsWith('/')) {
@@ -1941,7 +1940,7 @@ app.post('/messages/read', requireSameUserIdFromBody('userId'), APIGateway.valid
     type: 'string',
     minLength: 3,
     maxLength: 120,
-    pattern: /^(coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
+    pattern: /^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
   },
   messageId: { type: 'number', integer: true, min: 1 },
 }), async (req, res) => {
@@ -2135,7 +2134,7 @@ app.post('/messages/send',
     type: 'string',
     minLength: 3,
     maxLength: 120,
-    pattern: /^(coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
+    pattern: /^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
   },
   content: { type: 'string', maxLength: 8000 },
   mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },

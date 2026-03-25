@@ -215,6 +215,14 @@ export class WSServer {
   private mediaUrlForClient(mediaUrl: unknown): string | null {
     const value = String(mediaUrl || '').trim();
     if (!value) return null;
+    const asset = this.mediaAssetService.getByStorageValue(value);
+    if (asset) {
+      const mediaPath = mediaPathFromFileName(asset.fileName);
+      const deliveredAssetPath = mediaPath ? resolveMediaForDelivery(mediaPath) : '';
+      if (!deliveredAssetPath) return null;
+      if (!deliveredAssetPath.startsWith('/')) return deliveredAssetPath;
+      return this.publicMediaOrigin ? `${this.publicMediaOrigin}${deliveredAssetPath}` : deliveredAssetPath;
+    }
     const delivered = resolveMediaForDelivery(value);
     if (!delivered) return null;
     if (!delivered.startsWith('/')) return delivered;
@@ -445,7 +453,7 @@ export class WSServer {
   }
 
   private isValidTopic(topic: string): boolean {
-    return /^(coach_\d+|p2p_\d+_\d+|grp_\d+)$/.test(String(topic || '').trim());
+    return /^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/.test(String(topic || '').trim());
   }
 
   private allowIncomingMessage(client: Client): boolean {

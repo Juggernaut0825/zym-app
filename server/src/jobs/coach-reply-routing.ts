@@ -1,4 +1,5 @@
 import { getDB } from '../database/runtime-db.js';
+import { parseCoachTopic } from '../services/message-service.js';
 import { resolveGroupCoachInvocation } from '../utils/coach-mention.js';
 import type { CoachId } from '../utils/coach-mention.js';
 import type { CoachReplyJobPayload } from './coach-reply-queue.js';
@@ -44,7 +45,8 @@ function groupCoachPlan(topic: string, mentions: string[]): { shouldReply: boole
 
 export function buildCoachReplyJob(options: BuildCoachReplyJobOptions): CoachReplyJobPayload | null {
   const normalizedTopic = String(options.topic || '').trim();
-  const shouldCoachReplyInCoachThread = normalizedTopic === `coach_${options.userId}`;
+  const coachThread = parseCoachTopic(normalizedTopic);
+  const shouldCoachReplyInCoachThread = coachThread?.userId === options.userId;
   const groupPlan = groupCoachPlan(normalizedTopic, options.mentions);
   const shouldCoachReplyInGroup = groupPlan.shouldReply;
 
@@ -61,7 +63,7 @@ export function buildCoachReplyJob(options: BuildCoachReplyJobOptions): CoachRep
     mediaUrls: Array.from(new Set(options.mediaUrls.map((item) => String(item || '').trim()).filter(Boolean))),
     mediaIds: Array.from(new Set(options.mediaIds.map((item) => String(item || '').trim()).filter(Boolean))),
     platform: options.platform,
-    coachOverride: shouldCoachReplyInGroup ? groupPlan.coachOverride : undefined,
+    coachOverride: shouldCoachReplyInGroup ? groupPlan.coachOverride : coachThread?.coachId,
     conversationScope: shouldCoachReplyInGroup ? 'group' : 'coach_dm',
     allowWriteTools: !shouldCoachReplyInGroup,
     participantUserIds: uniqueUserIds(
