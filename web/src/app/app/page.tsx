@@ -2347,7 +2347,8 @@ export default function AppPage() {
           <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
           <input
             ref={conversationSearchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition focus:border-[rgba(105,121,247,0.28)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)]"
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition"
+            style={{ borderColor: selectedCoachTheme.borderColor }}
             value={conversationQuery}
             onChange={(event) => setConversationQuery(event.target.value)}
             placeholder="Search conversation..."
@@ -2359,7 +2360,11 @@ export default function AppPage() {
         <section className="flex w-full flex-col gap-3 xl:w-[320px]">
           <button
             type="button"
-            className="flex items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-4 py-3 text-sm font-semibold text-[color:var(--coach-zj)] transition hover:bg-white/75"
+            className="flex items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-4 py-3 text-sm font-semibold transition hover:bg-white/75"
+            style={{
+              color: selectedCoachTheme.ink,
+              borderColor: selectedCoachTheme.borderColor,
+            }}
             onClick={() => {
               const name = window.prompt('Group name:');
               if (!name?.trim()) return;
@@ -2451,7 +2456,8 @@ export default function AppPage() {
                       <span>{member.username} · {member.role}</span>
                       {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
                         <button
-                          className="text-[color:var(--coach-zj)]"
+                          className="font-semibold"
+                          style={{ color: selectedCoachTheme.ink }}
                           type="button"
                           onClick={() => void handleRemoveFromActiveGroup(member)}
                           disabled={activeGroupRemovePendingId === member.id}
@@ -2887,15 +2893,30 @@ export default function AppPage() {
               <article key={post.id} className="rounded-[30px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl transition hover:bg-white/55">
                 <header className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex size-11 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] font-semibold text-[color:var(--coach-zj)]">
-                      {avatarInitial(post.username)}
+                    <div
+                      className="flex size-11 items-center justify-center overflow-hidden rounded-full font-semibold"
+                      style={{
+                        background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                        color: selectedCoachTheme.ink,
+                      }}
+                    >
+                      {post.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={resolveApiAssetUrl(post.avatar_url)}
+                          alt={post.username}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        avatarInitial(post.username)
+                      )}
                     </div>
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className="text-sm text-slate-900">{post.username}</strong>
                         <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
                       </div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">{post.type}</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
                     </div>
                   </div>
                   <button className="text-slate-400" type="button">
@@ -2911,7 +2932,7 @@ export default function AppPage() {
                         : `${post.content.slice(0, 180)}...`}
                     </p>
                     {post.content.length > 180 ? (
-                      <button className="mt-2 text-sm font-semibold text-[color:var(--coach-zj)]" onClick={() => togglePostExpanded(post.id)}>
+                      <button className="mt-2 text-sm font-semibold" style={{ color: selectedCoachTheme.ink }} onClick={() => togglePostExpanded(post.id)}>
                         {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
                       </button>
                     ) : null}
@@ -2943,17 +2964,30 @@ export default function AppPage() {
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => void handleReact(post.id)}>
+                  <button
+                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
+                    onClick={() => void handleReact(post.id)}
+                  >
                     Like {post.reaction_count || 0}
                   </button>
-                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => void togglePostComments(post.id)}>
+                  <button
+                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
+                    onClick={() => void togglePostComments(post.id)}
+                  >
                     Comments {post.comment_count || 0}
                   </button>
-                  <button className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]" onClick={() => togglePostExpanded(post.id)}>
+                  <button
+                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
+                    onClick={() => togglePostExpanded(post.id)}
+                  >
                     {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
                   </button>
                   <button
-                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition hover:text-[color:var(--coach-zj)]"
+                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
                     onClick={() => void submitAbuseReport('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
                   >
                     Report
@@ -2966,11 +3000,33 @@ export default function AppPage() {
                       {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
                       {(postCommentsById[post.id] || []).map((comment) => (
                         <article key={comment.id} className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3">
-                          <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                            <strong className="text-slate-700">{comment.username}</strong>
-                            <span>{formatTime(comment.created_at)}</span>
+                          <div className="flex items-start gap-3">
+                            <div
+                              className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold"
+                              style={{
+                                background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                                color: selectedCoachTheme.ink,
+                              }}
+                            >
+                              {comment.avatar_url ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={resolveApiAssetUrl(comment.avatar_url)}
+                                  alt={comment.username}
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                              ) : (
+                                avatarInitial(comment.username)
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                                <strong className="text-slate-700">{comment.username}</strong>
+                                <span>{formatTime(comment.created_at)}</span>
+                              </div>
+                              <p className="mt-2 text-sm text-slate-600">{comment.content}</p>
+                            </div>
                           </div>
-                          <p className="mt-2 text-sm text-slate-600">{comment.content}</p>
                         </article>
                       ))}
                       {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
@@ -2992,7 +3048,7 @@ export default function AppPage() {
                         }}
                       />
                       <button
-                        className="btn btn-zj"
+                        className={selectedCoachButtonClass}
                         type="button"
                         disabled={commentPendingPostId === post.id}
                         onClick={() => void handleCreatePostComment(post.id)}
@@ -3036,18 +3092,16 @@ export default function AppPage() {
             <button
               type="button"
               onClick={() => setLeaderboardMetric('steps')}
-              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
-                leaderboardMetric === 'steps' ? 'bg-white text-[color:var(--coach-zj)] shadow-sm' : 'text-slate-500'
-              }`}
+              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${leaderboardMetric === 'steps' ? 'bg-white shadow-sm' : 'text-slate-500'}`}
+              style={leaderboardMetric === 'steps' ? { color: selectedCoachTheme.ink } : undefined}
             >
               Steps
             </button>
             <button
               type="button"
               onClick={() => setLeaderboardMetric('calories')}
-              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${
-                leaderboardMetric === 'calories' ? 'bg-white text-[color:var(--coach-zj)] shadow-sm' : 'text-slate-500'
-              }`}
+              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${leaderboardMetric === 'calories' ? 'bg-white shadow-sm' : 'text-slate-500'}`}
+              style={leaderboardMetric === 'calories' ? { color: selectedCoachTheme.ink } : undefined}
             >
               Calories
             </button>
@@ -3090,8 +3144,23 @@ export default function AppPage() {
                       </td>
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-3">
-                          <div className="flex size-10 items-center justify-center rounded-full bg-[rgba(105,121,247,0.12)] font-semibold text-[color:var(--coach-zj)]">
-                            {avatarInitial(entry.username)}
+                          <div
+                            className="flex size-10 items-center justify-center overflow-hidden rounded-full font-semibold"
+                            style={{
+                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+                              color: selectedCoachTheme.ink,
+                            }}
+                          >
+                            {entry.avatar_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={resolveApiAssetUrl(entry.avatar_url)}
+                                alt={entry.username}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              avatarInitial(entry.username)
+                            )}
                           </div>
                           <span className="font-semibold text-slate-800">{entry.username}</span>
                         </div>
@@ -3104,7 +3173,7 @@ export default function AppPage() {
                       <td className="px-6 py-5">
                         <div className="flex items-center gap-4">
                           <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
-                            <div className="h-full rounded-full bg-[color:var(--coach-zj)]" style={{ width: `${Math.round(ratio * 100)}%` }} />
+                            <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: selectedCoachTheme.gradient }} />
                           </div>
                           <span className="text-xs font-bold text-slate-500">{Math.round(ratio * 100)}%</span>
                         </div>
@@ -3148,7 +3217,13 @@ export default function AppPage() {
     <div className="flex h-full flex-col overflow-y-auto">
       <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
         <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-2xl bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]">
+          <div
+            className="flex size-9 items-center justify-center rounded-2xl"
+            style={{
+              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
+              color: selectedCoachTheme.ink,
+            }}
+          >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_circle</span>
           </div>
           <div>
@@ -3187,7 +3262,7 @@ export default function AppPage() {
                   className="size-32 rounded-full object-cover ring-4 ring-white"
                 />
               ) : (
-                <div className="flex size-32 items-center justify-center rounded-full bg-[color:var(--coach-zj)] text-4xl font-bold text-white ring-4 ring-white">
+                <div className="flex size-32 items-center justify-center rounded-full text-4xl font-bold text-white ring-4 ring-white" style={{ background: selectedCoachTheme.gradient }}>
                   {avatarInitial(authUsername || profile?.username || 'User')}
                 </div>
               )}
