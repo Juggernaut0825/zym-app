@@ -331,6 +331,18 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS user_consents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      consent_type TEXT NOT NULL,
+      version TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, consent_type, version)
+    );
+
     CREATE TABLE IF NOT EXISTS message_reads (
       user_id INTEGER NOT NULL,
       topic TEXT NOT NULL,
@@ -356,6 +368,19 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       source_id INTEGER NOT NULL,
       snippet TEXT,
       is_read INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS coach_outreach_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      trigger_type TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      coach_id TEXT NOT NULL DEFAULT 'zj',
+      local_day TEXT,
+      payload TEXT,
+      message_id INTEGER,
+      sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -478,10 +503,13 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_user_type ON auth_email_tokens(user_id, token_type, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_email_type ON auth_email_tokens(email, token_type, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_expires_at ON auth_email_tokens(expires_at)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_consents_user_type ON user_consents(user_id, consent_type, accepted_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_mentions_user_read ON mention_notifications(user_id, is_read, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_user_sent ON coach_outreach_events(user_id, sent_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_trigger_day ON coach_outreach_events(trigger_type, local_day, sent_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)');

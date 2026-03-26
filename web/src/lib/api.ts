@@ -157,10 +157,24 @@ export async function login(username: string, password: string, timezone?: strin
   });
 }
 
-export async function register(username: string, email: string, password: string): Promise<{ userId: number }> {
+export async function register(
+  username: string,
+  email: string,
+  password: string,
+  options: {
+    healthDisclaimerAccepted: boolean;
+    consentVersion: string;
+  },
+): Promise<{ userId: number }> {
   return request<{ userId: number }>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ username, email, password }),
+    body: JSON.stringify({
+      username,
+      email,
+      password,
+      healthDisclaimerAccepted: options.healthDisclaimerAccepted,
+      consentVersion: options.consentVersion,
+    }),
   });
 }
 

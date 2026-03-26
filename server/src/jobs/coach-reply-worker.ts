@@ -25,8 +25,8 @@ async function publishCoachLifecycle(topic: string, active: boolean): Promise<vo
     type: 'coach_status',
     topic,
     status: {
-      phase: active ? 'retrieving_knowledge' : 'complete',
-      label: active ? 'Retrieving knowledge base...' : '',
+      phase: active ? 'composing' : 'complete',
+      label: active ? 'Thinking...' : '',
       active,
     },
   }, active ? 'coach-status-start' : 'coach-status-complete');

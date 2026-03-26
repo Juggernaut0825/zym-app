@@ -5,7 +5,7 @@ import { toJson } from './base-tool-helpers.js';
 export class SearchKnowledgeTool implements Tool {
   definition: ToolDefinition = {
     name: 'search_knowledge',
-    description: 'Search grounded professional knowledge from the local and vector knowledge bases.',
+    description: 'Search the Chroma knowledge base and return grounded evidence with source URLs for inline citation.',
     parameters: {
       type: 'object',
       properties: {
@@ -17,9 +17,8 @@ export class SearchKnowledgeTool implements Tool {
         },
         domains: {
           type: 'array',
-          description: 'Optional domain filters. Use fitness and/or nutrition.',
+          description: 'Optional domain hints, for example fitness, nutrition, training, workout, food, or diet.',
           itemType: 'string',
-          itemEnum: ['fitness', 'nutrition'],
           maxItems: 2,
         },
         topK: {

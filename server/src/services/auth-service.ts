@@ -114,12 +114,38 @@ export class EmailVerificationRequiredError extends Error {
 }
 
 export class AuthService {
-  static async register(username: string, email: string, password: string) {
+  static async register(
+    username: string,
+    email: string,
+    password: string,
+    options?: {
+      healthDisclaimerAccepted?: boolean;
+      consentVersion?: string;
+      ipAddress?: string | null;
+      userAgent?: string | null;
+    },
+  ) {
     const hash = await bcrypt.hash(password, 10);
     const normalizedEmail = normalizeEmail(email);
-    const result = getDB()
+    const db = getDB();
+    const result = db
       .prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)')
       .run(username, normalizedEmail, hash);
+
+    const userId = Number(result.lastInsertRowid || 0);
+    if (userId > 0 && options?.healthDisclaimerAccepted) {
+      db.prepare(`
+        INSERT OR IGNORE INTO user_consents (user_id, consent_type, version, ip_address, user_agent)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        userId,
+        'health_disclaimer',
+        String(options.consentVersion || '2026-03-26').slice(0, 40),
+        String(options.ipAddress || '').slice(0, 120) || null,
+        String(options.userAgent || '').slice(0, 500) || null,
+      );
+    }
+
     return result.lastInsertRowid;
   }
 

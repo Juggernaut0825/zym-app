@@ -6,6 +6,13 @@ export interface VectorKnowledgeMatch {
   source: string;
   text: string;
   score: number;
+  title?: string;
+  referenceUrl?: string;
+  pdfUrl?: string;
+  authors?: string;
+  year?: string;
+  category?: string;
+  corpus?: string;
 }
 
 export interface VectorSearchOptions {
@@ -101,21 +108,6 @@ export class VectorService {
     }
   }
 
-  private static fallbackDomainsForQuery(query: string): Array<'fitness' | 'nutrition'> {
-    const text = String(query || '').toLowerCase();
-    const nutritionHits = [
-      'calorie', 'kcal', 'macro', 'protein', 'carb', 'fat', 'meal', 'diet', 'nutrition', 'food',
-    ].some((token) => text.includes(token));
-    const fitnessHits = [
-      'squat', 'bench', 'deadlift', 'cardio', 'run', 'rep', 'set', 'training', 'workout', 'form',
-    ].some((token) => text.includes(token));
-
-    if (nutritionHits && fitnessHits) return ['fitness', 'nutrition'];
-    if (nutritionHits) return ['nutrition'];
-    if (fitnessHits) return ['fitness'];
-    return ['fitness', 'nutrition'];
-  }
-
   private static normalizeScore(distance: number): number {
     const numeric = Number(distance);
     if (!Number.isFinite(numeric)) return 0;
@@ -137,19 +129,22 @@ export class VectorService {
       return [];
     }
 
-    const domains = options.domains?.length ? options.domains : this.fallbackDomainsForQuery(normalized);
     const topK = Math.min(8, Math.max(1, Math.floor(Number(options.topK || 4))));
     const embedding = await this.getEmbedding(normalized);
     if (embedding.length === 0) return [];
 
     const merged = new Map<string, VectorKnowledgeMatch>();
 
-    for (const domain of domains) {
+    const domainFilters = Array.isArray(options.domains) && options.domains.length > 0
+      ? options.domains
+      : [null];
+
+    for (const domain of domainFilters) {
       try {
         const result = await collection.query({
           queryEmbeddings: [embedding],
           nResults: topK,
-          where: { domain },
+          where: domain ? { domain } : undefined,
           include: ['metadatas', 'documents', 'distances'],
         });
 
@@ -162,21 +157,29 @@ export class VectorService {
           const metadata = metadatas[index] as Record<string, unknown> | null | undefined;
           const text = String(documents[index] || metadata?.text || '').replace(/\s+/g, ' ').trim().slice(0, 4_000);
           if (!text) continue;
-          const source = String(metadata?.source || metadata?.title || `${domain}-kb`).trim().slice(0, 180);
+          const matchDomain = metadata?.domain === 'nutrition' ? 'nutrition' : 'fitness';
+          const source = String(metadata?.source || metadata?.title || `${matchDomain}-kb`).trim().slice(0, 180);
           if (this.allowedSourceRegex && !this.allowedSourceRegex.test(source)) {
             continue;
           }
           const score = this.normalizeScore(Number(distances[index] || 0));
-          const id = String(ids[index] || `${domain}:${source}:${index + 1}`);
+          const id = String(ids[index] || `${matchDomain}:${source}:${index + 1}`);
           const key = `${source}:${text.slice(0, 120)}`;
           const existing = merged.get(key);
           if (existing && existing.score >= score) continue;
           merged.set(key, {
             id,
-            domain,
+            domain: matchDomain,
             source,
             text,
             score,
+            title: String(metadata?.title || '').trim().slice(0, 300) || undefined,
+            referenceUrl: String(metadata?.referenceUrl || '').trim().slice(0, 500) || undefined,
+            pdfUrl: String(metadata?.pdfUrl || '').trim().slice(0, 500) || undefined,
+            authors: String(metadata?.authors || '').trim().slice(0, 300) || undefined,
+            year: String(metadata?.year || '').trim().slice(0, 16) || undefined,
+            category: String(metadata?.category || '').trim().slice(0, 80) || undefined,
+            corpus: String(metadata?.corpus || '').trim().slice(0, 80) || undefined,
           });
         }
       } catch {

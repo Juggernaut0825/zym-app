@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import {
@@ -68,6 +68,10 @@ import {
   Profile,
   UserSummary,
 } from '@/lib/types';
+
+const APP_TITLE = 'ZYM Community Coach';
+const COACH_SAFETY_TOOLTIP = 'ZYM AI Coach is not medical advice.\nIf you have injuries, medical conditions, chest pain, severe pain, dizziness, or urgent symptoms, stop and seek professional or emergency care.';
+const BASE_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none"><defs><linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#f28a3a"/><stop offset="50%" stop-color="#e17734"/><stop offset="100%" stop-color="#6c7cf6"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="2" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="60" cy="60" r="55" fill="#0a0a0a" stroke="url(#logoGradient)" stroke-width="3"/><path d="M30 35 L90 35 L90 45 L50 75 L90 75 L90 85 L30 85 L30 75 L70 45 L30 45 Z" fill="url(#logoGradient)" filter="url(#glow)"/><path d="M75 30 L85 50 L78 50 L85 70 L75 50 L82 50 Z" fill="#fbbf24" opacity="0.9"/><circle cx="25" cy="60" r="3" fill="#f28a3a" opacity="0.65"/><circle cx="95" cy="60" r="3" fill="#6c7cf6" opacity="0.65"/><circle cx="60" cy="60" r="45" fill="none" stroke="#f28a3a" stroke-width="1" opacity="0.28"/><circle cx="60" cy="60" r="50" fill="none" stroke="#6c7cf6" stroke-width="0.5" opacity="0.22"/></svg>`;
 
 const tabs = [
   { key: 'messages', label: 'Message', icon: 'chat_bubble' },
@@ -399,6 +403,64 @@ function splitReplySegments(content?: string | null): string[] {
   return parts.length > 0 ? parts : [text];
 }
 
+function appendTextNodes(target: ReactNode[], text: string, keyPrefix: string) {
+  const lines = text.split('\n');
+  lines.forEach((line, lineIndex) => {
+    if (line) {
+      target.push(<span key={`${keyPrefix}-text-${lineIndex}`}>{line}</span>);
+    }
+    if (lineIndex < lines.length - 1) {
+      target.push(<br key={`${keyPrefix}-break-${lineIndex}`} />);
+    }
+  });
+}
+
+function renderMessageInlineLinks(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      appendTextNodes(nodes, text.slice(lastIndex, match.index), `seg-${lastIndex}`);
+    }
+    const url = match[2] || match[3] || '';
+    const label = match[1] || url;
+    nodes.push(
+      <a
+        key={`link-${match.index}`}
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="font-semibold underline underline-offset-2"
+      >
+        {label}
+      </a>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    appendTextNodes(nodes, text.slice(lastIndex), `tail-${lastIndex}`);
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+function buildFaviconHref(unreadCount: number): string {
+  if (unreadCount <= 0) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(BASE_FAVICON_SVG)}`;
+  }
+
+  const badge = unreadCount > 99 ? '99+' : String(unreadCount);
+  const svg = BASE_FAVICON_SVG.replace(
+    '</svg>',
+    `<circle cx="92" cy="28" r="20" fill="#dc2626" stroke="#ffffff" stroke-width="4"/><text x="92" y="34" text-anchor="middle" font-family="Arial, sans-serif" font-size="${badge.length > 2 ? 14 : 18}" font-weight="700" fill="#ffffff">${badge}</text></svg>`,
+  );
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function parseDisplayDate(value?: string | null): Date | null {
   if (!value) return null;
   const raw = String(value).trim();
@@ -461,6 +523,8 @@ export default function AppPage() {
   const coachReplyRevealQueuesRef = useRef<Record<string, ChatMessage[]>>({});
   const coachReplyRevealActiveMessageRef = useRef<Record<string, string | null>>({});
   const skipTypingPulseRef = useRef(false);
+  const notificationAudioContextRef = useRef<AudioContext | null>(null);
+  const lastNotificationKeyRef = useRef<string>('');
 
   const [ready, setReady] = useState(false);
   const [showAppIntro, setShowAppIntro] = useState(true);
@@ -675,6 +739,20 @@ export default function AppPage() {
     () => conversations.reduce((sum, item) => sum + Number(item.unreadCount || 0) + Number(item.mentionCount || 0), 0),
     [conversations],
   );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    document.title = totalUnreadCount > 0 ? `(${Math.min(totalUnreadCount, 99)}) ${APP_TITLE}` : APP_TITLE;
+
+    let iconLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+    if (!iconLink) {
+      iconLink = document.createElement('link');
+      iconLink.rel = 'icon';
+      document.head.appendChild(iconLink);
+    }
+    iconLink.href = buildFaviconHref(totalUnreadCount);
+  }, [totalUnreadCount]);
 
   const panelMomentum = useMemo(() => {
     if (tab === 'messages') {
@@ -962,6 +1040,32 @@ export default function AppPage() {
     runCoachReplyRevealQueue(queueKey);
   };
 
+  const playBackgroundNotificationTone = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (document.visibilityState !== 'hidden') return;
+
+    try {
+      const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const audioContext = notificationAudioContextRef.current || new AudioCtx();
+      notificationAudioContextRef.current = audioContext;
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.06, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.18);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.18);
+    } catch {
+      // Ignore notification audio failures.
+    }
+  };
+
   const handleSocketEvent = (event: AppSocketEvent | { type: string; [key: string]: unknown }) => {
     if (event.type === 'auth_failed') {
       forceReauth('Invalid or expired token.');
@@ -981,6 +1085,12 @@ export default function AppPage() {
       const message = event.message as ChatMessage;
       const isActiveTopic = topic === activeTopicRef.current;
       const isCoachMessage = Number(message.from_user_id) === 0;
+      const notificationKey = `${message.id}:${message.created_at}`;
+
+      if (!isActiveTopic && Number(message.from_user_id) !== authUserIdRef.current && lastNotificationKeyRef.current !== notificationKey) {
+        lastNotificationKeyRef.current = notificationKey;
+        playBackgroundNotificationTone();
+      }
 
       if (isActiveTopic && !messagesRef.current.some((item) => item.id === message.id)) {
         const nextMessages = [...messagesRef.current, message];
@@ -2455,7 +2565,23 @@ export default function AppPage() {
                 )}
               </button>
               <div className="min-w-0">
-                <h2 className="truncate text-xl font-bold text-slate-900">{activeConversation?.name || 'Select a chat'}</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-xl font-bold text-slate-900">{activeConversation?.name || 'Select a chat'}</h2>
+                  {activeConversation?.type === 'coach' ? (
+                    <div className="group relative">
+                      <button
+                        type="button"
+                        className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
+                        aria-label="Coach safety notice"
+                      >
+                        i
+                      </button>
+                      <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
+                        {COACH_SAFETY_TOOLTIP}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </header>
@@ -2653,7 +2779,7 @@ export default function AppPage() {
                                 }
                           ) : undefined}
                         >
-                          {segment ? <p className="whitespace-pre-wrap text-sm leading-6">{segment}</p> : null}
+                          {segment ? <p className="text-sm leading-6">{renderMessageInlineLinks(segment)}</p> : null}
                         </div>
                       ))}
 

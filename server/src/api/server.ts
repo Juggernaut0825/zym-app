@@ -990,18 +990,27 @@ app.post('/auth/register',
     username: { required: true, type: 'string', minLength: 3, maxLength: 32, pattern: /^[a-zA-Z0-9_]+$/ },
     email: { required: true, type: 'string', minLength: 3, maxLength: 120, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
     password: { required: true, type: 'string', minLength: 8, maxLength: 200 },
+    healthDisclaimerAccepted: { required: true, type: 'boolean' },
+    consentVersion: { required: true, type: 'string', minLength: 4, maxLength: 40 },
   }),
   async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
     const email = String(req.body.email || '').trim();
     const password = String(req.body.password || '');
+    const healthDisclaimerAccepted = Boolean(req.body.healthDisclaimerAccepted);
+    const consentVersion = String(req.body.consentVersion || '').trim();
 
-    if (!username || !email || password.length < 8) {
-      return res.status(400).json({ error: 'Username, email, and password(>=8) are required' });
+    if (!username || !email || password.length < 8 || !healthDisclaimerAccepted || !consentVersion) {
+      return res.status(400).json({ error: 'Username, email, password, and health disclaimer acceptance are required' });
     }
 
-    const userId = await AuthService.register(username, email, password);
+    const userId = await AuthService.register(username, email, password, {
+      healthDisclaimerAccepted,
+      consentVersion,
+      ipAddress: String(req.ip || req.socket.remoteAddress || '').trim() || null,
+      userAgent: String(req.headers['user-agent'] || '').trim() || null,
+    });
     const registeredUser = AuthService.findUserByEmail(email);
     if (!registeredUser) {
       throw new Error('Registered account could not be loaded.');

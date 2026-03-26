@@ -90,11 +90,23 @@ function extractJsonPayload(raw: string): string {
   return stripped;
 }
 
-function inferKnowledgeDomains(raw: unknown): KnowledgeDomain[] {
+function normalizeKnowledgeDomains(raw: unknown): KnowledgeDomain[] {
+  const normalizeOne = (value: unknown): KnowledgeDomain | null => {
+    const text = safeString(value, 40).toLowerCase();
+    if (!text) return null;
+    if (text === 'fitness' || text === 'training' || text === 'exercise' || text === 'workout' || text === 'lifting') {
+      return 'fitness';
+    }
+    if (text === 'nutrition' || text === 'food' || text === 'diet' || text === 'meal' || text === 'meals' || text === 'macros') {
+      return 'nutrition';
+    }
+    return null;
+  };
+
   if (Array.isArray(raw)) {
     const values = raw
-      .map((item) => safeString(item, 40).toLowerCase())
-      .filter((item): item is KnowledgeDomain => item === 'fitness' || item === 'nutrition');
+      .map((item) => normalizeOne(item))
+      .filter((item): item is KnowledgeDomain => Boolean(item));
     if (values.length > 0) {
       return Array.from(new Set(values));
     }
@@ -106,7 +118,51 @@ function inferKnowledgeDomains(raw: unknown): KnowledgeDomain[] {
   if (text === 'fitness,nutrition' || text === 'nutrition,fitness' || text === 'both') {
     return ['fitness', 'nutrition'];
   }
-  return ['fitness', 'nutrition'];
+  const single = normalizeOne(text);
+  if (single) {
+    return [single];
+  }
+  return [];
+}
+
+function stripHtmlTags(input: string): string {
+  return String(input || '').replace(/<[^>]+>/g, ' ');
+}
+
+function decodeHtmlEntities(input: string): string {
+  return String(input || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x27;/gi, "'")
+    .replace(/&nbsp;/gi, ' ');
+}
+
+function unwrapDuckDuckGoUrl(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value, 'https://duckduckgo.com');
+    return parsed.searchParams.get('uddg') || parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+function isYoutubeWatchUrl(url: string): boolean {
+  const value = String(url || '').toLowerCase();
+  return value.includes('youtube.com/watch')
+    || value.includes('youtube.com/shorts/')
+    || value.includes('youtu.be/');
+}
+
+function normalizeMarkdownLinkLabel(label: string): string {
+  return String(label || '')
+    .replace(/[[\]]/g, '')
+    .trim()
+    .slice(0, 80);
 }
 
 async function ensureDir(dirPath: string): Promise<void> {
@@ -1026,19 +1082,19 @@ ${domainPrompt[domain]}`;
     if (!query) {
       throw new Error('Query is required');
     }
-    const domains = inferKnowledgeDomains(input.domains);
+    const domains = normalizeKnowledgeDomains(input.domains);
     const topK = clampInt(input.topK, 1, 8, 4);
     const minScore = toNumber(input.minScore, 0, 1) ?? 0.08;
     logger.info(
-      `[tool][search_knowledge] start domains=${domains.join(',')} topK=${topK} minScore=${minScore.toFixed(2)} query="${query.slice(0, 160)}"`,
+      `[tool][search_knowledge] start domains=${domains.join(',') || 'all'} topK=${topK} minScore=${minScore.toFixed(2)} query="${query.slice(0, 160)}"`,
     );
     const matches = await knowledgeService.searchHybrid(query, {
-      domains,
+      domains: domains.length > 0 ? domains : undefined,
       topK,
       minScore,
     });
     logger.info(
-      `[tool][search_knowledge] done matches=${matches.length} domains=${domains.join(',')} query="${query.slice(0, 160)}"`,
+      `[tool][search_knowledge] done matches=${matches.length} domains=${domains.join(',') || 'all'} query="${query.slice(0, 160)}"`,
     );
 
     return {
@@ -1046,13 +1102,88 @@ ${domainPrompt[domain]}`;
       total: matches.length,
       matches: matches.map((item, idx) => ({
         rank: idx + 1,
+        title: safeString(item.title || item.source, 300),
         source: item.source,
         domain: item.domain,
         backend: item.backend,
         score: Number(item.score.toFixed(4)),
-        text: safeString(item.text, 1200),
+        authors: safeString(item.authors, 300),
+        year: safeString(item.year, 16),
+        category: safeString(item.category, 80),
+        referenceUrl: safeString(item.referenceUrl, 500),
+        pdfUrl: safeString(item.pdfUrl, 500),
+        sourceUrl: safeString(item.pdfUrl || item.referenceUrl, 500),
+        citationMarkdown: item.pdfUrl || item.referenceUrl
+          ? `[${idx + 1}](${safeString(item.pdfUrl || item.referenceUrl, 500)})`
+          : '',
+        snippet: safeString(item.text, 1200),
       })),
     };
+  }
+
+  async searchExerciseVideos(input: {
+    query: unknown;
+    maxResults?: unknown;
+  }): Promise<Record<string, unknown>> {
+    const query = safeString(input.query, 240);
+    if (!query) {
+      throw new Error('Query is required');
+    }
+
+    const maxResults = clampInt(input.maxResults, 1, 5, 3);
+    const searchTerms = `${query} exercise form tutorial`;
+    const fallbackSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchTerms)}`;
+
+    try {
+      const response = await fetch(`https://duckduckgo.com/html/?q=${encodeURIComponent(`site:youtube.com ${searchTerms}`)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo search failed (${response.status})`);
+      }
+
+      const html = await response.text();
+      const results: Array<Record<string, unknown>> = [];
+      const pattern = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let match: RegExpExecArray | null;
+
+      while ((match = pattern.exec(html)) && results.length < maxResults) {
+        const url = unwrapDuckDuckGoUrl(decodeHtmlEntities(match[1]));
+        if (!isYoutubeWatchUrl(url)) {
+          continue;
+        }
+        const title = safeString(decodeHtmlEntities(stripHtmlTags(match[2])), 180);
+        if (!title) {
+          continue;
+        }
+        results.push({
+          rank: results.length + 1,
+          title,
+          url,
+          markdownLink: `[${normalizeMarkdownLinkLabel(title)}](${url})`,
+          platform: 'youtube',
+        });
+      }
+
+      return {
+        query,
+        total: results.length,
+        searchUrl: fallbackSearchUrl,
+        results,
+      };
+    } catch (error: any) {
+      logger.warn(`[tool][search_exercise_videos] fallback search URL only query="${query.slice(0, 160)}" error=${String(error?.message || error)}`);
+      return {
+        query,
+        total: 0,
+        searchUrl: fallbackSearchUrl,
+        results: [],
+      };
+    }
   }
 }
 

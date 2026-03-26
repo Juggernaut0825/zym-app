@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { initDB } from './database/runtime-db.js';
+import { CoachOutreachScheduler } from './services/coach-outreach-scheduler.js';
 import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
 import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
 import { logger } from './utils/logger.js';
@@ -9,6 +10,7 @@ dotenv.config();
 
 ensureAppDataDirs();
 
+const coachOutreach = new CoachOutreachScheduler();
 const mediaCleanup = new MediaCleanupScheduler();
 const sessionCleanup = new SessionCleanupScheduler();
 let shuttingDown = false;
@@ -17,6 +19,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info(`[scheduler] received ${signal}, shutting down`);
+  coachOutreach.stop();
   mediaCleanup.stop();
   sessionCleanup.stop();
   process.exit(0);
@@ -24,9 +27,10 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
 
 async function main() {
   await initDB();
+  coachOutreach.start();
   mediaCleanup.start();
   sessionCleanup.start();
-  logger.info('[scheduler] background cleanup schedulers started');
+  logger.info('[scheduler] background schedulers started');
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
