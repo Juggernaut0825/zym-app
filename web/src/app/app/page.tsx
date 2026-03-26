@@ -3566,6 +3566,7 @@ export default function AppPage() {
         <CoachRecordsPanel
           userId={authUserId}
           active={ready && activeTab === 'profile' && authUserId > 0}
+          coachId={selectedCoach}
           onNotice={showNotice}
           onError={setError}
         />

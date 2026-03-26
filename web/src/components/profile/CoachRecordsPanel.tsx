@@ -12,6 +12,7 @@ import { CoachDayRecord, CoachMealRecord, CoachProfileData, CoachRecordsResponse
 interface CoachRecordsPanelProps {
   userId: number;
   active: boolean;
+  coachId: 'zj' | 'lc';
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 }
@@ -117,7 +118,7 @@ function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): Traini
 }
 
 export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
-  const { userId, active, onNotice, onError } = props;
+  const { userId, active, coachId, onNotice, onError } = props;
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<CoachRecordsResponse | null>(null);
@@ -135,6 +136,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
   });
   const [mealDraft, setMealDraft] = useState<MealEditDraft | null>(null);
   const [trainingDraft, setTrainingDraft] = useState<TrainingEditDraft | null>(null);
+  const primaryButtonClass = coachId === 'lc' ? 'btn btn-lc' : 'btn btn-zj';
 
   async function loadData() {
     if (!userId || userId <= 0) return;
@@ -320,7 +322,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
       />
 
       <div className="mt-4 flex gap-3">
-        <button className="btn btn-zj" type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>
+        <button className={primaryButtonClass} type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>
           {saving ? 'Saving...' : 'Save coach profile records'}
         </button>
       </div>
@@ -409,7 +411,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
             <input className="input-shell" maxLength={5} placeholder="Time HH:mm" value={mealDraft.time} onChange={(event) => setMealDraft((prev) => (prev ? { ...prev, time: event.target.value.slice(0, 5) } : prev))} />
           </div>
           <div className="coach-records-actions">
-            <button className="btn btn-primary" type="button" onClick={() => void handleSaveMeal()} disabled={saving}>
+            <button className={primaryButtonClass} type="button" onClick={() => void handleSaveMeal()} disabled={saving}>
               {saving ? 'Saving...' : 'Save meal update'}
             </button>
             <button className="btn btn-ghost" type="button" onClick={() => setMealDraft(null)} disabled={saving}>
@@ -440,7 +442,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
             onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, notes: event.target.value.slice(0, 500) } : prev))}
           />
           <div className="coach-records-actions">
-            <button className="btn btn-primary" type="button" onClick={() => void handleSaveTraining()} disabled={saving}>
+            <button className={primaryButtonClass} type="button" onClick={() => void handleSaveTraining()} disabled={saving}>
               {saving ? 'Saving...' : 'Save training update'}
             </button>
             <button className="btn btn-ghost" type="button" onClick={() => setTrainingDraft(null)} disabled={saving}>
