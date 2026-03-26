@@ -5,6 +5,7 @@ import { CoachService } from './coach-service.js';
 import { MessageService, buildCoachTopic } from './message-service.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { logger } from '../utils/logger.js';
+import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
 
 const DEFAULT_INTERVAL_MINUTES = 10;
@@ -120,6 +121,9 @@ export class CoachOutreachScheduler {
   async runOnce() {
     if (this.running) return;
     this.running = true;
+    const startedAt = Date.now();
+    let userCount = 0;
+    let sentCount = 0;
 
     try {
       const rows = getDB()
@@ -130,22 +134,28 @@ export class CoachOutreachScheduler {
           ORDER BY id ASC
         `)
         .all() as unknown as OutreachUser[];
+      userCount = rows.length;
 
       for (const user of rows) {
         try {
-          await this.processUser(user);
+          if (await this.processUser(user)) {
+            sentCount += 1;
+          }
         } catch (error) {
           logger.error(`[outreach] failed user=${user.id}`, error);
         }
       }
     } finally {
       this.running = false;
+      logger.info(
+        `[outreach] cycle users=${userCount} sent=${sentCount} elapsedMs=${Date.now() - startedAt} ${formatProcessMemoryUsage()}`,
+      );
     }
   }
 
-  private async processUser(user: OutreachUser): Promise<void> {
+  private async processUser(user: OutreachUser): Promise<boolean> {
     const userId = Number(user.id || 0);
-    if (!Number.isInteger(userId) || userId <= 0) return;
+    if (!Number.isInteger(userId) || userId <= 0) return false;
 
     const coachId = user.selected_coach === 'lc' ? 'lc' : 'zj';
     const timezone = normalizeTimezone(user.timezone);
@@ -154,16 +164,16 @@ export class CoachOutreachScheduler {
     const localNow = localDateParts(now, timezone);
 
     if (this.alreadySentForLocalDay(userId, localNow.day)) {
-      return;
+      return false;
     }
 
     if (await this.maybeSendOnboarding(userId, coachId, timezone, topic, user.created_at, now)) {
-      return;
+      return true;
     }
     if (await this.maybeSendInactivity(userId, coachId, timezone, topic, localNow, now)) {
-      return;
+      return true;
     }
-    await this.maybeSendNightlyCheckIn(userId, coachId, timezone, topic, localNow);
+    return this.maybeSendNightlyCheckIn(userId, coachId, timezone, topic, localNow);
   }
 
   private alreadySentForLocalDay(userId: number, localDay: string): boolean {

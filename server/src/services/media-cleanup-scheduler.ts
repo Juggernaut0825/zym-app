@@ -2,6 +2,7 @@ import { MediaStore } from '../context/media-store.js';
 import path from 'path';
 import { MediaAssetService } from './media-asset-service.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
+import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
 
 const DEFAULT_INTERVAL_MINUTES = 6 * 60;
 
@@ -53,12 +54,12 @@ export class MediaCleanupScheduler {
           `[media-cleanup] removed ${legacyResult.removedCount} legacy items across ${legacyResult.userCount} users, `
           + `${assetResult.removedCount} media assets (${assetResult.purgedPendingCount} pending, `
           + `${assetResult.purgedExpiredCount} expired, ${assetResult.purgedDeletedCount} deleted), `
-          + `and ${assetResult.orphanedUploadCount} orphan uploads in ${elapsed}ms`,
+          + `and ${assetResult.orphanedUploadCount} orphan uploads in ${elapsed}ms (${formatProcessMemoryUsage()})`,
         );
       } else {
         console.log(
           `[media-cleanup] no expired media found across ${legacyResult.userCount} legacy users `
-          + `(${assetResult.scannedUploadCount} upload files scanned, ${elapsed}ms)`,
+          + `(${assetResult.scannedUploadCount} upload files scanned, ${elapsed}ms, ${formatProcessMemoryUsage()})`,
         );
       }
     } catch (error: any) {

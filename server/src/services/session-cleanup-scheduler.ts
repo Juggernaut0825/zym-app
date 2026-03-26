@@ -1,4 +1,5 @@
 import { AuthService } from './auth-service.js';
+import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
 
 const DEFAULT_INTERVAL_MINUTES = 30;
 
@@ -36,9 +37,9 @@ export class SessionCleanupScheduler {
       const removed = AuthService.cleanupSessions(true);
       const elapsed = Date.now() - startedAt;
       if (removed > 0) {
-        console.log(`[session-cleanup] removed ${removed} expired/revoked sessions in ${elapsed}ms`);
+        console.log(`[session-cleanup] removed ${removed} expired/revoked sessions in ${elapsed}ms (${formatProcessMemoryUsage()})`);
       } else {
-        console.log(`[session-cleanup] no stale sessions found (${elapsed}ms)`);
+        console.log(`[session-cleanup] no stale sessions found (${elapsed}ms, ${formatProcessMemoryUsage()})`);
       }
     } catch (error: any) {
       console.error('[session-cleanup] background cleanup failed:', error?.message || error);
