@@ -2,7 +2,9 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import fs from 'fs/promises';
 import { getDB } from '../database/runtime-db.js';
+import { resolveUserDataDir } from '../utils/path-resolver.js';
 
 dotenv.config();
 
@@ -42,6 +44,9 @@ interface EmailActionLookupRow {
   user_id?: number;
   username?: string;
   email?: string | null;
+  consumed_at?: string | null;
+  expires_at?: string | null;
+  email_verified_at?: string | null;
 }
 
 function normalizeEmail(email: unknown): string | null {
@@ -200,22 +205,35 @@ export class AuthService {
     return rawToken;
   }
 
-  private static lookupEmailActionToken(token: string, tokenType: EmailActionType): { userId: number; username: string; email: string } | null {
+  private static lookupEmailActionTokenRow(token: string, tokenType: EmailActionType): EmailActionLookupRow | null {
     const normalizedToken = String(token || '').trim();
     if (!normalizedToken) return null;
 
     const row = getDB()
       .prepare(`
-        SELECT t.user_id, t.email, u.username
+        SELECT t.user_id, t.email, t.consumed_at, t.expires_at, u.username, u.email_verified_at
         FROM auth_email_tokens t
         JOIN users u ON u.id = t.user_id
         WHERE t.token_hash = ?
           AND t.token_type = ?
-          AND t.consumed_at IS NULL
-          AND datetime(t.expires_at) > datetime('now')
         LIMIT 1
       `)
       .get(hashEmailActionToken(normalizedToken), tokenType) as EmailActionLookupRow | undefined;
+
+    return row || null;
+  }
+
+  private static lookupEmailActionToken(token: string, tokenType: EmailActionType): { userId: number; username: string; email: string } | null {
+    const row = this.lookupEmailActionTokenRow(token, tokenType);
+    if (!row) return null;
+
+    if (String(row.consumed_at || '').trim()) return null;
+    if (!String(row.expires_at || '').trim() || !String(row.email || '').trim()) return null;
+
+    const expiresAt = new Date(String(row.expires_at));
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+      return null;
+    }
 
     const userId = Number(row?.user_id || 0);
     const email = normalizeEmail(row?.email);
@@ -229,8 +247,28 @@ export class AuthService {
   }
 
   static verifyEmailWithToken(token: string): { userId: number; username: string; email: string } | null {
-    const match = this.lookupEmailActionToken(token, 'verify_email');
-    if (!match) return null;
+    const row = this.lookupEmailActionTokenRow(token, 'verify_email');
+    if (!row) return null;
+
+    const userId = Number(row.user_id || 0);
+    const email = normalizeEmail(row.email);
+    if (!Number.isInteger(userId) || userId <= 0 || !email) return null;
+
+    const match = {
+      userId,
+      username: String(row.username || ''),
+      email,
+    };
+
+    if (isEmailVerified(row.email_verified_at)) {
+      return match;
+    }
+
+    const expiresAt = new Date(String(row.expires_at || ''));
+    const expired = !Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now();
+    if (String(row.consumed_at || '').trim() || expired) {
+      return null;
+    }
 
     getDB()
       .prepare('UPDATE users SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE id = ?')
@@ -245,6 +283,127 @@ export class AuthService {
       .run(match.userId);
 
     return match;
+  }
+
+  static async deleteAccount(userId: number): Promise<{ affectedFriendIds: number[] }> {
+    const safeUserId = Number(userId);
+    if (!Number.isInteger(safeUserId) || safeUserId <= 0) {
+      throw new Error('A valid user is required to delete an account.');
+    }
+
+    const db = getDB();
+    const affectedFriendIds = db.prepare(`
+      SELECT DISTINCT CASE
+        WHEN user_id = ? THEN friend_id
+        ELSE user_id
+      END AS friend_id
+      FROM friendships
+      WHERE user_id = ? OR friend_id = ?
+    `).all(safeUserId, safeUserId, safeUserId)
+      .map((row: any) => Number(row.friend_id || 0))
+      .filter((value: number) => Number.isInteger(value) && value > 0 && value !== safeUserId);
+
+    const coachTopicLegacy = `coach_${safeUserId}`;
+    const coachTopicZj = `coach_zj_${safeUserId}`;
+    const coachTopicLc = `coach_lc_${safeUserId}`;
+    const p2pPrefix = `p2p_${safeUserId}_%`;
+    const p2pSuffix = `p2p_%_${safeUserId}`;
+
+    db.exec('BEGIN');
+    try {
+      db.prepare(`
+        DELETE FROM mention_notifications
+        WHERE source_type = 'post_comment'
+          AND source_id IN (
+            SELECT id
+            FROM post_comments
+            WHERE user_id = ?
+               OR post_id IN (SELECT id FROM posts WHERE user_id = ?)
+          )
+      `).run(safeUserId, safeUserId);
+
+      db.prepare(`
+        DELETE FROM mention_notifications
+        WHERE user_id = ?
+           OR message_id IN (
+             SELECT id
+             FROM messages
+             WHERE from_user_id = ?
+                OR topic IN (?, ?, ?)
+                OR topic LIKE ?
+                OR topic LIKE ?
+           )
+      `).run(safeUserId, safeUserId, coachTopicLegacy, coachTopicZj, coachTopicLc, p2pPrefix, p2pSuffix);
+
+      db.prepare(`
+        DELETE FROM message_reads
+        WHERE user_id = ?
+           OR topic IN (?, ?, ?)
+           OR topic LIKE ?
+           OR topic LIKE ?
+      `).run(safeUserId, coachTopicLegacy, coachTopicZj, coachTopicLc, p2pPrefix, p2pSuffix);
+
+      db.prepare('DELETE FROM coach_outreach_events WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM security_events WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM abuse_reports WHERE reporter_user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM knowledge_ingestion_audit WHERE actor_user_id = ?').run(safeUserId);
+      db.prepare(`
+        DELETE FROM knowledge_ingestion_audit
+        WHERE request_id IN (SELECT id FROM knowledge_ingestion_requests WHERE requester_user_id = ?)
+      `).run(safeUserId);
+      db.prepare(`
+        UPDATE knowledge_ingestion_requests
+        SET reviewed_by_user_id = NULL
+        WHERE reviewed_by_user_id = ?
+      `).run(safeUserId);
+      db.prepare('DELETE FROM knowledge_ingestion_requests WHERE requester_user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM media_asset_attachments WHERE owner_user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM media_asset_attachments WHERE entity_type = \'post\' AND entity_id IN (SELECT id FROM posts WHERE user_id = ?)').run(safeUserId);
+      db.prepare(`
+        DELETE FROM media_asset_attachments
+        WHERE entity_type = 'message'
+          AND entity_id IN (
+            SELECT id
+            FROM messages
+            WHERE from_user_id = ?
+               OR topic IN (?, ?, ?)
+               OR topic LIKE ?
+               OR topic LIKE ?
+          )
+      `).run(safeUserId, coachTopicLegacy, coachTopicZj, coachTopicLc, p2pPrefix, p2pSuffix);
+      db.prepare('DELETE FROM post_reactions WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM post_reactions WHERE post_id IN (SELECT id FROM posts WHERE user_id = ?)').run(safeUserId);
+      db.prepare('DELETE FROM post_comments WHERE post_id IN (SELECT id FROM posts WHERE user_id = ?)').run(safeUserId);
+      db.prepare('DELETE FROM post_comments WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM posts WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE owner_id = ?)').run(safeUserId);
+      db.prepare('DELETE FROM group_members WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM groups WHERE owner_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM friendships WHERE user_id = ? OR friend_id = ?').run(safeUserId, safeUserId);
+      db.prepare('DELETE FROM friend_connect_codes WHERE user_id = ?').run(safeUserId);
+      db.prepare(`
+        DELETE FROM messages
+        WHERE from_user_id = ?
+           OR topic IN (?, ?, ?)
+           OR topic LIKE ?
+           OR topic LIKE ?
+      `).run(safeUserId, coachTopicLegacy, coachTopicZj, coachTopicLc, p2pPrefix, p2pSuffix);
+      db.prepare('DELETE FROM auth_email_tokens WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM user_consents WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM health_data WHERE user_id = ?').run(safeUserId);
+      db.prepare('DELETE FROM users WHERE id = ?').run(safeUserId);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    await fs.rm(resolveUserDataDir(String(safeUserId)), { recursive: true, force: true }).catch(() => undefined);
+
+    return {
+      affectedFriendIds: Array.from(new Set(affectedFriendIds)),
+    };
   }
 
   static async resetPasswordWithToken(token: string, nextPassword: string): Promise<{ userId: number; email: string } | null> {
@@ -516,7 +675,7 @@ export class AuthService {
     };
   }
 
-  static createFriendConnectToken(userId: number, ttlSeconds = 60): string {
+  static createFriendConnectToken(userId: number, ttlSeconds = 120): string {
     return jwt.sign(
       {
         typ: 'friend_connect',

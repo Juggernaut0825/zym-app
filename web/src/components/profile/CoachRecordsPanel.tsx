@@ -122,6 +122,8 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [records, setRecords] = useState<CoachRecordsResponse | null>(null);
+  const [recordQuery, setRecordQuery] = useState('');
+  const [recordDateFilter, setRecordDateFilter] = useState('');
   const [profileDraft, setProfileDraft] = useState<CoachProfileDraft>({
     height: '',
     weight: '',
@@ -165,6 +167,40 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
     }
     return map;
   }, [records]);
+
+  const filteredRecords = useMemo(() => {
+    const query = recordQuery.trim().toLowerCase();
+    return (records?.records || []).filter((day) => {
+      if (recordDateFilter && day.day !== recordDateFilter) {
+        return false;
+      }
+      if (!query) return true;
+
+      const haystack = [
+        day.day,
+        ...day.meals.map((meal) => [
+          meal.description,
+          meal.time,
+          meal.calories,
+          meal.protein_g,
+          meal.carbs_g,
+          meal.fat_g,
+        ].join(' ')),
+        ...day.training.map((entry) => [
+          entry.name,
+          entry.time,
+          entry.sets,
+          entry.reps,
+          entry.weight_kg,
+          entry.notes,
+        ].join(' ')),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [recordDateFilter, recordQuery, records]);
 
   async function handleSaveProfile() {
     if (!records) return;
@@ -327,68 +363,96 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
         </button>
       </div>
 
-      {!records && !loading ? (
-        <p className="mt-3 text-sm text-slate-500">No coach records available yet.</p>
-      ) : null}
-
-      {records?.records.map((day) => (
-        <article key={day.day} className="coach-day-card">
-          <header className="coach-day-head">
-            <strong>{formatDay(day.day)}</strong>
-            <span className="entity-sub">
-              Intake {Math.round(day.total_intake)} kcal · Burned {Math.round(day.total_burned)} kcal
-            </span>
-          </header>
-
-          <div className="coach-day-columns">
-            <section className="coach-day-block">
-              <h4>Meals</h4>
-              {day.meals.length === 0 ? <p className="entity-sub">No meals logged.</p> : null}
-              {day.meals.map((meal) => (
-                <div key={meal.id} className="coach-record-row">
-                  <div>
-                    <strong>{meal.description || 'Meal'}</strong>
-                    <p className="entity-sub">
-                      {meal.time || '--:--'} · C {meal.calories || 0} · P {meal.protein_g || 0} · Cb {meal.carbs_g || 0} · F {meal.fat_g || 0}
-                    </p>
-                  </div>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => setMealDraft(buildMealEditDraft(day.day, meal))}
-                    disabled={saving || loading}
-                  >
-                    Edit
-                  </button>
-                </div>
-              ))}
-            </section>
-
-            <section className="coach-day-block">
-              <h4>Training</h4>
-              {day.training.length === 0 ? <p className="entity-sub">No training logged.</p> : null}
-              {day.training.map((entry) => (
-                <div key={entry.id} className="coach-record-row">
-                  <div>
-                    <strong>{entry.name || 'Training entry'}</strong>
-                    <p className="entity-sub">
-                      {entry.time || '--:--'} · {entry.sets || 0} sets × {entry.reps || '0'} reps @ {entry.weight_kg || 0} kg
-                    </p>
-                  </div>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => setTrainingDraft(buildTrainingEditDraft(day.day, entry))}
-                    disabled={saving || loading}
-                  >
-                    Edit
-                  </button>
-                </div>
-              ))}
-            </section>
+      <section className="mt-5 rounded-[26px] border border-slate-200/70 bg-white/78 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Meal + Training Log</h3>
+            <p className="mt-1 text-sm text-slate-500">Latest days stay on top. Filter by date or keyword, then edit inline.</p>
           </div>
-        </article>
-      ))}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              className="input-shell min-w-[150px]"
+              type="date"
+              value={recordDateFilter}
+              onChange={(event) => setRecordDateFilter(event.target.value)}
+            />
+            <input
+              className="input-shell min-w-[210px]"
+              value={recordQuery}
+              onChange={(event) => setRecordQuery(event.target.value.slice(0, 120))}
+              placeholder="Search meals or training"
+            />
+          </div>
+        </div>
+
+        {!records && !loading ? (
+          <p className="mt-4 text-sm text-slate-500">No coach records available yet.</p>
+        ) : null}
+
+        <div className="mt-4 max-h-[420px] overflow-y-auto rounded-[22px] border border-slate-200/70 bg-[rgba(248,250,252,0.88)] px-4 py-2">
+          {filteredRecords.length === 0 ? (
+            <p className="py-6 text-sm text-slate-500">No records matched this filter.</p>
+          ) : null}
+
+          {filteredRecords.map((day, index) => (
+            <article
+              key={day.day}
+              className={`py-4 text-sm leading-6 text-slate-700 ${index > 0 ? 'border-t border-slate-200/70' : ''}`}
+            >
+              <header className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                <strong className="text-base font-semibold text-slate-900">{formatDay(day.day)}</strong>
+                <span className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                  Intake {Math.round(day.total_intake)} kcal · Burned {Math.round(day.total_burned)} kcal
+                </span>
+              </header>
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Meals</p>
+                {day.meals.length === 0 ? <p className="mt-1 text-sm text-slate-500">No meals logged.</p> : null}
+                <ol className="mt-1 space-y-1">
+                  {day.meals.map((meal, mealIndex) => (
+                    <li key={meal.id} className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 flex-1">
+                        {mealIndex + 1}) {meal.description || 'Meal'} {meal.time ? `${meal.time}` : '--:--'} calories: {meal.calories || 0}, protein: {meal.protein_g || 0}, carbs: {meal.carbs_g || 0}, fat: {meal.fat_g || 0}
+                      </span>
+                      <button
+                        className="shrink-0 text-xs font-semibold text-slate-500 transition hover:text-slate-900"
+                        type="button"
+                        onClick={() => setMealDraft(buildMealEditDraft(day.day, meal))}
+                        disabled={saving || loading}
+                      >
+                        Edit
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Training</p>
+                {day.training.length === 0 ? <p className="mt-1 text-sm text-slate-500">No training logged.</p> : null}
+                <ol className="mt-1 space-y-1">
+                  {day.training.map((entry, trainingIndex) => (
+                    <li key={entry.id} className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 flex-1">
+                        {trainingIndex + 1}) {entry.name || 'Training entry'} {entry.time ? `${entry.time}` : '--:--'} sets: {entry.sets || 0}, reps: {entry.reps || '0'}, weight: {entry.weight_kg || 0} kg{entry.notes ? `, notes: ${entry.notes}` : ''}
+                      </span>
+                      <button
+                        className="shrink-0 text-xs font-semibold text-slate-500 transition hover:text-slate-900"
+                        type="button"
+                        onClick={() => setTrainingDraft(buildTrainingEditDraft(day.day, entry))}
+                        disabled={saving || loading}
+                      >
+                        Edit
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       {mealDraft ? (
         <section className="coach-edit-sheet">

@@ -10,6 +10,7 @@ import {
   createGroup,
   createPostComment,
   createPost,
+  deleteAccount,
   createAbuseReport,
   getAuthSessions,
   getAbuseReports,
@@ -342,8 +343,8 @@ function isPotentialConnectCode(input: string): boolean {
   const value = input.trim();
   if (!value) return false;
 
-  if (/^\d{6}$/.test(value)) return true;
-  if (/connectId\s*[:=]\s*\d{6}/i.test(value)) return true;
+  if (/^\d{6,8}$/.test(value)) return true;
+  if (/connectId\s*[:=]\s*\d{6,8}/i.test(value)) return true;
   if (/token\s*[:=]\s*[A-Za-z0-9_\-.]+/i.test(value)) return true;
 
   try {
@@ -603,6 +604,7 @@ export default function AppPage() {
   const [authSessionsLoading, setAuthSessionsLoading] = useState(false);
   const [authSessionPendingId, setAuthSessionPendingId] = useState<string | null>(null);
   const [logoutAllSessionsPending, setLogoutAllSessionsPending] = useState(false);
+  const [deleteAccountPending, setDeleteAccountPending] = useState(false);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [securityEventsLoading, setSecurityEventsLoading] = useState(false);
   const [abuseReports, setAbuseReports] = useState<AbuseReport[]>([]);
@@ -629,6 +631,8 @@ export default function AppPage() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const reauthTriggeredRef = useRef(false);
+  const friendsRef = useRef<Friend[]>([]);
+  const selectedCoachRef = useRef<'zj' | 'lc'>('zj');
 
   const typingTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -731,8 +735,8 @@ export default function AppPage() {
   }, [typingUsers, authUserId, activeConversation, activeGroupMembers, messages, selectedCoach, hasInlineCoachReveal]);
 
   const connectCodeMeta = useMemo(() => {
-    if (!connectExpiresAt) return 'Secure code rotates every minute.';
-    return `Secure code rotates every minute · valid until ${formatTime(connectExpiresAt)}.`;
+    if (!connectExpiresAt) return 'Secure code rotates every 2 minutes.';
+    return `Secure code rotates every 2 minutes · valid until ${formatTime(connectExpiresAt)}.`;
   }, [connectExpiresAt]);
 
   const totalUnreadCount = useMemo(
@@ -1085,12 +1089,27 @@ export default function AppPage() {
       const message = event.message as ChatMessage;
       const isActiveTopic = topic === activeTopicRef.current;
       const isCoachMessage = Number(message.from_user_id) === 0;
+      const fromCurrentUser = Number(message.from_user_id) === authUserIdRef.current;
       const notificationKey = `${message.id}:${message.created_at}`;
+      const nextPreview = String(message.content || '').trim() || (Array.isArray(message.media_urls) && message.media_urls.length > 0 ? 'Sent an attachment' : 'New message');
 
-      if (!isActiveTopic && Number(message.from_user_id) !== authUserIdRef.current && lastNotificationKeyRef.current !== notificationKey) {
+      if (!isActiveTopic && !fromCurrentUser && lastNotificationKeyRef.current !== notificationKey) {
         lastNotificationKeyRef.current = notificationKey;
         playBackgroundNotificationTone();
       }
+
+      setConversations((prev) => prev.map((conversation) => {
+        if (conversation.topic !== topic) return conversation;
+        const existingUnread = Number(conversation.unreadCount || 0);
+        const unreadCount = !fromCurrentUser && !isActiveTopic
+          ? existingUnread + 1
+          : (isActiveTopic ? 0 : existingUnread);
+        return {
+          ...conversation,
+          preview: nextPreview,
+          unreadCount,
+        };
+      }));
 
       if (isActiveTopic && !messagesRef.current.some((item) => item.id === message.id)) {
         const nextMessages = [...messagesRef.current, message];
@@ -1116,7 +1135,7 @@ export default function AppPage() {
         setCoachReplyPending(false);
       }
 
-      loadInbox();
+      void loadInbox(authUserIdRef.current, selectedCoachRef.current, friendsRef.current);
       void loadMentions(authUserIdRef.current);
       return;
     }
@@ -1146,7 +1165,14 @@ export default function AppPage() {
     }
 
     if (event.type === 'inbox_updated') {
-      loadInbox();
+      void loadInbox(authUserIdRef.current, selectedCoachRef.current, friendsRef.current);
+      return;
+    }
+
+    if (event.type === 'friends_updated') {
+      void loadFriendsData(authUserIdRef.current)
+        .then((rows) => loadInbox(authUserIdRef.current, selectedCoachRef.current, rows))
+        .catch(() => undefined);
     }
   };
 
@@ -1160,6 +1186,7 @@ export default function AppPage() {
     setAuthUserId(auth.userId);
     setAuthUsername(auth.username);
     setSelectedCoach(auth.selectedCoach);
+    selectedCoachRef.current = auth.selectedCoach;
     const bootstrapCoachName = coachDisplayName(auth.selectedCoach);
     const defaultCoachTopic = buildCoachTopic(auth.userId, auth.selectedCoach);
     messageDraftsRef.current = loadMessageDrafts(auth.userId);
@@ -1298,6 +1325,14 @@ export default function AppPage() {
   }, [messages]);
 
   useEffect(() => {
+    friendsRef.current = friends;
+  }, [friends]);
+
+  useEffect(() => {
+    selectedCoachRef.current = selectedCoach;
+  }, [selectedCoach]);
+
+  useEffect(() => {
     if (!activeConversation || activeConversation.type !== 'group' || !activeConversation.groupId) {
       setActiveGroupMembers([]);
       setActiveGroupInvite('');
@@ -1355,7 +1390,7 @@ export default function AppPage() {
     if (!ready || !authUserId || tab !== 'friends') return;
     const interval = setInterval(() => {
       void loadConnectInfo(authUserId);
-    }, 55_000);
+    }, 110_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authUserId, tab]);
@@ -1544,16 +1579,17 @@ export default function AppPage() {
     return () => clearTimeout(timer);
   }, [friendIdInput, authUserId]);
 
-  async function loadInbox(userId = authUserId, coachOverride?: 'zj' | 'lc', friendSource: Friend[] = friends) {
+  async function loadInbox(userId = authUserIdRef.current, coachOverride?: 'zj' | 'lc', friendSource?: Friend[]) {
     if (!userId) return;
 
     try {
       const inbox = await getInbox(userId);
-      const activeCoach = coachOverride || selectedCoach;
+      const sourceFriends = friendSource || friendsRef.current;
+      const activeCoach = coachOverride || selectedCoachRef.current;
       const coachName = coachDisplayName(activeCoach);
 
       const dmTopics = new Set(inbox.dms.map((item) => item.topic));
-      const friendPlaceholders: Conversation[] = friendSource
+      const friendPlaceholders: Conversation[] = sourceFriends
         .map((friend) => ({
           topic: buildP2PTopic(userId, friend.id),
           name: friend.username,
@@ -1654,6 +1690,7 @@ export default function AppPage() {
     try {
       const [friendRes, requestRes] = await Promise.all([getFriends(userId), getFriendRequests(userId)]);
       setFriends(friendRes.friends);
+      friendsRef.current = friendRes.friends;
       setRequests(requestRes.requests);
       return friendRes.friends;
     } catch (err: any) {
@@ -2391,6 +2428,33 @@ export default function AppPage() {
     router.replace('/login');
   }
 
+  async function handleDeleteAccount() {
+    if (!authUserId || deleteAccountPending) return;
+
+    const firstConfirm = window.confirm(
+      'Delete this account permanently? This removes your username, email, sessions, friendships, logs, and your own content, and releases your username and email for reuse.',
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = window.prompt('Type DELETE to confirm permanent account deletion.');
+    if (secondConfirm !== 'DELETE') {
+      setError('Account deletion cancelled. Type DELETE exactly to confirm.');
+      return;
+    }
+
+    try {
+      setDeleteAccountPending(true);
+      await deleteAccount(authUserId);
+      clearAuth();
+      realtimeRef.current?.disconnect();
+      router.replace('/register');
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete account.');
+    } finally {
+      setDeleteAccountPending(false);
+    }
+  }
+
   function removeAttachmentAt(index: number, setter: Dispatch<SetStateAction<File[]>>) {
     setter((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   }
@@ -2655,6 +2719,12 @@ export default function AppPage() {
                 : message.username || (activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
               const senderLabel = mine ? 'You' : counterpartyName;
               const avatarText = avatarInitial(counterpartyName);
+              const counterpartyAvatarUrl = !mine && !message.is_coach
+                ? resolveApiAssetUrl(
+                    message.avatar_url
+                    || (activeConversation?.type === 'dm' ? activeConversation.avatarUrl || '' : ''),
+                  )
+                : '';
               const isCoachReply = !mine && message.is_coach;
               const revealedCoachSegmentCount = isCoachReply ? animatedCoachReplies[String(message.id)] : undefined;
               const contentSegments = isCoachReply ? splitReplySegments(message.content) : [];
@@ -2690,7 +2760,14 @@ export default function AppPage() {
                             : 'rgb(71 85 105)',
                         }}
                       >
-                        {compact ? '' : avatarText}
+                        {compact ? '' : counterpartyAvatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={counterpartyAvatarUrl}
+                            alt={counterpartyName}
+                            className="h-full w-full rounded-full object-cover"
+                          />
+                        ) : avatarText}
                       </div>
                     ) : null}
 
@@ -2963,10 +3040,15 @@ export default function AppPage() {
                     color: selectedCoachTheme.ink,
                   }}
                 >
-                  {profileDraft.avatar_url || profile?.avatar_url ? (
+                  {profileDraft.avatar_url || profile?.avatar_url || feed.find((post) => post.user_id === authUserId)?.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={resolveApiAssetUrl(profileDraft.avatar_url || profile?.avatar_url || '')}
+                      src={resolveApiAssetUrl(
+                        profileDraft.avatar_url
+                        || profile?.avatar_url
+                        || feed.find((post) => post.user_id === authUserId)?.avatar_url
+                        || '',
+                      )}
                       alt={authUsername || profile?.username || 'Your avatar'}
                       className="h-full w-full rounded-full object-cover"
                     />
@@ -3376,11 +3458,6 @@ export default function AppPage() {
         <div>
           <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">Profile</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="btn btn-danger-soft text-sm" type="button" onClick={() => void handleLogout()}>
-            Logout
-          </button>
-        </div>
       </header>
 
       <div className="flex flex-col gap-6 p-4 md:p-6">
@@ -3561,6 +3638,30 @@ export default function AppPage() {
           onNotice={showNotice}
           onError={setError}
         />
+
+        <section className="rounded-[28px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-5 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">Account actions</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Delete account permanently removes your username, email, sessions, friends, logs, and your own content, then releases your username and email for reuse.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button className="btn btn-ghost" type="button" onClick={() => void handleLogout()} disabled={deleteAccountPending}>
+                Logout
+              </button>
+              <button
+                className="btn btn-danger-soft"
+                type="button"
+                onClick={() => void handleDeleteAccount()}
+                disabled={deleteAccountPending}
+              >
+                {deleteAccountPending ? 'Deleting...' : 'Delete account'}
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -3618,9 +3719,9 @@ export default function AppPage() {
                     } : undefined}
                   >
                     <TabGlyph icon={item.icon} active={active} />
-                    {item.key === 'messages' && unreadMentionCount > 0 ? (
-                      <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[color:var(--coach-lc)] px-1 text-[10px] font-bold text-white">
-                        {Math.min(unreadMentionCount, 99)}
+                    {item.key === 'messages' && totalUnreadCount > 0 ? (
+                      <span className="absolute -right-1 -top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[10px] font-bold text-white">
+                        {Math.min(totalUnreadCount, 99)}
                       </span>
                     ) : null}
                   </button>

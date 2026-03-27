@@ -314,6 +314,9 @@ export class WSServer {
       case 'inbox_updated':
         this.deliverInboxUpdated(event.userIds);
         return;
+      case 'friends_updated':
+        this.deliverFriendsUpdated(event.userIds);
+        return;
     }
   }
 
@@ -564,12 +567,28 @@ export class WSServer {
     });
   }
 
+  notifyFriendsUpdated(userIds: number[]) {
+    this.publishEvent({
+      type: 'friends_updated',
+      userIds: Array.from(new Set(userIds)),
+    });
+  }
+
   private deliverInboxUpdated(userIds: number[]) {
     const unique = new Set(userIds);
     for (const client of this.clients.values()) {
       if (!client.authenticated || client.userId === null) continue;
       if (!unique.has(client.userId)) continue;
       this.send(client.ws, { type: 'inbox_updated' });
+    }
+  }
+
+  private deliverFriendsUpdated(userIds: number[]) {
+    const unique = new Set(userIds);
+    for (const client of this.clients.values()) {
+      if (!client.authenticated || client.userId === null) continue;
+      if (!unique.has(client.userId)) continue;
+      this.send(client.ws, { type: 'friends_updated' });
     }
   }
 

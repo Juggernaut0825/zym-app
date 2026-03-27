@@ -78,16 +78,6 @@ function detectPromptInjectionRisk(message: string): boolean {
   return suspiciousPatterns.some((pattern) => text.includes(pattern));
 }
 
-function ensureRecordsDetailsReminder(text: string): string {
-  const base = String(text || '').trim();
-  if (!base) return base;
-  const reminder = 'If any logged profile, meal, or training record looks wrong, you can edit it in the Details page.';
-  if (/details page/i.test(base) || /edit it in the details/i.test(base)) {
-    return base;
-  }
-  return `${base}\n\n${reminder}`.trim();
-}
-
 function collectLatestToolResults(messages: Message[]): Map<string, any> {
   const latestResults = new Map<string, any>();
   for (const message of [...messages].reverse()) {
@@ -104,22 +94,6 @@ function collectLatestToolResults(messages: Message[]): Map<string, any> {
     }
   }
   return latestResults;
-}
-
-function buildRecordsDetailsReminder(messages: Message[]): string {
-  const latestResults = collectLatestToolResults(messages);
-  const scopes: string[] = [];
-  if (latestResults.has('set_profile')) scopes.push('profile');
-  if (latestResults.has('log_meal')) scopes.push('meal');
-  if (latestResults.has('log_training')) scopes.push('training');
-  if (scopes.length === 0) return '';
-  if (scopes.length === 1) {
-    return `If any logged ${scopes[0]} record looks wrong, you can edit it in the Details page.`;
-  }
-  if (scopes.length === 2) {
-    return `If any logged ${scopes[0]} or ${scopes[1]} record looks wrong, you can edit it in the Details page.`;
-  }
-  return 'If any logged profile, meal, or training record looks wrong, you can edit it in the Details page.';
 }
 
 function sanitizeCoachResponseText(text: string): string {
@@ -405,11 +379,7 @@ export class CoachService {
       active: true,
     });
 
-    let finalResponse = sanitizeCoachResponseText(String(result.response || '').trim());
-    const recordsReminder = buildRecordsDetailsReminder(result.messages);
-    if (recordsReminder && !/details page/i.test(finalResponse)) {
-      finalResponse = ensureRecordsDetailsReminder(`${finalResponse}\n\n${recordsReminder}`.trim());
-    }
+    const finalResponse = sanitizeCoachResponseText(String(result.response || '').trim());
 
     await sessionStore.appendAssistantMessage(session, finalResponse);
     await sessionStore.save(session);

@@ -25,4 +25,8 @@ export type RealtimeEvent =
   | {
       type: 'inbox_updated';
       userIds: number[];
+    }
+  | {
+      type: 'friends_updated';
+      userIds: number[];
     };

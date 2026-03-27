@@ -33,6 +33,7 @@ function ConversationTileComponent({
   avatarInitial,
 }: ConversationTileProps) {
   const name = item.name || displayNameFromTopic(item.topic);
+  const unreadTotal = Number(item.unreadCount || 0) + Number(item.mentionCount || 0);
   const isLcCoach = item.type === 'coach' && name.toLowerCase().includes('lc');
   const badgeTone = item.type === 'coach'
     ? (isLcCoach ? 'bg-[rgba(242,138,58,0.12)] text-[color:var(--coach-lc)]' : 'bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]')
@@ -78,14 +79,9 @@ function ConversationTileComponent({
               <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${badgeTone}`}>
                 {badgeLabel}
               </span>
-              {Number(item.mentionCount || 0) > 0 ? (
-                <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[color:var(--coach-lc)] px-1 text-[10px] font-bold text-white">
-                  {item.mentionCount}
-                </span>
-              ) : null}
-              {Number(item.unreadCount || 0) > 0 ? (
-                <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[color:var(--coach-zj)] px-1 text-[10px] font-bold text-white">
-                  {item.unreadCount}
+              {unreadTotal > 0 ? (
+                <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[10px] font-bold text-white">
+                  {Math.min(unreadTotal, 99)}
                 </span>
               ) : null}
             </div>

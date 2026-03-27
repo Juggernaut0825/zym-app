@@ -20,7 +20,29 @@ export class FriendService {
 
   static async acceptFriend(userId: string, friendId: string) {
     const db = getDB();
-    db.prepare("UPDATE friendships SET status = 'accepted' WHERE user_id = ? AND friend_id = ?").run(friendId, userId);
+    const result = db
+      .prepare("UPDATE friendships SET status = 'accepted' WHERE user_id = ? AND friend_id = ? AND status = 'pending'")
+      .run(friendId, userId);
+    if (!Number(result.changes || 0)) {
+      throw new Error('Friend request not found');
+    }
+  }
+
+  static getAcceptedFriendIds(userId: number): number[] {
+    const safeUserId = Number(userId);
+    if (!Number.isInteger(safeUserId) || safeUserId <= 0) return [];
+
+    return getDB().prepare(`
+      SELECT DISTINCT CASE
+        WHEN user_id = ? THEN friend_id
+        ELSE user_id
+      END AS friend_id
+      FROM friendships
+      WHERE status = 'accepted'
+        AND (user_id = ? OR friend_id = ?)
+    `).all(safeUserId, safeUserId, safeUserId)
+      .map((row: any) => Number(row.friend_id || 0))
+      .filter((value: number) => Number.isInteger(value) && value > 0 && value !== safeUserId);
   }
 
   static async getFriends(userId: string) {

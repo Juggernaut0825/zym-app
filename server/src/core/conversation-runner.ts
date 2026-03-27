@@ -121,30 +121,6 @@ export class ConversationRunner {
           finalContent = fallbackFromTools;
         }
 
-        if (this.containsCjk(finalContent)) {
-          logger.warn(`[Turn ${turns}] Non-English content detected, rewriting response in English`);
-          const rewriteResponse = await this.aiService.chatStream(
-            [
-              ...messages,
-              {
-                role: 'assistant',
-                content: finalContent,
-              },
-              {
-                role: 'user',
-                content: 'Rewrite the previous assistant message into clear natural English only. Keep the original meaning and do not call tools.',
-              },
-            ],
-            [],
-            {
-              onText: callbacks?.onText,
-            },
-          );
-          if (!this.isBlank(rewriteResponse.content)) {
-            finalContent = rewriteResponse.content;
-          }
-        }
-
         messages.push({
           role: 'assistant',
           content: finalContent,
@@ -227,11 +203,6 @@ export class ConversationRunner {
 
   private isBlank(content: string | undefined): boolean {
     return !content || content.trim().length === 0;
-  }
-
-  private containsCjk(content: string | undefined): boolean {
-    if (!content) return false;
-    return /[\u4E00-\u9FFF]/.test(content);
   }
 
   private looksLikeToolFailure(content: string): boolean {

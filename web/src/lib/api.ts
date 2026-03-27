@@ -682,6 +682,13 @@ export async function logoutAllSessions(): Promise<void> {
   });
 }
 
+export async function deleteAccount(userId: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/auth/delete-account', {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  });
+}
+
 export async function getAuthSessions(): Promise<AuthSession[]> {
   const response = await request<{ sessions: AuthSession[] }>('/auth/sessions');
   return response.sessions;

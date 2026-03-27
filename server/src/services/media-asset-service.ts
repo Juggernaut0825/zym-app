@@ -919,6 +919,29 @@ export class MediaAssetService {
     return rows.map(toRecord);
   }
 
+  async deleteAllForUser(userId: number): Promise<number> {
+    const safeUserId = Number(userId);
+    if (!Number.isInteger(safeUserId) || safeUserId <= 0) return 0;
+
+    const rows = getDB()
+      .prepare(`
+        SELECT id, owner_user_id, storage_provider, storage_bucket, object_key, file_name, mime_type,
+               original_filename, kind, visibility, size_bytes, sha256, source, metadata, status,
+               created_at, updated_at, expires_at
+        FROM media_assets
+        WHERE owner_user_id = ?
+      `)
+      .all(safeUserId) as any[];
+
+    let removedCount = 0;
+    for (const row of rows) {
+      await this.purgeAsset(toRecord(row));
+      removedCount += 1;
+    }
+
+    return removedCount;
+  }
+
   private shouldPurgeAsset(asset: MediaAssetRecord, nowMs: number, pendingMaxAgeMs: number): boolean {
     if (asset.status === 'deleted') {
       return true;

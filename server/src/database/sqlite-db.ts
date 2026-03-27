@@ -346,6 +346,14 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       UNIQUE(user_id, consent_type, version)
     );
 
+    CREATE TABLE IF NOT EXISTS friend_connect_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      connect_code TEXT NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS message_reads (
       user_id INTEGER NOT NULL,
       topic TEXT NOT NULL,
@@ -507,6 +515,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_email_type ON auth_email_tokens(email, token_type, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_auth_email_tokens_expires_at ON auth_email_tokens(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_consents_user_type ON user_consents(user_id, consent_type, accepted_at DESC)');
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_connect_codes_connect_code ON friend_connect_codes(connect_code)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_friend_connect_codes_user_expires ON friend_connect_codes(user_id, expires_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_friend_connect_codes_expires_at ON friend_connect_codes(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');

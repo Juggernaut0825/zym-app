@@ -346,4 +346,13 @@ export interface InboxUpdateSocketEvent {
   type: 'inbox_updated';
 }
 
-export type AppSocketEvent = MessageSocketEvent | TypingSocketEvent | CoachStatusSocketEvent | InboxUpdateSocketEvent;
+export interface FriendsUpdatedSocketEvent {
+  type: 'friends_updated';
+}
+
+export type AppSocketEvent =
+  | MessageSocketEvent
+  | TypingSocketEvent
+  | CoachStatusSocketEvent
+  | InboxUpdateSocketEvent
+  | FriendsUpdatedSocketEvent;

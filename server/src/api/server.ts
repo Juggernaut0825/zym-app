@@ -237,6 +237,8 @@ const COACH_PROFILE_TEXT_MAX = 80;
 const COACH_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COACH_TIME_PATTERN = /^\d{2}:\d{2}$/;
 const COACH_RECORD_ID_PATTERN = /^[a-zA-Z0-9._-]{6,120}$/;
+const FRIEND_CONNECT_CODE_TTL_SECONDS = 120;
+const FRIEND_CONNECT_CODE_BUFFER_SECONDS = 15;
 const INGESTION_BLOCK_PATTERNS: RegExp[] = [
   /ignore\s+previous\s+instructions/i,
   /system\s*prompt/i,
@@ -472,37 +474,92 @@ async function publishRealtimeEventSafely(event: Parameters<typeof publishRealti
   }
 }
 
+function cleanupExpiredFriendConnectCodes(): void {
+  getDB()
+    .prepare("DELETE FROM friend_connect_codes WHERE datetime(expires_at) <= datetime('now')")
+    .run();
+}
+
 function generateUniqueConnectCode(): string {
   const db = getDB();
-  const existsStmt = db.prepare('SELECT id FROM users WHERE connect_code = ?');
+  const activeStmt = db.prepare(`
+    SELECT id
+    FROM friend_connect_codes
+    WHERE connect_code = ?
+      AND datetime(expires_at) > datetime('now')
+    LIMIT 1
+  `);
+  const legacyStmt = db.prepare('SELECT id FROM users WHERE connect_code = ?');
   for (let attempts = 0; attempts < 60; attempts += 1) {
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const exists = existsStmt.get(code);
-    if (!exists) return code;
+    const code = String(Math.floor(10_000_000 + Math.random() * 90_000_000));
+    const activeExists = activeStmt.get(code);
+    const legacyExists = legacyStmt.get(code);
+    if (!activeExists && !legacyExists) return code;
   }
   throw new Error('Failed to generate unique connect code');
 }
 
-function ensureUserConnectCode(userId: number): string {
+function issueUserConnectCode(userId: number): { connectId: string; expiresAt: string } {
   const db = getDB();
-  const user = db.prepare('SELECT connect_code FROM users WHERE id = ?').get(userId) as { connect_code?: string | null } | undefined;
+  cleanupExpiredFriendConnectCodes();
+
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId) as { id?: number } | undefined;
   if (!user) {
     throw new Error('User not found');
   }
 
-  const existing = String(user.connect_code || '').trim();
-  if (/^\d{6}$/.test(existing)) {
-    return existing;
+  const active = db.prepare(`
+    SELECT connect_code, expires_at
+    FROM friend_connect_codes
+    WHERE user_id = ?
+      AND datetime(expires_at) > datetime('now')
+    ORDER BY datetime(expires_at) DESC
+    LIMIT 1
+  `).get(userId) as { connect_code?: string | null; expires_at?: string | null } | undefined;
+
+  const activeCode = String(active?.connect_code || '').trim();
+  const activeExpiresAt = String(active?.expires_at || '').trim();
+  if (activeCode && activeExpiresAt) {
+    const expiresAtMs = new Date(activeExpiresAt).getTime();
+    if (Number.isFinite(expiresAtMs) && expiresAtMs > (Date.now() + FRIEND_CONNECT_CODE_BUFFER_SECONDS * 1000)) {
+      return {
+        connectId: activeCode,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+      };
+    }
   }
 
   const connectCode = generateUniqueConnectCode();
-  db.prepare('UPDATE users SET connect_code = ? WHERE id = ?').run(connectCode, userId);
-  return connectCode;
+  const expiresAt = new Date(Date.now() + FRIEND_CONNECT_CODE_TTL_SECONDS * 1000).toISOString();
+  db.prepare('DELETE FROM friend_connect_codes WHERE user_id = ?').run(userId);
+  db.prepare(`
+    INSERT INTO friend_connect_codes (user_id, connect_code, expires_at)
+    VALUES (?, ?, ?)
+  `).run(userId, connectCode, expiresAt);
+  return {
+    connectId: connectCode,
+    expiresAt,
+  };
 }
 
 function findUserIdByConnectId(code: string): number | undefined {
+  cleanupExpiredFriendConnectCodes();
+
+  const dynamicRow = getDB().prepare(`
+    SELECT user_id
+    FROM friend_connect_codes
+    WHERE connect_code = ?
+      AND datetime(expires_at) > datetime('now')
+    ORDER BY datetime(expires_at) DESC
+    LIMIT 1
+  `).get(code) as { user_id?: number } | undefined;
+  const dynamicUserId = Number(dynamicRow?.user_id || 0);
+  if (Number.isInteger(dynamicUserId) && dynamicUserId > 0) {
+    return dynamicUserId;
+  }
+
   const row = getDB().prepare('SELECT id FROM users WHERE connect_code = ?').get(code) as { id?: number } | undefined;
-  const userId = Number(row?.id);
+  const userId = Number(row?.id || 0);
   if (!Number.isInteger(userId) || userId <= 0) return undefined;
   return userId;
 }
@@ -511,7 +568,7 @@ function extractUserIdFromConnectCode(raw: unknown): number | undefined {
   const value = String(raw || '').trim();
   if (!value) return undefined;
 
-  if (/^\d{6}$/.test(value)) {
+  if (/^\d{6,8}$/.test(value)) {
     return findUserIdByConnectId(value);
   }
 
@@ -528,7 +585,7 @@ function extractUserIdFromConnectCode(raw: unknown): number | undefined {
     }
 
     const connectId = String(url.searchParams.get('connectId') || '').trim();
-    const fromConnectId = /^\d{6}$/.test(connectId) ? findUserIdByConnectId(connectId) : undefined;
+    const fromConnectId = /^\d{6,8}$/.test(connectId) ? findUserIdByConnectId(connectId) : undefined;
     const fromUid = toOptionalInt(url.searchParams.get('uid'));
     const fromUserId = toOptionalInt(url.searchParams.get('userId'));
     const resolvedUserId = fromConnectId || fromUid || fromUserId;
@@ -554,7 +611,7 @@ function extractUserIdFromConnectCode(raw: unknown): number | undefined {
     return tokenUserId;
   }
 
-  const connectIdMatch = value.match(/connectId\s*[:=]\s*(\d{6})/i);
+  const connectIdMatch = value.match(/connectId\s*[:=]\s*(\d{6,8})/i);
   if (connectIdMatch?.[1]) {
     return findUserIdByConnectId(connectIdMatch[1]);
   }
@@ -1536,6 +1593,42 @@ app.post('/auth/logout-all', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/auth/delete-account',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(8, 10 * 60_000, 'auth-delete-account'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+  }),
+  async (req, res) => {
+    try {
+      const authUserId = assertAuthUser(req);
+      const userId = toUserId(req.body.userId);
+      if (authUserId !== userId) {
+        return res.status(403).json({ error: 'Forbidden user scope' });
+      }
+
+      const wsServer = WSServer.getInstance();
+      await mediaAssetService.deleteAllForUser(userId);
+      const { affectedFriendIds } = await AuthService.deleteAccount(userId);
+      wsServer?.disconnectUserSessions(userId);
+
+      if (affectedFriendIds.length > 0) {
+        await publishRealtimeEventSafely({
+          type: 'friends_updated',
+          userIds: affectedFriendIds,
+        }, 'delete-account-friends-updated');
+        await publishRealtimeEventSafely({
+          type: 'inbox_updated',
+          userIds: affectedFriendIds,
+        }, 'delete-account-inbox-updated');
+      }
+
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to delete account.' });
+    }
+  });
+
 app.get('/auth/sessions', (req, res) => {
   const authUserId = assertAuthUser(req);
   const sessions = AuthService.getSessions(authUserId).map((session) => ({
@@ -2276,6 +2369,10 @@ app.post('/friends/add', requireSameUserIdFromBody('userId'), APIGateway.validat
     }
 
     await FriendService.addFriend(String(userId), String(friendId));
+    await publishRealtimeEventSafely({
+      type: 'friends_updated',
+      userIds: [userId, Number(friendId)],
+    }, 'friends-add-updated');
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2284,11 +2381,12 @@ app.post('/friends/add', requireSameUserIdFromBody('userId'), APIGateway.validat
 
 app.get('/friends/connect/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
   const userId = toUserId(req.params.userId);
-  const connectId = ensureUserConnectCode(userId);
-  const ttlSeconds = 60;
+  const issued = issueUserConnectCode(userId);
+  const connectId = issued.connectId;
+  const ttlSeconds = FRIEND_CONNECT_CODE_TTL_SECONDS;
   const token = AuthService.createFriendConnectToken(userId, ttlSeconds);
   const connectCode = `zym://add-friend?uid=${userId}&connectId=${connectId}&token=${encodeURIComponent(token)}`;
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  const expiresAt = issued.expiresAt;
   res.json({ userId, connectId, connectCode, token, ttlSeconds, expiresAt });
 });
 
@@ -2322,7 +2420,17 @@ app.post('/friends/accept',
     friendId: { required: true, type: 'number', integer: true, min: 1 },
   }),
   async (req, res) => {
-  await FriendService.acceptFriend(String(toUserId(req.body.userId)), String(toUserId(req.body.friendId)));
+  const userId = toUserId(req.body.userId);
+  const friendId = toUserId(req.body.friendId);
+  await FriendService.acceptFriend(String(userId), String(friendId));
+  await publishRealtimeEventSafely({
+    type: 'friends_updated',
+    userIds: [userId, friendId],
+  }, 'friends-accept-updated');
+  await publishRealtimeEventSafely({
+    type: 'inbox_updated',
+    userIds: [userId, friendId],
+  }, 'friends-accept-inbox-updated');
   res.json({ success: true });
 });
 
