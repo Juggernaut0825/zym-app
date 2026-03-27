@@ -35,6 +35,20 @@ export interface VectorKnowledgeUpsertInput {
   corpus?: string;
 }
 
+export interface VectorKnowledgeRecord {
+  id: string;
+  domain: 'fitness' | 'nutrition';
+  source: string;
+  text?: string;
+  title?: string;
+  referenceUrl?: string;
+  pdfUrl?: string;
+  authors?: string;
+  year?: string;
+  category?: string;
+  corpus?: string;
+}
+
 function parseAllowedSourceRegex(): RegExp | null {
   const raw = String(process.env.KB_ALLOWED_SOURCE_REGEX || '').trim();
   if (!raw) return null;
@@ -307,6 +321,68 @@ export class VectorService {
     }
 
     return { upserted, skipped };
+  }
+
+  static async countKnowledgeDocuments(): Promise<number> {
+    const collection = await this.getCollection();
+    if (!collection) {
+      return 0;
+    }
+
+    try {
+      return await collection.count();
+    } catch {
+      return 0;
+    }
+  }
+
+  static async getKnowledgeDocumentsPage(options: {
+    limit?: number;
+    offset?: number;
+    includeText?: boolean;
+  } = {}): Promise<VectorKnowledgeRecord[]> {
+    const collection = await this.getCollection();
+    if (!collection) {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(1_000, Math.floor(Number(options.limit || 100))));
+    const offset = Math.max(0, Math.floor(Number(options.offset || 0)));
+    const include = options.includeText
+      ? ['documents', 'metadatas'] as ['documents', 'metadatas']
+      : ['metadatas'] as ['metadatas'];
+
+    try {
+      const result = await collection.get({
+        limit,
+        offset,
+        include,
+      });
+
+      const ids = Array.isArray(result.ids) ? result.ids : [];
+      const metadatas = Array.isArray(result.metadatas) ? result.metadatas : [];
+      const documents = Array.isArray(result.documents) ? result.documents : [];
+
+      return ids.map((rawId, index) => {
+        const metadata = metadatas[index] as Record<string, unknown> | null | undefined;
+        const rawText = options.includeText ? String(documents[index] || metadata?.text || '').trim() : '';
+        return {
+          id: String(rawId || '').trim(),
+          domain: (metadata?.domain === 'nutrition' ? 'nutrition' : 'fitness') as 'fitness' | 'nutrition',
+          source: String(metadata?.source || metadata?.title || '').trim(),
+          text: rawText ? rawText : undefined,
+          title: String(metadata?.title || '').trim() || undefined,
+          referenceUrl: String(metadata?.referenceUrl || '').trim() || undefined,
+          pdfUrl: String(metadata?.pdfUrl || '').trim() || undefined,
+          authors: String(metadata?.authors || '').trim() || undefined,
+          year: String(metadata?.year || '').trim() || undefined,
+          category: String(metadata?.category || '').trim() || undefined,
+          corpus: String(metadata?.corpus || '').trim() || undefined,
+        };
+      }).filter((item) => item.id && item.source);
+    } catch {
+      return [];
+    }
   }
 
   static async getEmbedding(text: string): Promise<number[]> {

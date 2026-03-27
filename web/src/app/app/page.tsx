@@ -2441,7 +2441,7 @@ export default function AppPage() {
   ) => (
     <header className="flex flex-col gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
       <div>
-        <h1 className="text-lg font-bold tracking-tight text-slate-900">{title}</h1>
+        <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">{title}</h1>
         {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
       </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -2479,7 +2479,7 @@ export default function AppPage() {
   const renderMessagePage = () => (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
-        <h1 className="text-lg font-bold tracking-tight text-slate-900">Message</h1>
+        <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">Message</h1>
         <label className="relative block w-full max-w-[320px]">
           <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
           <input
@@ -2963,7 +2963,16 @@ export default function AppPage() {
                     color: selectedCoachTheme.ink,
                   }}
                 >
-                  {avatarInitial(authUsername || profile?.username || 'U')}
+                  {profileDraft.avatar_url || profile?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={resolveApiAssetUrl(profileDraft.avatar_url || profile?.avatar_url || '')}
+                      alt={authUsername || profile?.username || 'Your avatar'}
+                      className="h-full w-full rounded-full object-cover"
+                    />
+                  ) : (
+                    avatarInitial(authUsername || profile?.username || 'U')
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <textarea
@@ -2993,34 +3002,27 @@ export default function AppPage() {
                       ) : null}
                     </div>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <button
-                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'public' ? '' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                          style={postVisibility === 'public'
-                            ? {
-                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.16)' : 'rgba(105,121,247,0.16)',
-                              color: selectedCoachTheme.ink,
-                            }
-                            : undefined}
-                          type="button"
-                          onClick={() => setPostVisibility('public')}
+                      <label className="relative flex min-w-[170px] items-center">
+                        <select
+                          className="w-full appearance-none rounded-full border border-white/70 bg-white/80 px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 outline-none transition"
+                          style={{
+                            borderColor: selectedCoachTheme.borderColor,
+                            color: selectedCoachTheme.ink,
+                          }}
+                          value={postVisibility}
+                          onChange={(event) => setPostVisibility(event.target.value as 'public' | 'friends')}
+                          aria-label="Post visibility"
                         >
-                          Public
-                        </button>
-                        <button
-                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${postVisibility === 'friends' ? '' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                          style={postVisibility === 'friends'
-                            ? {
-                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.16)' : 'rgba(105,121,247,0.16)',
-                              color: selectedCoachTheme.ink,
-                            }
-                            : undefined}
-                          type="button"
-                          onClick={() => setPostVisibility('friends')}
+                          <option value="public">Public</option>
+                          <option value="friends">Friends only</option>
+                        </select>
+                        <span
+                          className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                          style={{ fontSize: 18 }}
                         >
-                          Friends only
-                        </button>
-                      </div>
+                          expand_more
+                        </span>
+                      </label>
                       <button className={selectedCoachButtonClass} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
                         {postPending ? 'Posting...' : 'Post'}
                       </button>
@@ -3371,19 +3373,8 @@ export default function AppPage() {
   const renderProfilePage = () => (
     <div className="flex h-full flex-col overflow-y-auto">
       <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
-        <div className="flex items-center gap-3">
-          <div
-            className="flex size-9 items-center justify-center rounded-2xl"
-            style={{
-              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-              color: selectedCoachTheme.ink,
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_circle</span>
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-slate-900">Profile</h1>
-          </div>
+        <div>
+          <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">Profile</h1>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn btn-danger-soft text-sm" type="button" onClick={() => void handleLogout()}>
