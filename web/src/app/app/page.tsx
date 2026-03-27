@@ -111,6 +111,16 @@ interface ProfileViewerState {
   data?: PublicProfileResponse | null;
 }
 
+interface AbuseReportDraft {
+  open: boolean;
+  targetType: 'user' | 'post' | 'message' | 'group';
+  targetId: number | null;
+  reason: string;
+  details: string;
+  title: string;
+  pending: boolean;
+}
+
 const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -561,6 +571,8 @@ export default function AppPage() {
   const [connectExpiresAt, setConnectExpiresAt] = useState('');
   const [connectQrDataUrl, setConnectQrDataUrl] = useState('');
   const [connectScanError, setConnectScanError] = useState('');
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [createGroupPending, setCreateGroupPending] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupCoachEnabled, setGroupCoachEnabled] = useState<'none' | 'zj' | 'lc'>('zj');
   const [groupMembers, setGroupMembers] = useState('');
@@ -605,10 +617,20 @@ export default function AppPage() {
   const [authSessionPendingId, setAuthSessionPendingId] = useState<string | null>(null);
   const [logoutAllSessionsPending, setLogoutAllSessionsPending] = useState(false);
   const [deleteAccountPending, setDeleteAccountPending] = useState(false);
+  const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] = useState(false);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [securityEventsLoading, setSecurityEventsLoading] = useState(false);
   const [abuseReports, setAbuseReports] = useState<AbuseReport[]>([]);
   const [abuseReportsLoading, setAbuseReportsLoading] = useState(false);
+  const [abuseReportDraft, setAbuseReportDraft] = useState<AbuseReportDraft>({
+    open: false,
+    targetType: 'user',
+    targetId: null,
+    reason: '',
+    details: '',
+    title: 'Report content',
+    pending: false,
+  });
   const [profileViewer, setProfileViewer] = useState<ProfileViewerState>({
     open: false,
     loading: false,
@@ -757,6 +779,20 @@ export default function AppPage() {
     }
     iconLink.href = buildFaviconHref(totalUnreadCount);
   }, [totalUnreadCount]);
+
+  useEffect(() => {
+    if (!createGroupOpen && !deleteAccountDialogOpen && !abuseReportDraft.open) return;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      setCreateGroupOpen(false);
+      setDeleteAccountDialogOpen(false);
+      setAbuseReportDraft((prev) => ({ ...prev, open: false, pending: false }));
+    }
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [createGroupOpen, deleteAccountDialogOpen, abuseReportDraft.open]);
 
   const panelMomentum = useMemo(() => {
     if (tab === 'messages') {
@@ -2008,11 +2044,19 @@ export default function AppPage() {
     }
   }
 
+  function openCreateGroupDialog() {
+    setGroupName('');
+    setGroupMembers('');
+    setGroupCoachEnabled('zj');
+    setCreateGroupOpen(true);
+  }
+
   async function handleCreateGroup(event: FormEvent) {
     event.preventDefault();
-    if (!groupName.trim()) return;
+    if (!groupName.trim() || createGroupPending) return;
 
     try {
+      setCreateGroupPending(true);
       const groupId = await createGroup({
         ownerId: authUserId,
         name: groupName.trim(),
@@ -2031,10 +2075,13 @@ export default function AppPage() {
       setGroupName('');
       setGroupMembers('');
       setGroupCoachEnabled('zj');
+      setCreateGroupOpen(false);
       showNotice('Group created.');
       await loadInbox();
     } catch (err: any) {
       setError(err.message || 'Failed to create group.');
+    } finally {
+      setCreateGroupPending(false);
     }
   }
 
@@ -2390,30 +2437,53 @@ export default function AppPage() {
     }
   }
 
-  async function submitAbuseReport(
+  function openAbuseReportDialog(
     targetType: 'user' | 'post' | 'message' | 'group',
     targetId: number,
     defaultReason: string,
     details = '',
   ) {
-    const reasonInput = window.prompt('Reason for report', defaultReason);
-    if (reasonInput === null) return;
-    const normalized = reasonInput.trim();
-    const reason = (normalized || defaultReason).slice(0, 80);
-    if (!reason) return;
+    setAbuseReportDraft({
+      open: true,
+      targetType,
+      targetId,
+      reason: defaultReason.slice(0, 80),
+      details: details.slice(0, 1200),
+      title: targetType === 'user' ? 'Report user' : targetType === 'post' ? 'Report post' : 'Report content',
+      pending: false,
+    });
+  }
 
+  async function submitAbuseReport() {
+    if (!abuseReportDraft.targetId || abuseReportDraft.pending) return;
+    const reason = abuseReportDraft.reason.trim().slice(0, 80);
+    if (!reason) {
+      setError('Please include a reason for this report.');
+      return;
+    }
     try {
+      setAbuseReportDraft((prev) => ({ ...prev, pending: true }));
       await createAbuseReport({
         userId: authUserId,
-        targetType,
-        targetId,
+        targetType: abuseReportDraft.targetType,
+        targetId: abuseReportDraft.targetId,
         reason,
-        details: details.slice(0, 1200),
+        details: abuseReportDraft.details.slice(0, 1200),
+      });
+      setAbuseReportDraft({
+        open: false,
+        targetType: 'user',
+        targetId: null,
+        reason: '',
+        details: '',
+        title: 'Report content',
+        pending: false,
       });
       showNotice('Report submitted. Thank you for helping keep the community safe.');
       await loadAbuseReports();
     } catch (err: any) {
       setError(err.message || 'Failed to submit report.');
+      setAbuseReportDraft((prev) => ({ ...prev, pending: false }));
     }
   }
 
@@ -2431,20 +2501,10 @@ export default function AppPage() {
   async function handleDeleteAccount() {
     if (!authUserId || deleteAccountPending) return;
 
-    const firstConfirm = window.confirm(
-      'Delete this account permanently? This removes your username, email, sessions, friendships, logs, and your own content, and releases your username and email for reuse.',
-    );
-    if (!firstConfirm) return;
-
-    const secondConfirm = window.prompt('Type DELETE to confirm permanent account deletion.');
-    if (secondConfirm !== 'DELETE') {
-      setError('Account deletion cancelled. Type DELETE exactly to confirm.');
-      return;
-    }
-
     try {
       setDeleteAccountPending(true);
       await deleteAccount(authUserId);
+      setDeleteAccountDialogOpen(false);
       clearAuth();
       realtimeRef.current?.disconnect();
       router.replace('/register');
@@ -2566,15 +2626,7 @@ export default function AppPage() {
               color: selectedCoachTheme.ink,
               borderColor: selectedCoachTheme.borderColor,
             }}
-            onClick={() => {
-              const name = window.prompt('Group name:');
-              if (!name?.trim()) return;
-              const members = window.prompt('Add members (comma-separated usernames):');
-              if (!members?.trim()) return;
-              setGroupName(name.trim());
-              setGroupMembers(members.trim());
-              void handleCreateGroup(new Event('submit') as any);
-            }}
+            onClick={openCreateGroupDialog}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add</span>
             Create Group
@@ -3227,7 +3279,7 @@ export default function AppPage() {
                   <button
                     className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
                     style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
-                    onClick={() => void submitAbuseReport('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
+                    onClick={() => openAbuseReportDialog('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
                   >
                     Report
                   </button>
@@ -3654,7 +3706,7 @@ export default function AppPage() {
               <button
                 className="btn btn-danger-soft"
                 type="button"
-                onClick={() => void handleDeleteAccount()}
+                onClick={() => setDeleteAccountDialogOpen(true)}
                 disabled={deleteAccountPending}
               >
                 {deleteAccountPending ? 'Deleting...' : 'Delete account'}
@@ -3854,7 +3906,7 @@ export default function AppPage() {
                       const targetId = profileViewer.data?.profile.id;
                       const username = profileViewer.data?.profile.username || 'user';
                       if (!targetId) return;
-                      void submitAbuseReport(
+                      openAbuseReportDialog(
                         'user',
                         targetId,
                         'inappropriate_behavior',
@@ -3950,6 +4002,215 @@ export default function AppPage() {
               )}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {createGroupOpen ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.72)] px-4 backdrop-blur-md"
+          onClick={() => !createGroupPending && setCreateGroupOpen(false)}
+        >
+          <form
+            className="w-full max-w-[560px] rounded-[30px] border border-white/80 bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.16)]"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => void handleCreateGroup(event)}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[1.55rem] font-semibold tracking-tight text-slate-900">Create group</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Start a shared chat for friends, accountability, or coach-assisted check-ins.
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                type="button"
+                onClick={() => setCreateGroupOpen(false)}
+                disabled={createGroupPending}
+                aria-label="Close create group dialog"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">Group name</span>
+                <input
+                  className="input-shell"
+                  value={groupName}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="Weekend training crew"
+                  maxLength={80}
+                  autoFocus
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">Coach in the group</span>
+                <div className="relative">
+                  <select
+                    className="input-shell w-full appearance-none pr-10"
+                    value={groupCoachEnabled}
+                    onChange={(event) => setGroupCoachEnabled(event.target.value as 'none' | 'zj' | 'lc')}
+                  >
+                    <option value="zj">ZJ Coach</option>
+                    <option value="lc">LC Coach</option>
+                    <option value="none">No coach</option>
+                  </select>
+                  <span className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>
+                    expand_more
+                  </span>
+                </div>
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">Invite members</span>
+                <textarea
+                  className="min-h-[120px] rounded-[22px] border border-white/70 bg-white/80 px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400"
+                  style={{ borderColor: selectedCoachTheme.borderColor }}
+                  value={groupMembers}
+                  onChange={(event) => setGroupMembers(event.target.value)}
+                  placeholder="Comma-separated usernames, for example: michaeltest, sophia, alex"
+                />
+                <p className="text-xs text-slate-400">Optional. We&apos;ll invite these usernames after the group is created.</p>
+              </label>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setCreateGroupOpen(false)}
+                disabled={createGroupPending}
+              >
+                Cancel
+              </button>
+              <button className={selectedCoachButtonClass} type="submit" disabled={createGroupPending || !groupName.trim()}>
+                {createGroupPending ? 'Creating...' : 'Create group'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {deleteAccountDialogOpen ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.76)] px-4 backdrop-blur-md"
+          onClick={() => !deleteAccountPending && setDeleteAccountDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-[520px] rounded-[30px] border border-[rgba(239,68,68,0.18)] bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.18)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[1.55rem] font-semibold tracking-tight text-slate-900">Delete account</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  This permanently removes your account, conversations, friend relationships, records, and content. Your username and email will become available again.
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                type="button"
+                onClick={() => setDeleteAccountDialogOpen(false)}
+                disabled={deleteAccountPending}
+                aria-label="Close delete account dialog"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-[22px] border border-[rgba(239,68,68,0.14)] bg-[rgba(254,242,242,0.85)] px-4 py-3 text-sm leading-6 text-[color:#991b1b]">
+              This action cannot be undone.
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setDeleteAccountDialogOpen(false)}
+                disabled={deleteAccountPending}
+              >
+                Cancel
+              </button>
+              <button className="btn btn-danger-soft" type="button" onClick={() => void handleDeleteAccount()} disabled={deleteAccountPending}>
+                {deleteAccountPending ? 'Deleting...' : 'Delete account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {abuseReportDraft.open ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.72)] px-4 backdrop-blur-md"
+          onClick={() => !abuseReportDraft.pending && setAbuseReportDraft((prev) => ({ ...prev, open: false }))}
+        >
+          <form
+            className="w-full max-w-[560px] rounded-[30px] border border-white/80 bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.16)]"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitAbuseReport();
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[1.55rem] font-semibold tracking-tight text-slate-900">{abuseReportDraft.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Tell us what happened so we can review it faster.
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                type="button"
+                onClick={() => setAbuseReportDraft((prev) => ({ ...prev, open: false }))}
+                disabled={abuseReportDraft.pending}
+                aria-label="Close report dialog"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">Reason</span>
+                <input
+                  className="input-shell"
+                  value={abuseReportDraft.reason}
+                  onChange={(event) => setAbuseReportDraft((prev) => ({ ...prev, reason: event.target.value.slice(0, 80) }))}
+                  placeholder="spam_or_harassment"
+                  maxLength={80}
+                  autoFocus
+                />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">Details</span>
+                <textarea
+                  className="min-h-[120px] rounded-[22px] border border-white/70 bg-white/80 px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400"
+                  style={{ borderColor: selectedCoachTheme.borderColor }}
+                  value={abuseReportDraft.details}
+                  onChange={(event) => setAbuseReportDraft((prev) => ({ ...prev, details: event.target.value.slice(0, 1200) }))}
+                  placeholder="Optional context"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setAbuseReportDraft((prev) => ({ ...prev, open: false }))}
+                disabled={abuseReportDraft.pending}
+              >
+                Cancel
+              </button>
+              <button className={selectedCoachButtonClass} type="submit" disabled={abuseReportDraft.pending || !abuseReportDraft.reason.trim()}>
+                {abuseReportDraft.pending ? 'Submitting...' : 'Submit report'}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 
