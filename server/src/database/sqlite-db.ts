@@ -115,6 +115,10 @@ class PostgresBridge {
   private readonly worker: Worker;
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
+  private readonly header = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+  private readonly payload = new SharedArrayBuffer(POSTGRES_RESULT_BUFFER_BYTES);
+  private readonly headerView = new Int32Array(this.header);
+  private readonly payloadView = new Uint8Array(this.payload);
 
   constructor() {
     this.worker = new Worker(runtimeWorkerUrl(), {
@@ -159,21 +163,20 @@ class PostgresBridge {
   }
 
   private call(request: Omit<PostgresBridgeRequest, 'header' | 'payload'>): any {
-    const header = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
-    const payload = new SharedArrayBuffer(POSTGRES_RESULT_BUFFER_BYTES);
-    const headerView = new Int32Array(header);
-    const payloadView = new Uint8Array(payload);
+    Atomics.store(this.headerView, 0, 0);
+    Atomics.store(this.headerView, 1, 0);
+    this.payloadView.fill(0);
 
     this.worker.postMessage({
       ...request,
-      header,
-      payload,
+      header: this.header,
+      payload: this.payload,
     } satisfies PostgresBridgeRequest);
 
-    Atomics.wait(headerView, 0, 0);
-    const status = Atomics.load(headerView, 0);
-    const bytesLength = Atomics.load(headerView, 1);
-    const text = this.decoder.decode(payloadView.subarray(0, bytesLength));
+    Atomics.wait(this.headerView, 0, 0);
+    const status = Atomics.load(this.headerView, 0);
+    const bytesLength = Atomics.load(this.headerView, 1);
+    const text = this.decoder.decode(this.payloadView.subarray(0, bytesLength));
     const data = text ? JSON.parse(text) : null;
 
     if (status === 2) {
