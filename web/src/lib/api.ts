@@ -28,6 +28,11 @@ function handleUnauthorized(path: string) {
   window.dispatchEvent(new CustomEvent('zym-auth-expired', { detail: { path } }));
 }
 
+function handleForbiddenUserScope(path: string) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('zym-auth-scope-mismatch', { detail: { path } }));
+}
+
 function detectClientTimeZone(): string | undefined {
   if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return undefined;
   try {
@@ -78,6 +83,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         if (retryResponse.status === 401) {
           handleUnauthorized(path);
         }
+        if (retryResponse.status === 403 && retryPayload?.error === 'Forbidden user scope') {
+          handleForbiddenUserScope(path);
+        }
         throw new Error(retryPayload?.error || 'Request failed');
       }
       return retryPayload as T;
@@ -86,6 +94,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    if (response.status === 403 && payload?.error === 'Forbidden user scope') {
+      handleForbiddenUserScope(path);
+    }
     const message = payload?.error || 'Request failed';
     throw new Error(message);
   }

@@ -556,6 +556,7 @@ export default function AppPage() {
   const realtimeRef = useRef<RealtimeClient | null>(null);
   const activeTopicRef = useRef<string>('');
   const authUserIdRef = useRef<number>(0);
+  const authStorageSyncTriggeredRef = useRef(false);
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatStreamRef = useRef<HTMLDivElement | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -953,6 +954,25 @@ export default function AppPage() {
     router.replace('/login');
   };
 
+  const syncAppToStoredAuth = (message = 'Session changed in another tab. Reloading...') => {
+    if (authStorageSyncTriggeredRef.current) return;
+    authStorageSyncTriggeredRef.current = true;
+    clearCoachReplyRevealQueue();
+    setAnimatedCoachReplies({});
+    realtimeRef.current?.disconnect();
+
+    const auth = getAuth();
+    if (typeof window === 'undefined') return;
+    if (!auth) {
+      clearAuth();
+      window.location.replace('/login');
+      return;
+    }
+
+    setNotice(message);
+    window.location.replace(auth.selectedCoach ? '/app' : '/coach-select');
+  };
+
   const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
     if (typeof window === 'undefined') return;
     window.requestAnimationFrame(() => {
@@ -1340,6 +1360,54 @@ export default function AppPage() {
     const onAuthExpired = () => forceReauth('Invalid or expired token.');
     window.addEventListener('zym-auth-expired', onAuthExpired as EventListener);
     return () => window.removeEventListener('zym-auth-expired', onAuthExpired as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const relevantAuthKeys = new Set(['token', 'refreshToken', 'userId', 'username', 'selectedCoach']);
+    const checkStoredAuth = (message = 'Session changed in another tab. Reloading...') => {
+      const currentUserId = authUserIdRef.current;
+      if (!currentUserId) return;
+
+      const auth = getAuth();
+      if (!auth) {
+        forceReauth('Signed out in another tab.');
+        return;
+      }
+
+      if (auth.userId !== currentUserId || auth.selectedCoach !== selectedCoachRef.current) {
+        syncAppToStoredAuth(message);
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) return;
+      if (event.key && !relevantAuthKeys.has(event.key)) return;
+      checkStoredAuth('Account changed in another tab. Reloading...');
+    };
+
+    const onFocus = () => checkStoredAuth('Session changed. Reloading...');
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkStoredAuth('Session changed. Reloading...');
+      }
+    };
+
+    const onScopeMismatch = () => {
+      checkStoredAuth('Session changed in another tab. Reloading...');
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('zym-auth-scope-mismatch', onScopeMismatch as EventListener);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('zym-auth-scope-mismatch', onScopeMismatch as EventListener);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
