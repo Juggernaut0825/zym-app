@@ -20,6 +20,8 @@ import { MediaAssetService } from '../services/media-asset-service.js';
 import { SecurityEventService } from '../services/security-event-service.js';
 import { knowledgeIngestionService } from '../services/knowledge-ingestion-service.js';
 import { coachTypedToolsService } from '../services/coach-typed-tools-service.js';
+import { AdminAuthService } from '../services/admin-auth-service.js';
+import { AdminService } from '../services/admin-service.js';
 import { APIGateway } from '../security/api-gateway.js';
 import {
   fileNameFromMediaPath,
@@ -29,6 +31,7 @@ import {
   verifyMediaPathSignature,
 } from '../security/media-url.js';
 import { requireAuth, requireSameUserIdFromBody, requireSameUserIdFromParam } from '../security/auth-middleware.js';
+import { requireAdminAuth } from '../security/admin-auth-middleware.js';
 import { extractMentionHandles } from '../utils/coach-mention.js';
 import { WSServer } from '../websocket/ws-server.js';
 import { MediaStore } from '../context/media-store.js';
@@ -1037,9 +1040,71 @@ app.get('/', (_, res) => {
       '/auth/verify-email/confirm',
       '/auth/forgot-password',
       '/auth/reset-password',
+      '/admin/auth/status',
+      '/admin/auth/login',
     ],
     note: 'Use Authorization: Bearer <token> for protected endpoints.',
   });
+});
+
+app.get('/admin/auth/status', (_req, res) => {
+  res.json(AdminAuthService.getPublicConfig());
+});
+
+app.post('/admin/auth/login',
+  APIGateway.rateLimit(12, 10 * 60_000, 'admin-auth-login'),
+  APIGateway.validateSchema({
+    username: { required: true, type: 'string', minLength: 1, maxLength: 80 },
+    password: { required: true, type: 'string', minLength: 1, maxLength: 200 },
+  }),
+  (req, res) => {
+    if (!AdminAuthService.isConfigured()) {
+      return res.status(503).json({ error: 'Admin dashboard is not configured on the server.' });
+    }
+
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '').trim();
+    const result = AdminAuthService.login(username, password);
+    if (!result) {
+      trackSecurityEvent(req, 'admin_login_failed', {
+        severity: 'warn',
+        metadata: {
+          providedUsername: username.slice(0, 80),
+        },
+      });
+      return res.status(401).json({ error: 'Invalid admin credentials' });
+    }
+
+    trackSecurityEvent(req, 'admin_login_success', {
+      metadata: {
+        adminUsername: result.username,
+      },
+    });
+    res.json(result);
+  },
+);
+
+app.get('/admin/overview', requireAdminAuth, async (req, res) => {
+  try {
+    const overview = await AdminService.getOverview();
+    res.json({
+      adminUsername: req.adminUsername || 'admin',
+      ...overview,
+    });
+  } catch (error: any) {
+    res.status(400).json({ error: error?.message || 'Failed to load admin overview.' });
+  }
+});
+
+app.get('/admin/users', requireAdminAuth, (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const limit = Number(req.query.limit || 500);
+    const users = AdminService.listUsers(search, limit);
+    res.json({ users });
+  } catch (error: any) {
+    res.status(400).json({ error: error?.message || 'Failed to load admin users.' });
+  }
 });
 
 app.post('/auth/register',

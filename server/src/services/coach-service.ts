@@ -275,13 +275,27 @@ export class CoachService {
     activeMediaIds: string[],
     options: {
       platform: string;
+      topic?: string;
       conversationScope: ToolExecutionContext['conversationScope'];
       allowWriteTools: boolean;
       sessionFile: string;
       onStatus?: (update: CoachStatusUpdate) => void;
     },
   ) {
-    const aiService = new AIService();
+    const numericUserId = parseUserId(userId);
+    const aiService = new AIService({
+      usageContext: {
+        source: options.conversationScope === 'group' ? 'coach_group_reply' : 'coach_dm_reply',
+        requestKind: 'chat',
+        userId: numericUserId,
+        topic: options.topic || null,
+        metadata: {
+          platform: options.platform,
+          conversationScope: options.conversationScope,
+          allowWriteTools: options.allowWriteTools,
+        },
+      },
+    });
     const activeSkill = await loadSkill('coach');
     const toolManager = new ToolManager(process.cwd(), activeSkill.toolPolicy);
     const runner = new ConversationRunner(aiService, toolManager, {
@@ -377,6 +391,7 @@ export class CoachService {
 
     const result = await this.runConversation(userId, systemPrompt, userContent, session.activeMediaIds, {
       platform: options.platform || 'web',
+      topic: options.conversationKey,
       conversationScope: options.conversationScope || 'unknown',
       allowWriteTools: options.allowWriteTools !== false,
       sessionFile,
@@ -433,6 +448,7 @@ ${normalizedInstruction}`.trim();
 
     const result = await this.runConversation(userId, systemPrompt, userContent, session.activeMediaIds, {
       platform: options.platform || 'scheduler',
+      topic: conversationKey,
       conversationScope: options.conversationScope || 'coach_dm',
       allowWriteTools: false,
       sessionFile,

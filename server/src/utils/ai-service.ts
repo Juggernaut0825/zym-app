@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Message, MessageContent, ToolDefinition, ToolCall } from '../types/index.js';
 import { logger } from './logger.js';
+import { OpenRouterUsageContext, OpenRouterUsageService } from '../services/openrouter-usage-service.js';
 
 export interface StreamCallbacks {
   onText?: (text: string) => void;
@@ -23,8 +24,9 @@ export class AIService {
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private usageContext: OpenRouterUsageContext;
 
-  constructor() {
+  constructor(options: { usageContext?: OpenRouterUsageContext } = {}) {
     this.apiKey = process.env.OPENROUTER_API_KEY || '';
     if (!this.apiKey) {
       throw new Error('Please set the OPENROUTER_API_KEY environment variable.');
@@ -32,34 +34,46 @@ export class AIService {
 
     this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
     this.model = process.env.GAUZ_LLM_MODEL || 'google/gemini-3-flash-preview';
+    this.usageContext = options.usageContext || {
+      source: 'ai_service_chat',
+      requestKind: 'chat',
+      model: this.model,
+    };
   }
 
   async chat(messages: Message[], tools: ToolDefinition[]): Promise<AIResponse> {
     const systemMessage = messages.find(m => m.role === 'system');
     const otherMessages = messages.filter(m => m.role !== 'system');
+    const startedAt = Date.now();
 
-    const response = await axios.post(this.baseUrl, {
-      model: this.model,
-      messages: this.convertMessages(otherMessages, systemMessage?.content as string | undefined),
-      tools: tools.length > 0 ? tools.map(t => ({
-        type: 'function',
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
+    try {
+      const response = await axios.post(this.baseUrl, {
+        model: this.model,
+        messages: this.convertMessages(otherMessages, systemMessage?.content as string | undefined),
+        tools: tools.length > 0 ? tools.map(t => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        })) : undefined,
+        max_tokens: 4096,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
+          'X-Title': 'ZJ Agent',
         },
-      })) : undefined,
-      max_tokens: 4096,
-    }, {
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
-        'X-Title': 'ZJ Agent',
-      },
-    });
+      });
 
-    return this.parseResponse(response.data);
+      OpenRouterUsageService.recordSuccessFromPayload(response.data, this.usageContext, startedAt);
+      return this.parseResponse(response.data);
+    } catch (error) {
+      OpenRouterUsageService.recordFailure(error, this.usageContext, startedAt);
+      throw error;
+    }
   }
 
   async chatStream(
@@ -69,39 +83,46 @@ export class AIService {
   ): Promise<AIResponse> {
     const systemMessage = messages.find(m => m.role === 'system');
     const otherMessages = messages.filter(m => m.role !== 'system');
+    const startedAt = Date.now();
 
     // OpenRouter supports streaming, but this implementation uses non-stream mode.
     // For true streaming behavior, use fetch + ReadableStream.
-    const response = await axios.post(this.baseUrl, {
-      model: this.model,
-      messages: this.convertMessages(otherMessages, systemMessage?.content as string | undefined),
-      tools: tools.length > 0 ? tools.map(t => ({
-        type: 'function',
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
+    try {
+      const response = await axios.post(this.baseUrl, {
+        model: this.model,
+        messages: this.convertMessages(otherMessages, systemMessage?.content as string | undefined),
+        tools: tools.length > 0 ? tools.map(t => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        })) : undefined,
+        max_tokens: 4096,
+        stream: false,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
+          'X-Title': 'ZJ Agent',
         },
-      })) : undefined,
-      max_tokens: 4096,
-      stream: false,
-    }, {
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
-        'X-Title': 'ZJ Agent',
-      },
-    });
+      });
 
-    const result = this.parseResponse(response.data);
+      OpenRouterUsageService.recordSuccessFromPayload(response.data, this.usageContext, startedAt);
+      const result = this.parseResponse(response.data);
 
-    // Simulated streaming callback
-    if (callbacks?.onText && result.content) {
-      callbacks.onText(result.content);
+      // Simulated streaming callback
+      if (callbacks?.onText && result.content) {
+        callbacks.onText(result.content);
+      }
+
+      return result;
+    } catch (error) {
+      OpenRouterUsageService.recordFailure(error, this.usageContext, startedAt);
+      throw error;
     }
-
-    return result;
   }
 
   private convertMessages(messages: Message[], systemPrompt?: string): any[] {

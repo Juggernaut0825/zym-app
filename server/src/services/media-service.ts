@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import { resolveSkillScriptPath } from '../utils/path-resolver.js';
+import { OpenRouterUsageService } from './openrouter-usage-service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +45,8 @@ export class MediaService {
     }
 
     const imageData = fs.readFileSync(imagePath, { encoding: 'base64' });
+    const model = process.env.GAUZ_LLM_MODEL || 'google/gemini-3-flash-preview';
+    const startedAt = Date.now();
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -51,7 +54,7 @@ export class MediaService {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: process.env.GAUZ_LLM_MODEL || 'google/gemini-3-flash-preview',
+        model,
         messages: [{
           role: 'user',
           content: [
@@ -62,6 +65,21 @@ export class MediaService {
       })
     });
     const data = await response.json();
+    if (response.ok) {
+      OpenRouterUsageService.recordSuccessFromPayload(data, {
+        source: 'media_food_analysis',
+        requestKind: 'chat',
+        model,
+        metadata: { imagePath: path.basename(imagePath) },
+      }, startedAt);
+    } else {
+      OpenRouterUsageService.recordFailure(new Error(`OpenRouter request failed (${response.status})`), {
+        source: 'media_food_analysis',
+        requestKind: 'chat',
+        model,
+        metadata: { imagePath: path.basename(imagePath) },
+      }, startedAt);
+    }
     const raw = String(data?.choices?.[0]?.message?.content || '')
       .trim()
       .replace(/^```(?:json)?/i, '')

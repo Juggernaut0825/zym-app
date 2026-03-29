@@ -418,6 +418,26 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS openrouter_usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      source TEXT NOT NULL,
+      request_kind TEXT NOT NULL DEFAULT 'chat',
+      topic TEXT,
+      model TEXT,
+      provider_name TEXT,
+      generation_id TEXT,
+      status TEXT NOT NULL DEFAULT 'success',
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      estimated_cost_usd REAL,
+      latency_ms INTEGER,
+      error_message TEXT,
+      metadata TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_ingestion_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       requester_user_id INTEGER NOT NULL,
@@ -532,6 +552,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_openrouter_usage_user_created ON openrouter_usage_events(user_id, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_openrouter_usage_source_created ON openrouter_usage_events(source, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_openrouter_usage_model_created ON openrouter_usage_events(model, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_status ON knowledge_ingestion_requests(status, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_requester ON knowledge_ingestion_requests(requester_user_id, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_audit_request ON knowledge_ingestion_audit(request_id, created_at DESC)');

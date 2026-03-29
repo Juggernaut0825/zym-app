@@ -1,4 +1,5 @@
 import { ChromaClient, type Collection } from 'chromadb';
+import { OpenRouterUsageService } from './openrouter-usage-service.js';
 
 export interface VectorKnowledgeMatch {
   id: string;
@@ -397,6 +398,8 @@ export class VectorService {
       : [];
     if (!apiKey || normalized.length === 0) return [];
 
+    const model = process.env.GAUZ_EMBEDDING_MODEL || 'qwen/qwen3-embedding-4b';
+    const startedAt = Date.now();
     const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -404,17 +407,29 @@ export class VectorService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.GAUZ_EMBEDDING_MODEL || 'qwen/qwen3-embedding-4b',
+        model,
         input: normalized.length === 1 ? normalized[0] : normalized,
       }),
       signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
+      OpenRouterUsageService.recordFailure(new Error(`OpenRouter embeddings request failed (${response.status})`), {
+        source: 'knowledge_embeddings',
+        requestKind: 'embeddings',
+        model,
+        metadata: { inputCount: normalized.length },
+      }, startedAt);
       return [];
     }
 
     const data = await response.json().catch(() => ({} as any));
+    OpenRouterUsageService.recordSuccessFromPayload(data, {
+      source: 'knowledge_embeddings',
+      requestKind: 'embeddings',
+      model,
+      metadata: { inputCount: normalized.length },
+    }, startedAt);
     if (!Array.isArray(data?.data)) {
       return [];
     }

@@ -8,6 +8,7 @@ import { MediaStore } from '../context/media-store.js';
 import { SessionStore } from '../context/session-store.js';
 import { MediaAssetService, type MediaAssetRecord } from './media-asset-service.js';
 import { knowledgeService } from './knowledge-service.js';
+import { OpenRouterUsageContext, OpenRouterUsageService } from './openrouter-usage-service.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
@@ -599,42 +600,78 @@ export class CoachTypedToolsService {
     };
   }
 
-  private async openRouterJson(content: unknown, maxTokens = 2048): Promise<any> {
+  private async openRouterJson(
+    content: unknown,
+    maxTokens = 2048,
+    usageContext?: OpenRouterUsageContext,
+  ): Promise<any> {
     const apiKey = safeString(process.env.OPENROUTER_API_KEY, 500);
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY is required');
     }
     const model = safeString(process.env.GAUZ_LLM_MODEL || 'google/gemini-3-flash-preview', 120);
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
-        'X-Title': 'ZYM Coach Typed Tools',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: 'user',
-            content,
-          },
-        ],
-      }),
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(`OpenRouter request failed (${response.status}): ${detail.slice(0, 240)}`);
-    }
-    const payload = await response.json().catch(() => ({} as any));
-    const raw = safeString(payload?.choices?.[0]?.message?.content, 120_000);
-    const jsonText = extractJsonPayload(raw);
+    const startedAt = Date.now();
     try {
-      return JSON.parse(jsonText);
-    } catch {
-      throw new Error('Model did not return valid JSON');
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Juggernaut0825/zym',
+          'X-Title': 'ZYM Coach Typed Tools',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          messages: [
+            {
+              role: 'user',
+              content,
+            },
+          ],
+        }),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        const error = new Error(`OpenRouter request failed (${response.status}): ${detail.slice(0, 240)}`);
+        OpenRouterUsageService.recordFailure(error, {
+          source: usageContext?.source || 'coach_typed_tool',
+          requestKind: 'chat',
+          userId: usageContext?.userId,
+          topic: usageContext?.topic,
+          model,
+          metadata: usageContext?.metadata,
+        }, startedAt);
+        throw error;
+      }
+      const payload = await response.json().catch(() => ({} as any));
+      OpenRouterUsageService.recordSuccessFromPayload(payload, {
+        source: usageContext?.source || 'coach_typed_tool',
+        requestKind: 'chat',
+        userId: usageContext?.userId,
+        topic: usageContext?.topic,
+        model,
+        metadata: usageContext?.metadata,
+      }, startedAt);
+      const raw = safeString(payload?.choices?.[0]?.message?.content, 120_000);
+      const jsonText = extractJsonPayload(raw);
+      try {
+        return JSON.parse(jsonText);
+      } catch {
+        throw new Error('Model did not return valid JSON');
+      }
+    } catch (error) {
+      if (!String(error instanceof Error ? error.message : error).includes('OpenRouter request failed')) {
+        OpenRouterUsageService.recordFailure(error, {
+          source: usageContext?.source || 'coach_typed_tool',
+          requestKind: 'chat',
+          userId: usageContext?.userId,
+          topic: usageContext?.topic,
+          model,
+          metadata: usageContext?.metadata,
+        }, startedAt);
+      }
+      throw error;
     }
   }
 
@@ -684,7 +721,12 @@ Return ONLY JSON:
   "total": {"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},
   "description": "string"
 }`;
-    const ai = await this.openRouterJson([{ type: 'text', text: prompt }], 1600);
+    const ai = await this.openRouterJson([{ type: 'text', text: prompt }], 1600, {
+      source: 'coach_meal_estimate',
+      requestKind: 'chat',
+      userId: Number(userId) || null,
+      metadata: { tool: 'log_meal' },
+    });
     const normalized = this.sanitizeMealEstimate(ai, safeDescription);
 
     const dailyPath = this.getDailyPath(userId);
@@ -1023,7 +1065,17 @@ ${domainPrompt[domain]}`;
         type: 'text',
         text: this.buildInspectPrompt(domain, question, media.kind),
       });
-      result = await this.openRouterJson(contentParts, 2200);
+      result = await this.openRouterJson(contentParts, 2200, {
+        source: 'coach_media_inspection',
+        requestKind: 'chat',
+        userId: Number(userId) || null,
+        metadata: {
+          tool: 'inspect_media',
+          domain,
+          hasQuestion: Boolean(question),
+          mediaId,
+        },
+      });
     }
 
     const createdAt = nowIso();

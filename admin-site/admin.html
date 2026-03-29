@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZYM Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./admin.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">ZYM Control</p>
+          <h1>Admin dashboard for growth, ops, and AI usage.</h1>
+          <p class="hero-copy">
+            This page combines user growth, product activity, and OpenRouter telemetry in one place.
+            Local AI usage tracking starts from this deployment forward, while user activity metrics are historical.
+          </p>
+        </div>
+        <div class="hero-badge">
+          <span id="admin-status-pill">Checking admin config...</span>
+        </div>
+      </header>
+
+      <section id="error-banner" class="error-banner hidden"></section>
+
+      <section id="login-panel" class="panel login-panel">
+        <div class="panel-head">
+          <div>
+            <p class="section-kicker">Secure entry</p>
+            <h2>Admin sign-in</h2>
+          </div>
+        </div>
+        <form id="login-form" class="login-form">
+          <label>
+            <span>Username</span>
+            <input id="username-input" type="text" autocomplete="username" placeholder="admin" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="password-input" type="password" autocomplete="current-password" placeholder="Enter admin password" />
+          </label>
+          <button type="submit" id="login-button">Enter dashboard</button>
+        </form>
+      </section>
+
+      <main id="dashboard" class="dashboard hidden">
+        <section class="panel">
+          <div class="panel-head split">
+            <div>
+              <p class="section-kicker">Snapshot</p>
+              <h2>Platform overview</h2>
+            </div>
+            <div class="toolbar">
+              <button id="refresh-button" class="ghost-button" type="button">Refresh</button>
+              <button id="logout-button" class="ghost-button danger" type="button">Log out</button>
+            </div>
+          </div>
+          <div id="stats-grid" class="stats-grid"></div>
+        </section>
+
+        <section class="two-column">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">OpenRouter</p>
+                <h2>AI usage</h2>
+              </div>
+            </div>
+            <div id="openrouter-summary" class="stack"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Pulse</p>
+                <h2>Recent users</h2>
+              </div>
+            </div>
+            <div id="recent-users" class="stack"></div>
+          </section>
+        </section>
+
+        <section class="two-column">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Security</p>
+                <h2>Recent warnings</h2>
+              </div>
+            </div>
+            <div id="recent-warnings" class="stack"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Moderation</p>
+                <h2>Recent reports</h2>
+              </div>
+            </div>
+            <div id="recent-reports" class="stack"></div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head split">
+            <div>
+              <p class="section-kicker">Users</p>
+              <h2>User directory + usage</h2>
+            </div>
+            <div class="search-row">
+              <input id="search-input" type="search" placeholder="Search username or email" />
+              <select id="limit-select">
+                <option value="100">100 users</option>
+                <option value="250">250 users</option>
+                <option value="500" selected>500 users</option>
+                <option value="1000">1000 users</option>
+              </select>
+            </div>
+          </div>
+          <div id="users-table-wrap" class="table-wrap"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./admin.js" defer></script>
+  </body>
+</html>
