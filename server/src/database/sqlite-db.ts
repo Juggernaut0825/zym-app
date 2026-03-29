@@ -232,7 +232,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       email TEXT UNIQUE,
       password_hash TEXT,
       email_verified_at DATETIME,
-      selected_coach TEXT DEFAULT 'zj',
+      selected_coach TEXT,
       avatar_url TEXT,
       background_url TEXT,
       bio TEXT,
@@ -489,6 +489,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   if (!userColumns.some((column) => column.name === 'email_verified_at')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN email_verified_at DATETIME');
   }
+  if (!userColumns.some((column) => column.name === 'google_sub')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN google_sub TEXT');
+  }
   if (!sessionColumns.some((column) => column.name === 'ip_address')) {
     sqlite.exec('ALTER TABLE user_sessions ADD COLUMN ip_address TEXT');
   }
@@ -508,6 +511,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   `);
 
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');

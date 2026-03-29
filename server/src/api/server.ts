@@ -1031,6 +1031,7 @@ app.get('/', (_, res) => {
       '/health',
       '/auth/register',
       '/auth/login',
+      '/auth/google',
       '/auth/refresh',
       '/auth/verify-email/request',
       '/auth/verify-email/confirm',
@@ -1209,15 +1210,19 @@ app.post('/auth/reset-password',
 app.post('/auth/login',
   APIGateway.rateLimit(36, 10 * 60_000, 'auth-login'),
   APIGateway.validateSchema({
-    username: { required: true, type: 'string', minLength: 1, maxLength: 64 },
+    identifier: { type: 'string', minLength: 1, maxLength: 120 },
+    username: { type: 'string', minLength: 1, maxLength: 120 },
     password: { required: true, type: 'string', minLength: 1, maxLength: 200 },
     timezone: { type: 'string', maxLength: 80 },
   }),
   async (req, res) => {
   try {
-    const username = String(req.body.username || '').trim();
+    const identifier = String(req.body.identifier || req.body.username || '').trim();
     const password = String(req.body.password || '');
     const timezone = String(req.body.timezone || '').trim();
+    if (!identifier) {
+      return res.status(400).json({ error: 'Email or username is required' });
+    }
     if (timezone && !isValidTimeZone(timezone)) {
       return res.status(400).json({ error: 'Invalid timezone format' });
     }
@@ -1225,7 +1230,7 @@ app.post('/auth/login',
     const ipAddress = Array.isArray(forwarded)
       ? String(forwarded[0] || '')
       : String(forwarded || req.ip || '').split(',')[0].trim();
-    const result = await AuthService.login(username, password, {
+    const result = await AuthService.login(identifier, password, {
       deviceName: String(req.headers['user-agent'] || '').trim(),
       ipAddress,
     });
@@ -1234,7 +1239,7 @@ app.post('/auth/login',
       trackSecurityEvent(req, 'auth_login_failed', {
         severity: 'warn',
         metadata: {
-          username: username.slice(0, 64),
+          identifier: identifier.slice(0, 120),
         },
       });
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -1244,7 +1249,7 @@ app.post('/auth/login',
       userId: Number(result.userId),
       sessionId: String(result.sessionId || ''),
       metadata: {
-        username: username.slice(0, 64),
+        identifier: identifier.slice(0, 120),
       },
     });
 
@@ -1271,7 +1276,7 @@ app.post('/auth/login',
     res.json({
       ...result,
       username: user?.username,
-      selectedCoach: user?.selected_coach || 'zj',
+      selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -1279,7 +1284,7 @@ app.post('/auth/login',
       trackSecurityEvent(req, 'auth_login_blocked_unverified', {
         severity: 'info',
         metadata: {
-          username: String(req.body.username || '').trim().slice(0, 64),
+          identifier: String(req.body.identifier || req.body.username || '').trim().slice(0, 120),
           email: err.email.slice(0, 120),
         },
       });
@@ -1288,6 +1293,67 @@ app.post('/auth/login',
     res.status(400).json({ error: err.message });
   }
 });
+
+app.post('/auth/google',
+  APIGateway.rateLimit(36, 10 * 60_000, 'auth-google'),
+  APIGateway.validateSchema({
+    idToken: { required: true, type: 'string', minLength: 32, maxLength: 4096 },
+    timezone: { type: 'string', maxLength: 80 },
+    healthDisclaimerAccepted: { type: 'boolean' },
+    consentVersion: { type: 'string', minLength: 4, maxLength: 40 },
+  }),
+  async (req, res) => {
+    try {
+      const idToken = String(req.body.idToken || '').trim();
+      const timezone = String(req.body.timezone || '').trim();
+      if (timezone && !isValidTimeZone(timezone)) {
+        return res.status(400).json({ error: 'Invalid timezone format' });
+      }
+
+      const forwarded = req.headers['x-forwarded-for'];
+      const ipAddress = Array.isArray(forwarded)
+        ? String(forwarded[0] || '')
+        : String(forwarded || req.ip || '').split(',')[0].trim();
+
+      const result = await AuthService.loginWithGoogle(idToken, {
+        deviceName: String(req.headers['user-agent'] || '').trim(),
+        ipAddress,
+        userAgent: String(req.headers['user-agent'] || '').trim(),
+        healthDisclaimerAccepted: Boolean(req.body.healthDisclaimerAccepted),
+        consentVersion: String(req.body.consentVersion || '').trim(),
+      });
+
+      if (timezone) {
+        await persistUserTimezone(Number(result.userId), timezone);
+      }
+
+      const db = getDB();
+      const user = db.prepare('SELECT id, username, selected_coach, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+
+      trackSecurityEvent(req, 'auth_google_login_success', {
+        userId: Number(result.userId),
+        sessionId: String(result.sessionId || ''),
+        metadata: {
+          email: String(user?.email || '').slice(0, 120),
+        },
+      });
+
+      res.json({
+        ...result,
+        username: user?.username,
+        selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
+        timezone: user?.timezone || null,
+      });
+    } catch (err: any) {
+      trackSecurityEvent(req, 'auth_google_login_failed', {
+        severity: 'warn',
+        metadata: {
+          message: String(err?.message || '').slice(0, 160),
+        },
+      });
+      res.status(400).json({ error: err.message || 'Google sign-in failed.' });
+    }
+  });
 
 app.post('/auth/refresh',
   APIGateway.rateLimit(80, 10 * 60_000, 'auth-refresh'),
@@ -1336,7 +1402,7 @@ app.post('/auth/refresh',
     res.json({
       ...refreshed,
       username: user?.username,
-      selectedCoach: user?.selected_coach || 'zj',
+      selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -2489,7 +2555,7 @@ app.post('/groups/add-member',
 
   let userId = toOptionalInt(req.body.userId);
   if (!userId && req.body.username) {
-    const user = getDB().prepare('SELECT id FROM users WHERE username = ?').get(String(req.body.username).trim()) as any;
+    const user = getDB().prepare('SELECT id FROM users WHERE lower(username) = ?').get(String(req.body.username).trim().toLowerCase()) as any;
     userId = user?.id;
   }
   if (!userId) {
@@ -2517,7 +2583,7 @@ app.post('/groups/remove-member',
 
   let userId = toOptionalInt(req.body.userId);
   if (!userId && req.body.username) {
-    const user = getDB().prepare('SELECT id FROM users WHERE username = ?').get(String(req.body.username).trim()) as any;
+    const user = getDB().prepare('SELECT id FROM users WHERE lower(username) = ?').get(String(req.body.username).trim().toLowerCase()) as any;
     userId = user?.id;
   }
   if (!userId) {
@@ -2623,7 +2689,7 @@ app.get('/profile/public/:userId', async (req, res) => {
         bio: null,
         fitness_goal: null,
         hobbies: null,
-        selected_coach: user.selected_coach || 'zj',
+        selected_coach: user.selected_coach === 'lc' || user.selected_coach === 'zj' ? user.selected_coach : null,
         timezone: null,
       },
       today_health: null,

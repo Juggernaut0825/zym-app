@@ -10,11 +10,13 @@ export default function ForgotPasswordPage() {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('Enter your email and we will send a password reset link if the account exists.');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
     setError('');
+    setSuccess(false);
 
     if (!normalizedEmail) {
       setError('Please enter your email address.');
@@ -25,6 +27,7 @@ export default function ForgotPasswordPage() {
       setPending(true);
       await requestPasswordReset(normalizedEmail);
       setMessage('If the account exists, a password reset email has been sent.');
+      setSuccess(true);
     } catch (err: any) {
       setError(err.message || 'Failed to request password reset.');
     } finally {
@@ -40,7 +43,9 @@ export default function ForgotPasswordPage() {
 
         <h1 className="text-[1.625rem] font-semibold tracking-tight text-[color:var(--ink-900)] sm:text-[1.875rem]">Reset your password</h1>
         <p className="mt-3 text-sm leading-6 text-[color:var(--ink-500)]">{message}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-400">Use the exact email address you registered with. We will only send reset links to that email.</p>
         {error ? <p className="mt-3 text-sm text-[color:var(--danger)]">{error}</p> : null}
+        {success ? <p className="mt-3 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">Reset email sent if that registered account exists. Check spam if you do not see it soon.</p> : null}
 
         <form onSubmit={onSubmit} className="mt-6 grid gap-3">
           <input

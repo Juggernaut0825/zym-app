@@ -157,7 +157,14 @@ export class CoachOutreachScheduler {
     const userId = Number(user.id || 0);
     if (!Number.isInteger(userId) || userId <= 0) return false;
 
-    const coachId = user.selected_coach === 'lc' ? 'lc' : 'zj';
+    const coachId = user.selected_coach === 'lc'
+      ? 'lc'
+      : user.selected_coach === 'zj'
+        ? 'zj'
+        : null;
+    if (!coachId) {
+      return false;
+    }
     const timezone = normalizeTimezone(user.timezone);
     const topic = buildCoachTopic(userId, coachId);
     const now = new Date();

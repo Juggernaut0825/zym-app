@@ -13,6 +13,7 @@ import { SecurityEventService } from './security-event-service.js';
 import { logger } from '../utils/logger.js';
 import { MediaAssetService } from './media-asset-service.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
+import { buildCoachTopic } from './message-service.js';
 
 function buildGuardrailPrompt() {
   return `[SAFETY GUARDRAILS]
@@ -173,6 +174,7 @@ export interface CoachChatOptions {
   mediaIds?: string[];
   platform?: string;
   coachOverride?: CoachId;
+  conversationKey?: string;
   conversationScope?: ToolExecutionContext['conversationScope'];
   allowWriteTools?: boolean;
   onStatus?: (update: CoachStatusUpdate) => void;
@@ -181,6 +183,7 @@ export interface CoachChatOptions {
 export interface CoachProactiveOptions {
   platform?: string;
   coachOverride?: CoachId;
+  conversationKey?: string;
   conversationScope?: ToolExecutionContext['conversationScope'];
 }
 
@@ -247,8 +250,13 @@ export class CoachService {
     return [`[USER_MESSAGE]\n${cleanMessage}`, ...lines].filter(Boolean).join('\n\n').trim();
   }
 
-  private static async prepareSession(userId: string, mediaIds: string[]): Promise<SessionState> {
-    const session = await sessionStore.refreshPinnedFacts(await sessionStore.load(userId));
+  private static async prepareSession(
+    userId: string,
+    mediaIds: string[],
+    conversationKey?: string,
+  ): Promise<{ session: SessionState; sessionFile: string }> {
+    const sessionFile = sessionStore.getSessionFile(userId, conversationKey);
+    const session = await sessionStore.refreshPinnedFacts(await sessionStore.loadFromFile(userId, sessionFile));
     session.activeMediaIds = await pruneActiveMediaIds(userId, session.activeMediaIds);
 
     if (mediaIds.length > 0) {
@@ -257,7 +265,7 @@ export class CoachService {
       session.activeMediaIds = [];
     }
 
-    return session;
+    return { session, sessionFile };
   }
 
   private static async runConversation(
@@ -269,6 +277,7 @@ export class CoachService {
       platform: string;
       conversationScope: ToolExecutionContext['conversationScope'];
       allowWriteTools: boolean;
+      sessionFile: string;
       onStatus?: (update: CoachStatusUpdate) => void;
     },
   ) {
@@ -307,7 +316,7 @@ export class CoachService {
       workingDirectory: userDataDir,
       dataDirectory: userDataDir,
       contextDirectory: sessionStore.getContextDir(userId),
-      sessionFile: sessionStore.getSessionFile(userId),
+      sessionFile: options.sessionFile,
       mediaIndexFile: mediaStore.getMediaIndexFile(userId),
       activeMediaIds,
       platform: options.platform,
@@ -326,10 +335,10 @@ export class CoachService {
     const incomingMediaIds = Array.isArray(options.mediaIds)
       ? options.mediaIds.map((item) => String(item || '').trim()).filter(Boolean)
       : [];
-    const session = await this.prepareSession(userId, incomingMediaIds);
+    const { session, sessionFile } = await this.prepareSession(userId, incomingMediaIds, options.conversationKey);
 
     await sessionStore.appendUserMessage(session, normalizedMessage, session.activeMediaIds);
-    await sessionStore.save(session);
+    await sessionStore.saveToFile(session, sessionFile);
 
     if (promptInjectionRisk && numericUserId) {
       SecurityEventService.create({
@@ -370,6 +379,7 @@ export class CoachService {
       platform: options.platform || 'web',
       conversationScope: options.conversationScope || 'unknown',
       allowWriteTools: options.allowWriteTools !== false,
+      sessionFile,
       onStatus: options.onStatus,
     });
 
@@ -382,7 +392,7 @@ export class CoachService {
     const finalResponse = sanitizeCoachResponseText(String(result.response || '').trim());
 
     await sessionStore.appendAssistantMessage(session, finalResponse);
-    await sessionStore.save(session);
+    await sessionStore.saveToFile(session, sessionFile);
 
     options.onStatus?.({
       phase: 'complete',
@@ -401,7 +411,11 @@ export class CoachService {
     const normalizedInstruction = sanitizePromptText(instruction, 4_000);
     const basePrompt = await this.getCoachPrompt(userId, options.coachOverride);
     const activeSkill = await loadSkill('coach');
-    const session = await this.prepareSession(userId, []);
+    const coachId = normalizeCoachId(options.coachOverride)
+      || normalizeCoachId((getDB().prepare('SELECT selected_coach FROM users WHERE id = ?').get(userId) as any)?.selected_coach)
+      || 'zj';
+    const conversationKey = options.conversationKey || buildCoachTopic(Number(userId), coachId);
+    const { session, sessionFile } = await this.prepareSession(userId, [], conversationKey);
 
     const systemPrompt = composeCoachSystemPrompt({
       soulPrompt: basePrompt,
@@ -421,11 +435,12 @@ ${normalizedInstruction}`.trim();
       platform: options.platform || 'scheduler',
       conversationScope: options.conversationScope || 'coach_dm',
       allowWriteTools: false,
+      sessionFile,
     });
 
     const finalResponse = sanitizeCoachResponseText(String(result.response || '').trim());
     await sessionStore.appendAssistantMessage(session, finalResponse);
-    await sessionStore.save(session);
+    await sessionStore.saveToFile(session, sessionFile);
     return finalResponse;
   }
 }

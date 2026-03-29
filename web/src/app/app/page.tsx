@@ -86,6 +86,7 @@ const visibleTabs = tabs.filter((item) => item.key !== 'leaderboard');
 type VisibleTabKey = (typeof tabs)[number]['key'];
 type TabKey = VisibleTabKey | 'friends';
 type TabIcon = (typeof tabs)[number]['icon'];
+type CoachId = 'zj' | 'lc';
 
 type ConversationType = 'coach' | 'dm' | 'group';
 interface Conversation {
@@ -125,6 +126,7 @@ const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const GROUP_MEMBER_LIMIT = 500;
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
 const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
 const POST_DRAFT_STORAGE_KEY_PREFIX = 'zym.web.postDraft.v2.user';
@@ -234,6 +236,36 @@ function displayNameFromTopic(topic: string): string {
   if (topic.startsWith('grp_')) return 'Group';
   if (topic.startsWith('coach_')) return 'Coach';
   return 'DM';
+}
+
+function normalizeCoachId(value: unknown): CoachId | null {
+  return value === 'lc' || value === 'zj' ? value : null;
+}
+
+function coachButtonClass(coachId?: CoachId | null): string {
+  if (coachId === 'lc') return 'btn btn-lc';
+  if (coachId === 'zj') return 'btn btn-zj';
+  return 'btn btn-ghost';
+}
+
+function groupCoachSubtitle(coachEnabled?: string): string {
+  if (coachEnabled === 'lc') return 'Group · LC coach';
+  if (coachEnabled === 'zj') return 'Group · ZJ coach';
+  return 'Group · No AI';
+}
+
+function resolveConversationCoachId(
+  conversation: Conversation | undefined,
+  selectedCoach: CoachId,
+): CoachId {
+  if (!conversation) return selectedCoach;
+  if (conversation.type === 'group') {
+    return normalizeCoachId(conversation.coachEnabled) || selectedCoach;
+  }
+  if (conversation.type === 'coach') {
+    return conversation.topic.startsWith('coach_lc_') ? 'lc' : 'zj';
+  }
+  return selectedCoach;
 }
 
 function isVideoUrl(url: string): boolean {
@@ -575,9 +607,15 @@ export default function AppPage() {
   const [createGroupPending, setCreateGroupPending] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupCoachEnabled, setGroupCoachEnabled] = useState<'none' | 'zj' | 'lc'>('zj');
-  const [groupMembers, setGroupMembers] = useState('');
+  const [groupInviteQuery, setGroupInviteQuery] = useState('');
+  const [groupInvitees, setGroupInvitees] = useState<UserSummary[]>([]);
+  const [groupInviteSuggestions, setGroupInviteSuggestions] = useState<UserSummary[]>([]);
+  const [groupInviteSuggestionsPending, setGroupInviteSuggestionsPending] = useState(false);
+  const [groupSettingsOpen, setGroupSettingsOpen] = useState(false);
   const [activeGroupMembers, setActiveGroupMembers] = useState<GroupMember[]>([]);
-  const [activeGroupInvite, setActiveGroupInvite] = useState('');
+  const [activeGroupInviteQuery, setActiveGroupInviteQuery] = useState('');
+  const [activeGroupInviteSuggestions, setActiveGroupInviteSuggestions] = useState<UserSummary[]>([]);
+  const [activeGroupInviteSuggestionsPending, setActiveGroupInviteSuggestionsPending] = useState(false);
   const [activeGroupMembersPending, setActiveGroupMembersPending] = useState(false);
   const [activeGroupInvitePending, setActiveGroupInvitePending] = useState(false);
   const [activeGroupRemovePendingId, setActiveGroupRemovePendingId] = useState<number | null>(null);
@@ -781,18 +819,19 @@ export default function AppPage() {
   }, [totalUnreadCount]);
 
   useEffect(() => {
-    if (!createGroupOpen && !deleteAccountDialogOpen && !abuseReportDraft.open) return;
+    if (!createGroupOpen && !groupSettingsOpen && !deleteAccountDialogOpen && !abuseReportDraft.open) return;
 
     function handleEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
       setCreateGroupOpen(false);
+      setGroupSettingsOpen(false);
       setDeleteAccountDialogOpen(false);
       setAbuseReportDraft((prev) => ({ ...prev, open: false, pending: false }));
     }
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [createGroupOpen, deleteAccountDialogOpen, abuseReportDraft.open]);
+  }, [createGroupOpen, groupSettingsOpen, deleteAccountDialogOpen, abuseReportDraft.open]);
 
   const panelMomentum = useMemo(() => {
     if (tab === 'messages') {
@@ -1218,6 +1257,10 @@ export default function AppPage() {
       router.replace('/login');
       return;
     }
+    if (!auth.selectedCoach) {
+      router.replace('/coach-select');
+      return;
+    }
 
     setAuthUserId(auth.userId);
     setAuthUsername(auth.username);
@@ -1371,7 +1414,9 @@ export default function AppPage() {
   useEffect(() => {
     if (!activeConversation || activeConversation.type !== 'group' || !activeConversation.groupId) {
       setActiveGroupMembers([]);
-      setActiveGroupInvite('');
+      setActiveGroupInviteQuery('');
+      setActiveGroupInviteSuggestions([]);
+      setGroupSettingsOpen(false);
       return;
     }
     void loadActiveGroupMembers(activeConversation.groupId);
@@ -1552,6 +1597,69 @@ export default function AppPage() {
   }, [friendQuery, authUserId]);
 
   useEffect(() => {
+    const query = groupInviteQuery.trim();
+    const excludedIds = new Set([authUserId, ...groupInvitees.map((item) => item.id)]);
+    if (!query) {
+      setGroupInviteSuggestions([]);
+      setGroupInviteSuggestionsPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setGroupInviteSuggestionsPending(true);
+      void searchUsers(query)
+        .then((result) => {
+          if (cancelled) return;
+          setGroupInviteSuggestions(result.filter((item) => !excludedIds.has(item.id)));
+        })
+        .catch(() => {
+          if (!cancelled) setGroupInviteSuggestions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setGroupInviteSuggestionsPending(false);
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [groupInviteQuery, groupInvitees, authUserId]);
+
+  useEffect(() => {
+    const query = activeGroupInviteQuery.trim();
+    const excludedIds = new Set(activeGroupMembers.map((item) => item.id));
+    excludedIds.add(authUserId);
+    if (!query) {
+      setActiveGroupInviteSuggestions([]);
+      setActiveGroupInviteSuggestionsPending(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setActiveGroupInviteSuggestionsPending(true);
+      void searchUsers(query)
+        .then((result) => {
+          if (cancelled) return;
+          setActiveGroupInviteSuggestions(result.filter((item) => !excludedIds.has(item.id)));
+        })
+        .catch(() => {
+          if (!cancelled) setActiveGroupInviteSuggestions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setActiveGroupInviteSuggestionsPending(false);
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeGroupInviteQuery, activeGroupMembers, authUserId]);
+
+  useEffect(() => {
     const raw = friendIdInput.trim();
     if (!raw) {
       setFriendByIdPreview(null);
@@ -1667,7 +1775,7 @@ export default function AppPage() {
           topic: item.topic,
           name: item.name,
           type: 'group' as const,
-          subtitle: `Group · ${item.coach_enabled === 'none' ? 'No AI' : 'Coach enabled'}`,
+          subtitle: groupCoachSubtitle(item.coach_enabled),
           preview: item.last_message_preview,
           unreadCount: Number(item.unread_count || 0),
           mentionCount: Number(item.mention_count || 0),
@@ -2046,9 +2154,26 @@ export default function AppPage() {
 
   function openCreateGroupDialog() {
     setGroupName('');
-    setGroupMembers('');
-    setGroupCoachEnabled('zj');
+    setGroupInviteQuery('');
+    setGroupInvitees([]);
+    setGroupInviteSuggestions([]);
+    setGroupCoachEnabled(selectedCoach);
     setCreateGroupOpen(true);
+  }
+
+  function handleAddGroupInvitee(user: UserSummary) {
+    setGroupInvitees((current) => {
+      if (current.some((item) => item.id === user.id) || current.length >= GROUP_MEMBER_LIMIT - 1) {
+        return current;
+      }
+      return [...current, user];
+    });
+    setGroupInviteQuery('');
+    setGroupInviteSuggestions([]);
+  }
+
+  function handleRemoveGroupInvitee(userId: number) {
+    setGroupInvitees((current) => current.filter((item) => item.id !== userId));
   }
 
   async function handleCreateGroup(event: FormEvent) {
@@ -2063,18 +2188,15 @@ export default function AppPage() {
         coachEnabled: groupCoachEnabled,
       });
 
-      const memberNames = groupMembers
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean);
-
-      for (const name of memberNames) {
-        await addGroupMember({ groupId, username: name });
+      for (const member of groupInvitees) {
+        await addGroupMember({ groupId, userId: member.id });
       }
 
       setGroupName('');
-      setGroupMembers('');
-      setGroupCoachEnabled('zj');
+      setGroupInviteQuery('');
+      setGroupInvitees([]);
+      setGroupInviteSuggestions([]);
+      setGroupCoachEnabled(selectedCoach);
       setCreateGroupOpen(false);
       showNotice('Group created.');
       await loadInbox();
@@ -2085,16 +2207,17 @@ export default function AppPage() {
     }
   }
 
-  async function handleInviteToActiveGroup() {
+  async function handleInviteToActiveGroup(user?: UserSummary) {
     if (!activeConversation?.groupId) return;
-    const username = activeGroupInvite.trim();
-    if (!username) return;
+    const candidate = user || activeGroupInviteSuggestions[0];
+    if (!candidate) return;
 
     try {
       setActiveGroupInvitePending(true);
-      await addGroupMember({ groupId: activeConversation.groupId, username });
-      setActiveGroupInvite('');
-      showNotice(`Invited ${username}.`);
+      await addGroupMember({ groupId: activeConversation.groupId, userId: candidate.id });
+      setActiveGroupInviteQuery('');
+      setActiveGroupInviteSuggestions([]);
+      showNotice(`Invited ${candidate.username}.`);
       await loadActiveGroupMembers(activeConversation.groupId);
       await loadInbox();
     } catch (err: any) {
@@ -2532,12 +2655,14 @@ export default function AppPage() {
   }
 
   const activeTab = tab === 'friends' ? 'community' : tab;
-  const activeConversationCoach = activeConversation?.type === 'coach'
-    ? (activeConversation.name.toLowerCase().includes('lc') ? 'lc' : 'zj')
-    : selectedCoach;
+  const activeConversationCoach = resolveConversationCoachId(activeConversation, selectedCoach);
   const activeConversationTheme = coachTheme(activeConversationCoach);
   const selectedCoachTheme = coachTheme(selectedCoach);
-  const selectedCoachButtonClass = selectedCoach === 'lc' ? 'btn btn-lc' : 'btn btn-zj';
+  const selectedCoachButtonClass = coachButtonClass(selectedCoach);
+  const activeConversationButtonClass = coachButtonClass(activeConversation?.type === 'group'
+    ? normalizeCoachId(activeConversation.coachEnabled)
+    : activeConversationCoach);
+  const createGroupButtonClass = groupCoachEnabled === 'none' ? 'btn btn-ghost' : coachButtonClass(groupCoachEnabled);
   const selectedTabLabel = tabs.find((item) => item.key === activeTab)?.label || 'Message';
   const topLeaderboardMetric = Math.max(
     ...filteredLeaderboard.map((entry) => (
@@ -2697,65 +2822,20 @@ export default function AppPage() {
                       </div>
                     </div>
                   ) : null}
+                  {activeConversation?.type === 'group' ? (
+                    <button
+                      type="button"
+                      className="flex size-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100/80 text-slate-500 transition hover:bg-slate-200/80"
+                      aria-label="Open group settings"
+                      onClick={() => setGroupSettingsOpen(true)}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </div>
           </header>
-
-          {activeConversation?.type === 'group' ? (
-            <section className="border-b border-slate-200/50 px-5 py-4 md:px-6">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <strong className="text-sm text-slate-800">Group members</strong>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  style={{ padding: '6px 10px' }}
-                  onClick={() => activeConversation.groupId && void loadActiveGroupMembers(activeConversation.groupId)}
-                  disabled={activeGroupMembersPending}
-                >
-                  {activeGroupMembersPending ? 'Loading...' : 'Refresh'}
-                </button>
-              </div>
-              <div className="mb-3 flex flex-wrap gap-2">
-                {activeGroupMembers.length === 0 ? (
-                  <span className="text-sm text-slate-500">No members loaded</span>
-                ) : (
-                  activeGroupMembers.map((member) => (
-                    <div key={member.id} className="flex items-center gap-2 rounded-full border border-white/60 bg-white/55 px-3 py-2 text-xs text-slate-600">
-                      <span>{member.username} · {member.role}</span>
-                      {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
-                        <button
-                          className="font-semibold"
-                          style={{ color: selectedCoachTheme.ink }}
-                          type="button"
-                          onClick={() => void handleRemoveFromActiveGroup(member)}
-                          disabled={activeGroupRemovePendingId === member.id}
-                        >
-                          {activeGroupRemovePendingId === member.id ? '...' : 'Remove'}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="flex flex-col gap-3 md:flex-row">
-                <input
-                  className="input-shell"
-                  placeholder="Invite username"
-                  value={activeGroupInvite}
-                  onChange={(event) => setActiveGroupInvite(event.target.value)}
-                />
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => void handleInviteToActiveGroup()}
-                  disabled={activeGroupInvitePending}
-                >
-                  {activeGroupInvitePending ? 'Inviting...' : 'Invite'}
-                </button>
-              </div>
-            </section>
-          ) : null}
 
           <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-5 py-5 md:px-6">
             {messages.map((message, index) => {
@@ -4005,6 +4085,117 @@ export default function AppPage() {
         </div>
       ) : null}
 
+      {groupSettingsOpen && activeConversation?.type === 'group' ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.72)] px-4 backdrop-blur-md"
+          onClick={() => !activeGroupInvitePending && setGroupSettingsOpen(false)}
+        >
+          <div
+            className="w-full max-w-[560px] rounded-[30px] border border-white/80 bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.18)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[1.45rem] font-semibold tracking-tight text-slate-900">Group members ({activeGroupMembers.length})</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  {groupCoachSubtitle(activeConversation.coachEnabled)}. {GROUP_MEMBER_LIMIT} member max.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  onClick={() => activeConversation.groupId && void loadActiveGroupMembers(activeConversation.groupId)}
+                  disabled={activeGroupMembersPending}
+                >
+                  {activeGroupMembersPending ? 'Loading...' : 'Refresh'}
+                </button>
+                <button
+                  className="flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                  type="button"
+                  onClick={() => setGroupSettingsOpen(false)}
+                  aria-label="Close group settings"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 max-h-[42vh] space-y-3 overflow-y-auto pr-1">
+              {activeGroupMembers.length === 0 ? (
+                <div className="rounded-[24px] border border-dashed border-slate-300/80 bg-slate-50/80 px-4 py-5 text-sm text-slate-500">
+                  No members loaded yet.
+                </div>
+              ) : (
+                activeGroupMembers.map((member) => (
+                  <div key={member.id} className="flex items-center justify-between gap-3 rounded-[22px] border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{member.username}</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{member.role}</p>
+                    </div>
+                    {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
+                      <button
+                        className="text-sm font-semibold"
+                        style={{ color: activeConversationTheme.ink }}
+                        type="button"
+                        onClick={() => void handleRemoveFromActiveGroup(member)}
+                        disabled={activeGroupRemovePendingId === member.id}
+                      >
+                        {activeGroupRemovePendingId === member.id ? 'Removing...' : 'Remove'}
+                      </button>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {activeGroupMyRole === 'owner' ? (
+              <div className="mt-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Invite members</h4>
+                  <span className="text-xs text-slate-400">{Math.max(GROUP_MEMBER_LIMIT - activeGroupMembers.length, 0)} spots left</span>
+                </div>
+                <div className="mt-3 rounded-[24px] border border-white/70 bg-slate-50/70 p-3">
+                  <input
+                    className="input-shell border-0 bg-white"
+                    placeholder="Search username"
+                    value={activeGroupInviteQuery}
+                    onChange={(event) => setActiveGroupInviteQuery(event.target.value)}
+                    disabled={activeGroupMembers.length >= GROUP_MEMBER_LIMIT}
+                  />
+                  <div className="mt-3 space-y-2">
+                    {activeGroupInviteSuggestionsPending ? (
+                      <p className="text-xs text-slate-400">Searching usernames...</p>
+                    ) : null}
+                    {!activeGroupInviteSuggestionsPending && activeGroupInviteQuery.trim() && activeGroupInviteSuggestions.length === 0 ? (
+                      <p className="text-xs text-slate-400">No matching usernames.</p>
+                    ) : null}
+                    {activeGroupInviteSuggestions.slice(0, 6).map((user) => (
+                      <div key={user.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/95 px-3 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                          <p className="text-xs text-slate-500">Ready to invite</p>
+                        </div>
+                        <button
+                          className={activeConversationButtonClass}
+                          type="button"
+                          onClick={() => void handleInviteToActiveGroup(user)}
+                          disabled={activeGroupInvitePending || activeGroupMembers.length >= GROUP_MEMBER_LIMIT}
+                        >
+                          {activeGroupInvitePending ? 'Inviting...' : 'Invite'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-6 text-sm text-slate-500">Only the group owner can invite or remove members.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {createGroupOpen ? (
         <div
           className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.72)] px-4 backdrop-blur-md"
@@ -4066,14 +4257,52 @@ export default function AppPage() {
 
               <label className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">Invite members</span>
-                <textarea
-                  className="min-h-[120px] rounded-[22px] border border-white/70 bg-white/80 px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400"
-                  style={{ borderColor: selectedCoachTheme.borderColor }}
-                  value={groupMembers}
-                  onChange={(event) => setGroupMembers(event.target.value)}
-                  placeholder="Comma-separated usernames, for example: michaeltest, sophia, alex"
-                />
-                <p className="text-xs text-slate-400">Optional. We&apos;ll invite these usernames after the group is created.</p>
+                <div className="rounded-[22px] border border-white/70 bg-white/80 p-3" style={{ borderColor: selectedCoachTheme.borderColor }}>
+                  <div className="flex flex-wrap gap-2">
+                    {groupInvitees.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/95 px-3 py-2 text-xs text-slate-600"
+                        onClick={() => handleRemoveGroupInvitee(member.id)}
+                        title="Remove invitee"
+                      >
+                        <span>{member.username}</span>
+                        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    className="mt-3 w-full border-0 bg-transparent px-1 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                    value={groupInviteQuery}
+                    onChange={(event) => setGroupInviteQuery(event.target.value)}
+                    placeholder="Search username to invite"
+                    disabled={groupInvitees.length >= GROUP_MEMBER_LIMIT - 1}
+                  />
+                  <div className="mt-2 space-y-2">
+                    {groupInviteSuggestionsPending ? (
+                      <p className="text-xs text-slate-400">Searching usernames...</p>
+                    ) : null}
+                    {!groupInviteSuggestionsPending && groupInviteQuery.trim() && groupInviteSuggestions.length === 0 ? (
+                      <p className="text-xs text-slate-400">No matching usernames.</p>
+                    ) : null}
+                    {groupInviteSuggestions.slice(0, 6).map((user) => (
+                      <button
+                        key={user.id}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-2xl border border-white/70 bg-white/95 px-3 py-3 text-left transition hover:-translate-y-0.5"
+                        onClick={() => handleAddGroupInvitee(user)}
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                          <p className="text-xs text-slate-500">Tap to add to the new group</p>
+                        </div>
+                        <span className="material-symbols-outlined text-slate-400">person_add</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400">Optional. Add up to {GROUP_MEMBER_LIMIT - 1} invitees here. The owner counts toward the {GROUP_MEMBER_LIMIT}-member limit.</p>
               </label>
             </div>
 
@@ -4086,7 +4315,7 @@ export default function AppPage() {
               >
                 Cancel
               </button>
-              <button className={selectedCoachButtonClass} type="submit" disabled={createGroupPending || !groupName.trim()}>
+              <button className={createGroupButtonClass} type="submit" disabled={createGroupPending || !groupName.trim()}>
                 {createGroupPending ? 'Creating...' : 'Create group'}
               </button>
             </div>

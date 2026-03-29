@@ -29,6 +29,7 @@ export class GetContextTool implements Tool {
     const result = await coachTypedToolsService.getContext(userId, {
       scope: args?.scope,
       limit: args?.limit,
+      sessionFile: context.sessionFile,
     });
     return toJson(result);
   }

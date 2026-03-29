@@ -7,6 +7,7 @@ const MAX_RECENT_MESSAGES = 12;
 const SUMMARY_BATCH_SIZE = 6;
 const MAX_SUMMARY_CHARS = 1200;
 const MAX_ACTIVE_MEDIA = 6;
+const SESSION_KEY_FALLBACK = 'default';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -33,6 +34,16 @@ function isTrivialMessage(text: string): boolean {
 
 function trimSummary(summary: string): string {
   return summary.length <= MAX_SUMMARY_CHARS ? summary : summary.slice(summary.length - MAX_SUMMARY_CHARS);
+}
+
+function sanitizeSessionKey(sessionKey?: string): string {
+  const normalized = String(sessionKey || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+  return normalized || SESSION_KEY_FALLBACK;
 }
 
 function summarizeMessages(messages: CompactMessage[]): string {
@@ -92,20 +103,24 @@ export class SessionStore {
     return path.join(this.getUserDataDir(userId), 'context');
   }
 
-  getSessionFile(userId: string): string {
-    return path.join(this.getContextDir(userId), 'session.json');
+  getSessionFile(userId: string, sessionKey?: string): string {
+    return path.join(this.getContextDir(userId), 'sessions', `${sanitizeSessionKey(sessionKey)}.json`);
   }
 
   getTranscriptFile(userId: string): string {
     return path.join(this.getContextDir(userId), 'transcript.ndjson');
   }
 
-  async load(userId: string): Promise<SessionState> {
-    const filePath = this.getSessionFile(userId);
-    await ensureDir(path.dirname(filePath));
+  async load(userId: string, sessionKey?: string): Promise<SessionState> {
+    const filePath = this.getSessionFile(userId, sessionKey);
+    return this.loadFromFile(userId, filePath);
+  }
 
+  async loadFromFile(userId: string, filePath?: string): Promise<SessionState> {
+    const resolvedFilePath = String(filePath || '').trim() || this.getSessionFile(userId);
+    await ensureDir(path.dirname(resolvedFilePath));
     try {
-      const raw = await fs.readFile(filePath, 'utf8');
+      const raw = await fs.readFile(resolvedFilePath, 'utf8');
       const parsed = JSON.parse(raw) as SessionState;
       return {
         schemaVersion: 1,
@@ -124,13 +139,18 @@ export class SessionStore {
     }
   }
 
-  async save(state: SessionState): Promise<void> {
+  async save(state: SessionState, sessionKey?: string): Promise<void> {
+    const filePath = this.getSessionFile(state.userId, sessionKey);
+    await this.saveToFile(state, filePath);
+  }
+
+  async saveToFile(state: SessionState, filePath?: string): Promise<void> {
     this.compressIfNeeded(state);
     state.activeMediaIds = state.activeMediaIds.slice(-MAX_ACTIVE_MEDIA);
 
-    const filePath = this.getSessionFile(state.userId);
-    await ensureDir(path.dirname(filePath));
-    await writeJsonAtomic(filePath, state);
+    const resolvedFilePath = String(filePath || '').trim() || this.getSessionFile(state.userId);
+    await ensureDir(path.dirname(resolvedFilePath));
+    await writeJsonAtomic(resolvedFilePath, state);
   }
 
   async refreshPinnedFacts(state: SessionState): Promise<SessionState> {

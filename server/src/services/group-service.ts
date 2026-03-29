@@ -1,5 +1,7 @@
 import { getDB } from '../database/runtime-db.js';
 
+const GROUP_MEMBER_LIMIT = 500;
+
 export class GroupService {
   static async createGroup(name: string, ownerId: string, coachEnabled?: string) {
     const db = getDB();
@@ -16,6 +18,17 @@ export class GroupService {
 
   static async addMember(groupId: string, userId: string) {
     const db = getDB();
+    const existing = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, userId);
+    if (existing) {
+      return;
+    }
+
+    const memberCountRow = db.prepare('SELECT COUNT(1) AS count FROM group_members WHERE group_id = ?').get(groupId) as { count?: number } | undefined;
+    const memberCount = Number(memberCountRow?.count || 0);
+    if (memberCount >= GROUP_MEMBER_LIMIT) {
+      throw new Error(`This group already has the maximum ${GROUP_MEMBER_LIMIT} members.`);
+    }
+
     db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)').run(groupId, userId);
   }
 

@@ -1,32 +1,122 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { login } from '@/lib/api';
+import { FormEvent, Suspense, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { login, loginWithGoogle } from '@/lib/api';
 import { setAuth } from '@/lib/auth-storage';
+import { GOOGLE_CLIENT_ID } from '@/lib/config';
 
-export default function LoginPage() {
-  const [username, setUsername] = useState('');
+const HEALTH_DISCLAIMER_VERSION = '2026-03-26';
+
+function LoginScreen() {
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [googleConsentAccepted, setGoogleConsentAccepted] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
+  const routeAfterLogin = (selectedCoach: 'zj' | 'lc' | null) => {
+    router.push(selectedCoach ? '/app' : '/coach-select');
+  };
+
+  useEffect(() => {
+    const email = String(searchParams.get('email') || '').trim();
+    if (email) {
+      setIdentifier((current) => current || email);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
+
+    let cancelled = false;
+    const container = googleButtonRef.current;
+
+    const handleGoogleCredential = async (credential: string) => {
+      if (!credential) {
+        setError('Google sign-in did not return a credential.');
+        return;
+      }
+
+      try {
+        setPending(true);
+        setError('');
+        const auth = await loginWithGoogle(credential, {
+          healthDisclaimerAccepted: googleConsentAccepted,
+          consentVersion: HEALTH_DISCLAIMER_VERSION,
+        });
+        setAuth(auth);
+        routeAfterLogin(auth.selectedCoach);
+      } catch (err: any) {
+        setError(err.message || 'Google sign-in failed.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    const renderGoogleButton = () => {
+      if (cancelled || !container) return;
+      const google = (window as any).google;
+      if (!google?.accounts?.id) return;
+
+      container.innerHTML = '';
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response: { credential?: string }) => {
+          void handleGoogleCredential(String(response?.credential || ''));
+        },
+        ux_mode: 'popup',
+        auto_select: false,
+        itp_support: true,
+      });
+      google.accounts.id.renderButton(container, {
+        theme: 'outline',
+        size: 'large',
+        shape: 'pill',
+        text: 'continue_with',
+        logo_alignment: 'left',
+        width: Math.max(container.clientWidth, 320),
+      });
+    };
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-google-identity="true"]');
+    if ((window as any).google?.accounts?.id) {
+      renderGoogleButton();
+    } else if (existingScript) {
+      existingScript.addEventListener('load', renderGoogleButton, { once: true });
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.dataset.googleIdentity = 'true';
+      script.addEventListener('load', renderGoogleButton, { once: true });
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+      container.innerHTML = '';
+    };
+  }, [googleConsentAccepted, router]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
 
-    if (!username.trim() || !password.trim()) {
-      setError('Please enter both username and password.');
+    if (!identifier.trim() || !password.trim()) {
+      setError('Please enter your email or username and password.');
       return;
     }
 
     try {
       setPending(true);
-      const auth = await login(username.trim(), password);
+      const auth = await login(identifier.trim(), password);
       setAuth(auth);
-      const hasCoach = auth.selectedCoach === 'zj' || auth.selectedCoach === 'lc';
-      router.push(hasCoach ? '/app' : '/coach-select');
+      routeAfterLogin(auth.selectedCoach);
     } catch (err: any) {
       setError(err.message || 'Login failed.');
     } finally {
@@ -60,14 +150,15 @@ export default function LoginPage() {
 
           <form onSubmit={onSubmit} className="space-y-4 sm:space-y-5">
             <div className="space-y-2">
-              <label className="ml-1 text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Username</label>
+              <label className="ml-1 text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Email Or Username</label>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[20px] text-[color:var(--ink-300)]">person</span>
                 <input
                   className="w-full rounded-2xl border border-[rgba(171,164,155,0.22)] bg-white/55 py-3.5 pl-12 pr-4 text-sm text-[color:var(--ink-900)] outline-none transition focus:border-[rgba(105,121,247,0.32)] focus:ring-4 focus:ring-[rgba(105,121,247,0.12)] sm:py-4"
-                  placeholder="your username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="your email or username"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                  autoComplete="username"
                 />
               </div>
             </div>
@@ -105,6 +196,32 @@ export default function LoginPage() {
               {pending ? 'Signing in...' : 'Get to Work'}
               <span className="material-symbols-outlined text-base">arrow_forward</span>
             </button>
+
+            {GOOGLE_CLIENT_ID ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Google</span>
+                  <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
+                </div>
+                <label className="flex items-start gap-3 rounded-2xl border border-[rgba(171,164,155,0.16)] bg-white/55 px-4 py-3 text-sm leading-6 text-[color:var(--ink-500)]">
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4 rounded border-slate-300"
+                    checked={googleConsentAccepted}
+                    onChange={(event) => setGoogleConsentAccepted(event.target.checked)}
+                  />
+                  <span>
+                    I understand ZYM AI Coach is not medical advice. If I have injuries, chest pain, severe pain, dizziness, or urgent symptoms, I should stop and seek professional care.
+                  </span>
+                </label>
+                {googleConsentAccepted ? (
+                  <div ref={googleButtonRef} className={pending ? 'pointer-events-none opacity-60' : ''} />
+                ) : (
+                  <p className="text-xs text-[color:var(--ink-300)]">Confirm the health disclaimer above to continue with Google.</p>
+                )}
+              </div>
+            ) : null}
           </form>
 
           <div className="mt-[clamp(1.5rem,3vh,2rem)] border-t border-[rgba(171,164,155,0.12)] pt-[clamp(1.5rem,3vh,2rem)] text-center">
@@ -136,5 +253,13 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="grid min-h-dvh place-items-center px-5 py-8 text-sm text-[color:var(--ink-500)]">Loading...</main>}>
+      <LoginScreen />
+    </Suspense>
   );
 }

@@ -13,7 +13,8 @@ export function getAuth(): AuthPayload | null {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
   const userId = Number(localStorage.getItem(USER_ID_KEY));
   const username = localStorage.getItem(USERNAME_KEY) || '';
-  const selectedCoach = (localStorage.getItem(COACH_KEY) || 'zj') as 'zj' | 'lc';
+  const rawCoach = String(localStorage.getItem(COACH_KEY) || '').trim().toLowerCase();
+  const selectedCoach = rawCoach === 'zj' || rawCoach === 'lc' ? rawCoach : null;
 
   if (!token || !refreshToken || !Number.isInteger(userId) || userId <= 0) return null;
   return { token, refreshToken, userId, username, selectedCoach };
@@ -24,7 +25,11 @@ export function setAuth(payload: AuthPayload): void {
   localStorage.setItem(REFRESH_TOKEN_KEY, payload.refreshToken);
   localStorage.setItem(USER_ID_KEY, String(payload.userId));
   localStorage.setItem(USERNAME_KEY, payload.username);
-  localStorage.setItem(COACH_KEY, payload.selectedCoach);
+  if (payload.selectedCoach === 'zj' || payload.selectedCoach === 'lc') {
+    localStorage.setItem(COACH_KEY, payload.selectedCoach);
+  } else {
+    localStorage.removeItem(COACH_KEY);
+  }
 }
 
 export function setAuthTokens(token: string, refreshToken: string): void {

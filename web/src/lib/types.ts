@@ -3,7 +3,7 @@ export interface AuthPayload {
   token: string;
   refreshToken: string;
   username: string;
-  selectedCoach: 'zj' | 'lc';
+  selectedCoach: 'zj' | 'lc' | null;
 }
 
 export interface AuthSession {
@@ -218,7 +218,7 @@ export interface Profile {
   bio: string | null;
   fitness_goal: string | null;
   hobbies: string | null;
-  selected_coach: 'zj' | 'lc';
+  selected_coach: 'zj' | 'lc' | null;
   timezone?: string | null;
 }
 

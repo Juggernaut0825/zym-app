@@ -548,10 +548,14 @@ export class CoachTypedToolsService {
     };
   }
 
-  async getContext(userId: string, input: { scope?: unknown; limit?: unknown } = {}): Promise<Record<string, unknown>> {
+  async getContext(
+    userId: string,
+    input: { scope?: unknown; limit?: unknown; sessionFile?: unknown } = {},
+  ): Promise<Record<string, unknown>> {
     const scope = normalizeSessionScope(input.scope);
     const limit = clampInt(input.limit, 1, 24, 6);
-    const session = await this.sessionStore.refreshPinnedFacts(await this.sessionStore.load(userId));
+    const sessionFile = String(input.sessionFile || '').trim() || undefined;
+    const session = await this.sessionStore.refreshPinnedFacts(await this.sessionStore.loadFromFile(userId, sessionFile));
     const recent = Array.isArray(session.recentMessages) ? session.recentMessages : [];
 
     let selected = recent;

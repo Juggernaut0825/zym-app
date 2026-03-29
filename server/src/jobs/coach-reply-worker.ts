@@ -48,6 +48,7 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
       mediaIds: job.mediaIds,
       platform: job.platform,
       coachOverride: job.coachOverride,
+      conversationKey: job.topic,
       conversationScope: job.conversationScope,
       allowWriteTools: job.allowWriteTools,
       onStatus: (status) => {

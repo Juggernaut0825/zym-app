@@ -9,7 +9,11 @@ export default function HomePage() {
 
   useEffect(() => {
     const auth = getAuth();
-    router.replace(auth ? '/app' : '/login');
+    if (!auth) {
+      router.replace('/login');
+      return;
+    }
+    router.replace(auth.selectedCoach ? '/app' : '/coach-select');
   }, [router]);
 
   return <div style={{ minHeight: '100vh' }} />;

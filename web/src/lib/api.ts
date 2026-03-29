@@ -142,17 +142,36 @@ export interface LoginResponse {
   token: string;
   refreshToken: string;
   username: string;
-  selectedCoach: 'zj' | 'lc';
+  selectedCoach: 'zj' | 'lc' | null;
   timezone?: string | null;
 }
 
-export async function login(username: string, password: string, timezone?: string): Promise<LoginResponse> {
+export async function login(identifier: string, password: string, timezone?: string): Promise<LoginResponse> {
   return request<LoginResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({
-      username,
+      identifier,
       password,
       timezone: timezone || detectClientTimeZone(),
+    }),
+  });
+}
+
+export async function loginWithGoogle(
+  idToken: string,
+  options?: {
+    timezone?: string;
+    healthDisclaimerAccepted?: boolean;
+    consentVersion?: string;
+  },
+): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({
+      idToken,
+      timezone: options?.timezone || detectClientTimeZone(),
+      healthDisclaimerAccepted: options?.healthDisclaimerAccepted,
+      consentVersion: options?.consentVersion,
     }),
   });
 }

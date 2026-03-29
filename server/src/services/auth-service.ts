@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
+import { googleAuthService } from './google-auth-service.js';
 
 dotenv.config();
 
@@ -53,8 +54,24 @@ function normalizeEmail(email: unknown): string | null {
   return String(email || '').trim().toLowerCase() || null;
 }
 
+function normalizeLoginIdentifier(identifier: unknown): string {
+  return String(identifier || '').trim().toLowerCase();
+}
+
 function isEmailVerified(value: unknown): boolean {
   return String(value || '').trim().length > 0;
+}
+
+function sanitizeUsernameSeed(value: string): string {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const sliced = normalized.slice(0, 32);
+  if (sliced.length >= 3) {
+    return sliced;
+  }
+  return `${sliced || 'zym'}user`.slice(0, 32);
 }
 
 function createAccessToken(userId: number, sessionId: string): string {
@@ -134,7 +151,7 @@ export class AuthService {
     const normalizedEmail = normalizeEmail(email);
     const db = getDB();
     const result = db
-      .prepare('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)')
+      .prepare('INSERT INTO users (username, email, password_hash, selected_coach) VALUES (?, ?, ?, NULL)')
       .run(username, normalizedEmail, hash);
 
     const userId = Number(result.lastInsertRowid || 0);
@@ -435,17 +452,140 @@ export class AuthService {
   }
 
   static async login(
-    username: string,
+    identifier: string,
     password: string,
     context: { deviceName?: string; ipAddress?: string } = {},
   ) {
     runSessionCleanupIfNeeded();
-    const user = getDB().prepare('SELECT id, password_hash, email, email_verified_at FROM users WHERE username = ?').get(username) as any;
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) return null;
+    const normalizedIdentifier = normalizeLoginIdentifier(identifier);
+    if (!normalizedIdentifier) return null;
+
+    const user = getDB().prepare(`
+      SELECT id, username, password_hash, email, email_verified_at
+      FROM users
+      WHERE lower(username) = ? OR lower(email) = ?
+      LIMIT 1
+    `).get(normalizedIdentifier, normalizedIdentifier) as any;
+
+    if (!user?.password_hash || !(await bcrypt.compare(password, user.password_hash))) return null;
     const normalizedEmail = normalizeEmail(user.email);
     if (normalizedEmail && !isEmailVerified(user.email_verified_at)) {
       throw new EmailVerificationRequiredError(normalizedEmail);
     }
+    return this.issueSessionForUser(Number(user.id || 0), context);
+  }
+
+  static async loginWithGoogle(
+    idToken: string,
+    context: {
+      deviceName?: string;
+      ipAddress?: string;
+      healthDisclaimerAccepted?: boolean;
+      consentVersion?: string;
+      userAgent?: string | null;
+    } = {},
+  ) {
+    const identity = await googleAuthService.verifyIdToken(idToken);
+    if (!identity.emailVerified) {
+      throw new Error('This Google account email is not verified.');
+    }
+
+    const db = getDB();
+    let user = db.prepare(`
+      SELECT id, username, email, email_verified_at, google_sub
+      FROM users
+      WHERE google_sub = ?
+      LIMIT 1
+    `).get(identity.sub) as any;
+
+    if (!user) {
+      user = db.prepare(`
+        SELECT id, username, email, email_verified_at, google_sub
+        FROM users
+        WHERE lower(email) = ?
+        LIMIT 1
+      `).get(identity.email) as any;
+    }
+
+    if (!user) {
+      if (!context.healthDisclaimerAccepted) {
+        throw new Error('Please confirm the health disclaimer before continuing with Google.');
+      }
+      const username = this.generateUniqueUsername(identity.name || identity.email.split('@')[0] || 'zymuser');
+      const result = db.prepare(`
+        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, google_sub)
+        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?)
+      `).run(username, identity.email, identity.sub);
+      const userId = Number(result.lastInsertRowid || 0);
+      if (userId > 0) {
+        db.prepare(`
+          INSERT OR IGNORE INTO user_consents (user_id, consent_type, version, ip_address, user_agent)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          userId,
+          'health_disclaimer',
+          String(context.consentVersion || '2026-03-26').slice(0, 40),
+          String(context.ipAddress || '').slice(0, 120) || null,
+          String(context.userAgent || '').slice(0, 500) || null,
+        );
+      }
+      user = db.prepare(`
+        SELECT id, username, email, email_verified_at, google_sub
+        FROM users
+        WHERE id = ?
+      `).get(userId) as any;
+    } else {
+      const updates: string[] = [];
+      const params: unknown[] = [];
+
+      if (!String(user.google_sub || '').trim()) {
+        updates.push('google_sub = ?');
+        params.push(identity.sub);
+      }
+      if (!normalizeEmail(user.email) && identity.email) {
+        updates.push('email = ?');
+        params.push(identity.email);
+      }
+      if (!isEmailVerified(user.email_verified_at)) {
+        updates.push('email_verified_at = CURRENT_TIMESTAMP');
+      }
+
+      if (updates.length > 0) {
+        db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params, user.id);
+      }
+    }
+
+    return this.issueSessionForUser(Number(user.id || 0), context);
+  }
+
+  private static generateUniqueUsername(seed: string): string {
+    const base = sanitizeUsernameSeed(seed);
+    const existing = getDB()
+      .prepare('SELECT username FROM users WHERE lower(username) = ? LIMIT 1');
+
+    if (!existing.get(base.toLowerCase())) {
+      return base;
+    }
+
+    for (let attempt = 1; attempt <= 9999; attempt += 1) {
+      const suffix = `_${attempt}`;
+      const candidate = `${base.slice(0, Math.max(3, 32 - suffix.length))}${suffix}`;
+      if (!existing.get(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+
+    return `${base.slice(0, 24)}_${crypto.randomBytes(3).toString('hex')}`.slice(0, 32);
+  }
+
+  private static issueSessionForUser(
+    userId: number,
+    context: { deviceName?: string; ipAddress?: string } = {},
+  ) {
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new Error('A valid user is required to create a session.');
+    }
+
     const sessionId = crypto.randomUUID();
     const expiresAt = createSessionExpiryIso();
     const refreshToken = createRefreshToken();
@@ -459,7 +599,7 @@ export class AuthService {
         INSERT INTO user_sessions (user_id, session_id, device_name, ip_address, refresh_token_hash, expires_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `)
-      .run(user.id, sessionId, safeDeviceName, safeIpAddress, refreshTokenHash, expiresAt);
+      .run(userId, sessionId, safeDeviceName, safeIpAddress, refreshTokenHash, expiresAt);
 
     const activeSessions = getDB()
       .prepare(`
@@ -470,7 +610,7 @@ export class AuthService {
           AND datetime(expires_at) > datetime('now')
         ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
       `)
-      .all(user.id) as Array<{ session_id: string }>;
+      .all(userId) as Array<{ session_id: string }>;
 
     const overflow = activeSessions.slice(MAX_ACTIVE_SESSIONS_PER_USER);
     let revokedSessionIds: string[] = [];
@@ -482,7 +622,7 @@ export class AuthService {
           SET revoked_at = CURRENT_TIMESTAMP, refresh_token_hash = NULL
           WHERE user_id = ? AND session_id IN (${placeholders}) AND revoked_at IS NULL
         `)
-        .run(user.id, ...overflow.map((row) => row.session_id));
+        .run(userId, ...overflow.map((row) => row.session_id));
       if (revokeResult.changes > 0) {
         revokedSessionIds = overflow.map((row) => row.session_id);
         getDB()
@@ -491,10 +631,10 @@ export class AuthService {
       }
     }
 
-    const token = createAccessToken(user.id, sessionId);
+    const token = createAccessToken(userId, sessionId);
 
     return {
-      userId: user.id,
+      userId,
       token,
       refreshToken,
       sessionId,

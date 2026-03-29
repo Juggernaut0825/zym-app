@@ -71,7 +71,7 @@ async function looksLikeUserDataDir(dirPath: string): Promise<boolean> {
   const markers = [
     'profile.json',
     'daily.json',
-    path.join('context', 'session.json'),
+    path.join('context', 'sessions', 'default.json'),
     path.join('media', 'index.json'),
     'analyses',
   ];
