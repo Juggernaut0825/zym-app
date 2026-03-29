@@ -11,21 +11,41 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
   exit 1
 fi
 
-aws s3 cp "$SOURCE_DIR/admin.html" "s3://${BUCKET_NAME}/admin.html" \
-  --region "$AWS_REGION" \
-  --cache-control "no-cache, no-store, must-revalidate"
+declare -a invalidation_paths=()
 
-aws s3 cp "$SOURCE_DIR/admin.css" "s3://${BUCKET_NAME}/admin.css" \
-  --region "$AWS_REGION" \
-  --cache-control "no-cache, no-store, must-revalidate"
+upload_file() {
+  local filename="$1"
+  local cache_control="$2"
+  local source_path="${SOURCE_DIR}/${filename}"
 
-aws s3 cp "$SOURCE_DIR/admin.js" "s3://${BUCKET_NAME}/admin.js" \
-  --region "$AWS_REGION" \
-  --cache-control "no-cache, no-store, must-revalidate"
+  if [[ ! -f "$source_path" ]]; then
+    return
+  fi
 
-aws cloudfront create-invalidation \
-  --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
-  --paths "/admin.html" "/admin.css" "/admin.js" \
-  --region "$AWS_REGION" >/dev/null
+  aws s3 cp "$source_path" "s3://${BUCKET_NAME}/${filename}" \
+    --region "$AWS_REGION" \
+    --cache-control "$cache_control"
 
-echo "Admin site deployed to https://zym8.com/admin.html"
+  invalidation_paths+=("/${filename}")
+}
+
+upload_file "admin.html" "no-cache, no-store, must-revalidate"
+upload_file "admin.css" "no-cache, no-store, must-revalidate"
+upload_file "admin.js" "no-cache, no-store, must-revalidate"
+upload_file "privacy.html" "no-cache, no-store, must-revalidate"
+upload_file "terms.html" "no-cache, no-store, must-revalidate"
+upload_file "legal.css" "no-cache, no-store, must-revalidate"
+upload_file "logo.svg" "public, max-age=31536000, immutable"
+upload_file "logo-120.png" "public, max-age=31536000, immutable"
+
+if [[ ${#invalidation_paths[@]} -gt 0 ]]; then
+  aws cloudfront create-invalidation \
+    --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+    --paths "${invalidation_paths[@]}" \
+    --region "$AWS_REGION" >/dev/null
+fi
+
+echo "Static site deployed:"
+for path in "${invalidation_paths[@]}"; do
+  echo "  https://zym8.com${path}"
+done
