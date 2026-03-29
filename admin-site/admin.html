@@ -6,34 +6,26 @@
     <title>ZYM Admin</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL,GRAD,opsz@300,0,0,24&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./admin.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">ZYM Control</p>
-          <h1>Admin dashboard for growth, ops, and AI usage.</h1>
-          <p class="hero-copy">
-            This page combines user growth, product activity, and OpenRouter telemetry in one place.
-            Local AI usage tracking starts from this deployment forward, while user activity metrics are historical.
-          </p>
-        </div>
-        <div class="hero-badge">
-          <span id="admin-status-pill">Checking admin config...</span>
-        </div>
-      </header>
-
-      <section id="error-banner" class="error-banner hidden"></section>
-
-      <section id="login-panel" class="panel login-panel">
-        <div class="panel-head">
+    <section id="login-panel" class="auth-shell">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <img src="./logo.svg" alt="ZYM logo" />
           <div>
-            <p class="section-kicker">Secure entry</p>
-            <h2>Admin sign-in</h2>
+            <p class="eyebrow">ZYM Control</p>
+            <h1>Admin sign-in</h1>
           </div>
         </div>
+        <p class="auth-copy">
+          Review user growth, OpenRouter usage, moderation signals, and account activity from one internal workspace.
+        </p>
+        <section id="error-banner" class="error-banner hidden"></section>
         <form id="login-form" class="login-form">
           <label>
             <span>Username</span>
@@ -43,89 +35,243 @@
             <span>Password</span>
             <input id="password-input" type="password" autocomplete="current-password" placeholder="Enter admin password" />
           </label>
-          <button type="submit" id="login-button">Enter dashboard</button>
+          <button type="submit" id="login-button">Enter admin</button>
         </form>
+      </div>
+    </section>
+
+    <main id="dashboard" class="dashboard-shell hidden">
+      <aside class="sidebar">
+        <a class="sidebar-brand" href="https://app.zym8.com/" target="_blank" rel="noopener noreferrer">
+          <img src="./logo.svg" alt="ZYM logo" />
+          <div>
+            <strong>ZYM Admin</strong>
+            <small>Internal control room</small>
+          </div>
+        </a>
+
+        <section class="sidebar-session">
+          <p class="eyebrow">Session</p>
+          <div class="session-row">
+            <div class="session-avatar">A</div>
+            <div>
+              <strong id="sidebar-admin-name">admin</strong>
+              <small>Authenticated admin session</small>
+            </div>
+          </div>
+        </section>
+
+        <nav class="sidebar-nav" aria-label="Admin sections">
+          <button type="button" class="nav-item is-active" data-tab="overview">
+            <span class="nav-item-copy">
+              <span class="material-symbols-outlined">dashboard</span>
+              <span>Overview</span>
+            </span>
+            <span class="nav-badge" id="nav-overview-count">—</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="ai-usage">
+            <span class="nav-item-copy">
+              <span class="material-symbols-outlined">neurology</span>
+              <span>AI usage</span>
+            </span>
+            <span class="nav-badge" id="nav-ai-count">—</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="warnings">
+            <span class="nav-item-copy">
+              <span class="material-symbols-outlined">warning</span>
+              <span>Recent warnings</span>
+            </span>
+            <span class="nav-badge" id="nav-warning-count">—</span>
+          </button>
+          <button type="button" class="nav-item" data-tab="users">
+            <span class="nav-item-copy">
+              <span class="material-symbols-outlined">group</span>
+              <span>Users</span>
+            </span>
+            <span class="nav-badge" id="nav-user-count">—</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-note">
+          <p class="eyebrow">Scope</p>
+          <p>Everything here reads from the live production API and current OpenRouter telemetry.</p>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="workspace-header">
+          <div>
+            <p id="workspace-kicker" class="eyebrow">Overview</p>
+            <h1 id="workspace-title">Platform overview</h1>
+            <p id="workspace-subtitle" class="workspace-subtitle">
+              User growth, engagement, moderation pulse, and the latest operational signals.
+            </p>
+          </div>
+          <div class="workspace-actions">
+            <span id="admin-status-pill" class="status-pill">Checking admin config...</span>
+            <button id="refresh-button" class="toolbar-button" type="button">Refresh</button>
+            <button id="logout-button" class="toolbar-button danger" type="button">Log out</button>
+          </div>
+        </header>
+
+        <section data-panel="overview" class="tab-panel is-active">
+          <section class="surface-panel">
+            <div class="section-head">
+              <div>
+                <h2>Snapshot</h2>
+                <p>Core platform totals that matter most day to day.</p>
+              </div>
+            </div>
+            <div id="stats-grid" class="metric-grid"></div>
+            <div id="overview-pulse" class="info-grid info-grid--compact"></div>
+          </section>
+
+          <div class="panel-grid panel-grid--two">
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Recent users</h2>
+                  <p>Newest accounts and coach selections.</p>
+                </div>
+              </div>
+              <div id="recent-users" class="data-list"></div>
+            </section>
+
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Recent reports</h2>
+                  <p>Latest moderation and abuse report activity.</p>
+                </div>
+              </div>
+              <div id="recent-reports" class="data-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section data-panel="ai-usage" class="tab-panel">
+          <section class="surface-panel">
+            <div class="section-head">
+              <div>
+                <h2>AI summary</h2>
+                <p>OpenRouter live usage plus local tracking captured by the app.</p>
+              </div>
+            </div>
+            <div id="ai-highlights" class="metric-grid"></div>
+          </section>
+
+          <div class="panel-grid panel-grid--two">
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Live OpenRouter status</h2>
+                  <p>Direct provider totals from the configured key and credits endpoints.</p>
+                </div>
+              </div>
+              <div id="openrouter-live" class="info-grid"></div>
+            </section>
+
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Tracked local telemetry</h2>
+                  <p>Usage events recorded by ZYM itself since local telemetry was enabled.</p>
+                </div>
+              </div>
+              <div id="openrouter-local" class="info-grid"></div>
+            </section>
+          </div>
+
+          <div class="panel-grid panel-grid--two">
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Top sources</h2>
+                  <p>Which product surfaces are using the most AI calls.</p>
+                </div>
+              </div>
+              <div id="openrouter-sources" class="data-list"></div>
+            </section>
+
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Top models</h2>
+                  <p>Model distribution from tracked successful requests.</p>
+                </div>
+              </div>
+              <div id="openrouter-models" class="data-list"></div>
+            </section>
+          </div>
+
+          <section class="surface-panel">
+            <div class="section-head">
+              <div>
+                <h2>Provider warnings</h2>
+                <p>Fallbacks or warnings returned while reading live OpenRouter telemetry.</p>
+              </div>
+            </div>
+            <div id="openrouter-provider-warnings" class="data-list"></div>
+          </section>
+        </section>
+
+        <section data-panel="warnings" class="tab-panel">
+          <section class="surface-panel">
+            <div class="section-head">
+              <div>
+                <h2>Security summary</h2>
+                <p>Warnings, reports, and live operational pressure points.</p>
+              </div>
+            </div>
+            <div id="warnings-highlights" class="metric-grid"></div>
+          </section>
+
+          <div class="panel-grid panel-grid--two">
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Recent warning events</h2>
+                  <p>Latest security and abuse-related events from production.</p>
+                </div>
+              </div>
+              <div id="recent-warnings" class="data-list"></div>
+            </section>
+
+            <section class="surface-panel">
+              <div class="section-head">
+                <div>
+                  <h2>Open reports</h2>
+                  <p>Recent reports that may need manual review.</p>
+                </div>
+              </div>
+              <div id="warnings-reports" class="data-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section data-panel="users" class="tab-panel">
+          <section class="surface-panel">
+            <div class="section-head section-head--stack-mobile">
+              <div>
+                <h2>User directory</h2>
+                <p>Search usernames or emails, then inspect engagement and AI usage in one table.</p>
+              </div>
+              <div class="search-row">
+                <input id="search-input" type="search" placeholder="Search username or email" />
+                <select id="limit-select">
+                  <option value="100">100 users</option>
+                  <option value="250">250 users</option>
+                  <option value="500" selected>500 users</option>
+                  <option value="1000">1000 users</option>
+                </select>
+              </div>
+            </div>
+            <div id="users-summary" class="section-note"></div>
+            <div id="users-table-wrap" class="table-wrap"></div>
+          </section>
+        </section>
       </section>
-
-      <main id="dashboard" class="dashboard hidden">
-        <section class="panel">
-          <div class="panel-head split">
-            <div>
-              <p class="section-kicker">Snapshot</p>
-              <h2>Platform overview</h2>
-            </div>
-            <div class="toolbar">
-              <button id="refresh-button" class="ghost-button" type="button">Refresh</button>
-              <button id="logout-button" class="ghost-button danger" type="button">Log out</button>
-            </div>
-          </div>
-          <div id="stats-grid" class="stats-grid"></div>
-        </section>
-
-        <section class="two-column">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">OpenRouter</p>
-                <h2>AI usage</h2>
-              </div>
-            </div>
-            <div id="openrouter-summary" class="stack"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Pulse</p>
-                <h2>Recent users</h2>
-              </div>
-            </div>
-            <div id="recent-users" class="stack"></div>
-          </section>
-        </section>
-
-        <section class="two-column">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Security</p>
-                <h2>Recent warnings</h2>
-              </div>
-            </div>
-            <div id="recent-warnings" class="stack"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Moderation</p>
-                <h2>Recent reports</h2>
-              </div>
-            </div>
-            <div id="recent-reports" class="stack"></div>
-          </section>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head split">
-            <div>
-              <p class="section-kicker">Users</p>
-              <h2>User directory + usage</h2>
-            </div>
-            <div class="search-row">
-              <input id="search-input" type="search" placeholder="Search username or email" />
-              <select id="limit-select">
-                <option value="100">100 users</option>
-                <option value="250">250 users</option>
-                <option value="500" selected>500 users</option>
-                <option value="1000">1000 users</option>
-              </select>
-            </div>
-          </div>
-          <div id="users-table-wrap" class="table-wrap"></div>
-        </section>
-      </main>
-    </div>
+    </main>
 
     <script src="./admin.js" defer></script>
   </body>
