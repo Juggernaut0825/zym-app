@@ -12,11 +12,13 @@ function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [googleConsentAccepted, setGoogleConsentAccepted] = useState(false);
+  const [googleConsentWarning, setGoogleConsentWarning] = useState('');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const googleConsentAcceptedRef = useRef(false);
 
   const routeAfterLogin = (selectedCoach: 'zj' | 'lc' | null) => {
     router.push(selectedCoach ? '/app' : '/coach-select');
@@ -30,12 +32,23 @@ function LoginScreen() {
   }, [searchParams]);
 
   useEffect(() => {
+    googleConsentAcceptedRef.current = googleConsentAccepted;
+    if (googleConsentAccepted) {
+      setGoogleConsentWarning('');
+    }
+  }, [googleConsentAccepted]);
+
+  useEffect(() => {
     if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
 
     let cancelled = false;
     const container = googleButtonRef.current;
 
     const handleGoogleCredential = async (credential: string) => {
+      if (!googleConsentAcceptedRef.current) {
+        setGoogleConsentWarning('Please confirm Terms and Privacy before continuing with Google.');
+        return;
+      }
       if (!credential) {
         setError('Google sign-in did not return a credential.');
         return;
@@ -45,7 +58,7 @@ function LoginScreen() {
         setPending(true);
         setError('');
         const auth = await loginWithGoogle(credential, {
-          healthDisclaimerAccepted: googleConsentAccepted,
+          healthDisclaimerAccepted: googleConsentAcceptedRef.current,
           consentVersion: HEALTH_DISCLAIMER_VERSION,
         });
         setAuth(auth);
@@ -101,7 +114,7 @@ function LoginScreen() {
       cancelled = true;
       container.innerHTML = '';
     };
-  }, [googleConsentAccepted, router]);
+  }, [router]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -212,14 +225,34 @@ function LoginScreen() {
                     onChange={(event) => setGoogleConsentAccepted(event.target.checked)}
                   />
                   <span>
-                    I understand ZYM AI Coach is not medical advice. If I have injuries, chest pain, severe pain, dizziness, or urgent symptoms, I should stop and seek professional care.
+                    I understand the{' '}
+                    <a href="https://zym8.com/terms.html" target="_blank" rel="noreferrer" className="font-semibold text-[color:var(--coach-zj)] transition hover:underline">
+                      Terms
+                    </a>
+                    {' '}and{' '}
+                    <a href="https://zym8.com/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-[color:var(--coach-zj)] transition hover:underline">
+                      Privacy Policy
+                    </a>
+                    .
                   </span>
                 </label>
-                {googleConsentAccepted ? (
-                  <div ref={googleButtonRef} className={pending ? 'pointer-events-none opacity-60' : ''} />
-                ) : (
-                  <p className="text-xs text-[color:var(--ink-300)]">Confirm the health disclaimer above to continue with Google.</p>
-                )}
+                <div className={`relative ${pending ? 'pointer-events-none opacity-60' : ''}`}>
+                  <div
+                    ref={googleButtonRef}
+                    className={!googleConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}
+                  />
+                  {!googleConsentAccepted ? (
+                    <button
+                      type="button"
+                      className="absolute inset-0 z-10 cursor-not-allowed rounded-full"
+                      aria-label="Confirm Terms and Privacy before continuing with Google"
+                      onClick={() => setGoogleConsentWarning('Please confirm Terms and Privacy before continuing with Google.')}
+                    />
+                  ) : null}
+                </div>
+                {googleConsentWarning ? (
+                  <p className="text-xs font-medium text-[color:var(--danger)]">{googleConsentWarning}</p>
+                ) : null}
               </div>
             ) : null}
           </form>

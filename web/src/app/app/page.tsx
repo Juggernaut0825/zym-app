@@ -10,6 +10,7 @@ import {
   createGroup,
   createPostComment,
   createPost,
+  deletePost,
   deleteAccount,
   createAbuseReport,
   getAuthSessions,
@@ -42,6 +43,7 @@ import {
   selectCoach,
   sendMessage,
   syncHealth,
+  updatePostVisibility,
   updateProfile,
   uploadFile,
 } from '@/lib/api';
@@ -119,6 +121,13 @@ interface AbuseReportDraft {
   reason: string;
   details: string;
   title: string;
+  pending: boolean;
+}
+
+interface PostActionDialogState {
+  open: boolean;
+  mode: 'delete' | 'visibility';
+  post: FeedPost | null;
   pending: boolean;
 }
 
@@ -630,6 +639,13 @@ export default function AppPage() {
   const [postFilePreviews, setPostFilePreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
   const [postPending, setPostPending] = useState(false);
   const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
+  const [postMenuOpenId, setPostMenuOpenId] = useState<number | null>(null);
+  const [postActionDialog, setPostActionDialog] = useState<PostActionDialogState>({
+    open: false,
+    mode: 'delete',
+    post: null,
+    pending: false,
+  });
   const [postCommentsById, setPostCommentsById] = useState<Record<number, FeedComment[]>>({});
   const [expandedCommentPostIds, setExpandedCommentPostIds] = useState<number[]>([]);
   const [commentDraftByPostId, setCommentDraftByPostId] = useState<Record<number, string>>({});
@@ -694,6 +710,7 @@ export default function AppPage() {
   const reauthTriggeredRef = useRef(false);
   const friendsRef = useRef<Friend[]>([]);
   const selectedCoachRef = useRef<'zj' | 'lc'>('zj');
+  const postMenuRef = useRef<HTMLDivElement | null>(null);
 
   const typingTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -750,6 +767,29 @@ export default function AppPage() {
       return haystack.includes(query);
     });
   }, [communityQuery, feed]);
+
+  useEffect(() => {
+    if (postMenuOpenId === null) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!postMenuRef.current?.contains(event.target as Node)) {
+        setPostMenuOpenId(null);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPostMenuOpenId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [postMenuOpenId]);
 
   const filteredLeaderboard = useMemo(() => {
     const query = leaderboardQuery.trim().toLowerCase();
@@ -2360,6 +2400,67 @@ export default function AppPage() {
     }
   }
 
+  function openPostVisibilityDialog(post: FeedPost) {
+    setPostMenuOpenId(null);
+    setPostActionDialog({
+      open: true,
+      mode: 'visibility',
+      post,
+      pending: false,
+    });
+  }
+
+  function openPostDeleteDialog(post: FeedPost) {
+    setPostMenuOpenId(null);
+    setPostActionDialog({
+      open: true,
+      mode: 'delete',
+      post,
+      pending: false,
+    });
+  }
+
+  async function submitPostActionDialog() {
+    if (!postActionDialog.post) return;
+
+    const post = postActionDialog.post;
+    const nextVisibility = post.visibility === 'public' ? 'friends' : 'public';
+
+    try {
+      setPostActionDialog((prev) => ({ ...prev, pending: true }));
+
+      if (postActionDialog.mode === 'delete') {
+        await deletePost({ userId: authUserId, postId: post.id });
+        setExpandedPostIds((prev) => prev.filter((id) => id !== post.id));
+        setExpandedCommentPostIds((prev) => prev.filter((id) => id !== post.id));
+        setPostCommentsById((prev) => {
+          const next = { ...prev };
+          delete next[post.id];
+          return next;
+        });
+        showNotice('Post deleted.');
+      } else {
+        await updatePostVisibility({
+          userId: authUserId,
+          postId: post.id,
+          visibility: nextVisibility,
+        });
+        showNotice(`Post scope changed to ${nextVisibility === 'public' ? 'public' : 'friends only'}.`);
+      }
+
+      setPostActionDialog({
+        open: false,
+        mode: 'delete',
+        post: null,
+        pending: false,
+      });
+      await loadFeed();
+    } catch (err: any) {
+      setError(err.message || (postActionDialog.mode === 'delete' ? 'Failed to delete post.' : 'Failed to update post scope.'));
+      setPostActionDialog((prev) => ({ ...prev, pending: false }));
+    }
+  }
+
   async function loadPostComments(postId: number) {
     try {
       setCommentLoadingPostIds((prev) => (prev.includes(postId) ? prev : [...prev, postId]));
@@ -3358,9 +3459,46 @@ export default function AppPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
                     </div>
                   </div>
-                  <button className="text-slate-400" type="button">
-                    <span className="material-symbols-outlined">more_horiz</span>
-                  </button>
+                  <div className="relative" ref={postMenuOpenId === post.id ? postMenuRef : null}>
+                    <button
+                      className="rounded-full p-1 text-slate-400 transition hover:bg-white/70 hover:text-slate-600"
+                      type="button"
+                      aria-label="Open post actions"
+                      onClick={() => setPostMenuOpenId((current) => (current === post.id ? null : post.id))}
+                    >
+                      <span className="material-symbols-outlined">more_horiz</span>
+                    </button>
+                    {postMenuOpenId === post.id ? (
+                      <div className="absolute right-0 top-[calc(100%+10px)] z-20 min-w-[220px] rounded-[22px] border border-white/80 bg-white/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
+                        {post.user_id === authUserId ? (
+                          <>
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                              onClick={() => openPostVisibilityDialog(post)}
+                            >
+                              <span>Change scope</span>
+                              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                {post.visibility === 'public' ? 'To friends' : 'To public'}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-[color:var(--danger)] transition hover:bg-[rgba(239,68,68,0.06)]"
+                              onClick={() => openPostDeleteDialog(post)}
+                            >
+                              <span>Delete</span>
+                              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                            </button>
+                          </>
+                        ) : (
+                          <div className="px-3 py-2 text-sm leading-6 text-slate-500">
+                            Only the author can change scope or delete this post.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 </header>
 
                 {post.content ? (
@@ -4433,6 +4571,69 @@ export default function AppPage() {
               </button>
               <button className="btn btn-danger-soft" type="button" onClick={() => void handleDeleteAccount()} disabled={deleteAccountPending}>
                 {deleteAccountPending ? 'Deleting...' : 'Delete account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {postActionDialog.open && postActionDialog.post ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-center bg-[rgba(241,245,249,0.76)] px-4 backdrop-blur-md"
+          onClick={() => !postActionDialog.pending && setPostActionDialog({ open: false, mode: 'delete', post: null, pending: false })}
+        >
+          <div
+            className="w-full max-w-[520px] rounded-[30px] border border-white/80 bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.18)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[1.55rem] font-semibold tracking-tight text-slate-900">
+                  {postActionDialog.mode === 'delete' ? 'Delete post' : 'Change post scope'}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  {postActionDialog.mode === 'delete'
+                    ? 'Do you want to delete this post? This cannot be undone.'
+                    : `Do you want to change this post from ${postActionDialog.post.visibility === 'public' ? 'public' : 'friends only'} to ${postActionDialog.post.visibility === 'public' ? 'friends only' : 'public'}?`}
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                type="button"
+                onClick={() => setPostActionDialog({ open: false, mode: 'delete', post: null, pending: false })}
+                disabled={postActionDialog.pending}
+                aria-label="Close post action dialog"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-[22px] border border-slate-200/70 bg-slate-50/90 px-4 py-3 text-sm leading-6 text-slate-600">
+              {postActionDialog.mode === 'delete'
+                ? 'The post content, media visibility, and feed entry will be removed from the community view.'
+                : 'Friends only means only accepted friends can see it. Public means everyone in the community feed can see it.'}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setPostActionDialog({ open: false, mode: 'delete', post: null, pending: false })}
+                disabled={postActionDialog.pending}
+              >
+                Cancel
+              </button>
+              <button
+                className={postActionDialog.mode === 'delete' ? 'btn btn-danger-soft' : selectedCoachButtonClass}
+                type="button"
+                onClick={() => void submitPostActionDialog()}
+                disabled={postActionDialog.pending}
+              >
+                {postActionDialog.pending
+                  ? (postActionDialog.mode === 'delete' ? 'Deleting...' : 'Updating...')
+                  : (postActionDialog.mode === 'delete'
+                    ? 'Delete post'
+                    : `Change to ${postActionDialog.post.visibility === 'public' ? 'friends only' : 'public'}`)}
               </button>
             </div>
           </div>

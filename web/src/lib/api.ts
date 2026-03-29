@@ -530,6 +530,27 @@ export async function createPost(payload: {
   });
 }
 
+export async function updatePostVisibility(payload: {
+  userId: number;
+  postId: number;
+  visibility: PostVisibility;
+}): Promise<void> {
+  await request('/community/post/visibility', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deletePost(payload: {
+  userId: number;
+  postId: number;
+}): Promise<void> {
+  await request('/community/post/delete', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function reactToPost(postId: number, userId: number, reactionType = 'like'): Promise<void> {
   await request('/community/react', {
     method: 'POST',

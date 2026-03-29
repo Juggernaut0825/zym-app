@@ -765,6 +765,61 @@ export class MediaAssetService {
     }
   }
 
+  syncPostAssetVisibility(
+    ownerUserId: number,
+    postId: number,
+    visibility: MediaAssetVisibility = 'friends',
+  ): void {
+    const rows = getDB()
+      .prepare(`
+        SELECT media_asset_id
+        FROM media_asset_attachments
+        WHERE owner_user_id = ?
+          AND entity_type = 'post'
+          AND entity_id = ?
+      `)
+      .all(ownerUserId, postId) as Array<{ media_asset_id?: string }>;
+
+    for (const row of rows) {
+      const assetId = safeString(row.media_asset_id, 80);
+      if (!assetId) continue;
+      const asset = this.getById(assetId);
+      if (!asset || asset.ownerUserId !== ownerUserId) continue;
+      if (asset.visibility !== visibility) {
+        this.setAssetVisibility(asset.id, visibility);
+      }
+    }
+  }
+
+  async deletePostAssets(ownerUserId: number, postId: number): Promise<void> {
+    const rows = getDB()
+      .prepare(`
+        SELECT media_asset_id
+        FROM media_asset_attachments
+        WHERE owner_user_id = ?
+          AND entity_type = 'post'
+          AND entity_id = ?
+      `)
+      .all(ownerUserId, postId) as Array<{ media_asset_id?: string }>;
+
+    getDB()
+      .prepare(`
+        DELETE FROM media_asset_attachments
+        WHERE owner_user_id = ?
+          AND entity_type = 'post'
+          AND entity_id = ?
+      `)
+      .run(ownerUserId, postId);
+
+    for (const row of rows) {
+      const assetId = safeString(row.media_asset_id, 80);
+      if (!assetId) continue;
+      const asset = this.getById(assetId);
+      if (!asset || asset.ownerUserId !== ownerUserId) continue;
+      await this.markDeleted(asset.id);
+    }
+  }
+
   async attachUserAsset(
     assetId: string | null,
     ownerUserId: number,

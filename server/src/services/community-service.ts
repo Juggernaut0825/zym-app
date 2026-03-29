@@ -91,6 +91,55 @@ export class CommunityService {
       }));
   }
 
+  static getPostById(postId: number) {
+    return getDB()
+      .prepare('SELECT id, user_id, visibility FROM posts WHERE id = ?')
+      .get(postId) as { id?: number; user_id?: number; visibility?: string } | undefined;
+  }
+
+  static updatePostVisibility(postId: number, userId: number, visibility: 'private' | 'friends' | 'public') {
+    const post = this.getPostById(postId);
+    if (!post?.id) {
+      throw new Error('Post not found.');
+    }
+    if (Number(post.user_id) !== userId) {
+      throw new Error('You can only update your own posts.');
+    }
+
+    getDB()
+      .prepare('UPDATE posts SET visibility = ? WHERE id = ?')
+      .run(visibility, postId);
+  }
+
+  static deletePost(postId: number, userId: number) {
+    const post = this.getPostById(postId);
+    if (!post?.id) {
+      throw new Error('Post not found.');
+    }
+    if (Number(post.user_id) !== userId) {
+      throw new Error('You can only delete your own posts.');
+    }
+
+    const commentIds = getDB()
+      .prepare('SELECT id FROM post_comments WHERE post_id = ?')
+      .all(postId) as Array<{ id?: number }>;
+
+    getDB().prepare('DELETE FROM post_reactions WHERE post_id = ?').run(postId);
+    getDB().prepare('DELETE FROM post_comments WHERE post_id = ?').run(postId);
+
+    if (commentIds.length > 0) {
+      const deleteMentionByCommentId = getDB()
+        .prepare('DELETE FROM mention_notifications WHERE source_type = ? AND source_id = ?');
+      for (const comment of commentIds) {
+        if (comment.id) {
+          deleteMentionByCommentId.run('post_comment', Number(comment.id));
+        }
+      }
+    }
+
+    getDB().prepare('DELETE FROM posts WHERE id = ?').run(postId);
+  }
+
   static canAccessPost(viewerUserId: number, postId: number): boolean {
     const post = getDB()
       .prepare('SELECT user_id, visibility FROM posts WHERE id = ?')

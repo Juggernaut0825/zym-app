@@ -1915,6 +1915,46 @@ app.post('/community/post',
   }
 });
 
+app.post('/community/post/visibility',
+  APIGateway.rateLimit(120, 10 * 60_000, 'community-post-visibility'),
+  requireSameUserIdFromBody('userId'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    postId: { required: true, type: 'number', integer: true, min: 1 },
+    visibility: { required: true, type: 'string', minLength: 1, maxLength: 20 },
+  }),
+  async (req, res) => {
+  try {
+    const userId = toUserId(req.body.userId);
+    const postId = toUserId(req.body.postId);
+    const visibility = normalizePostVisibility(req.body.visibility, 'friends');
+    CommunityService.updatePostVisibility(postId, userId, visibility);
+    mediaAssetService.syncPostAssetVisibility(userId, postId, visibility);
+    res.json({ success: true, visibility });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to update post visibility.' });
+  }
+});
+
+app.post('/community/post/delete',
+  APIGateway.rateLimit(80, 10 * 60_000, 'community-post-delete'),
+  requireSameUserIdFromBody('userId'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    postId: { required: true, type: 'number', integer: true, min: 1 },
+  }),
+  async (req, res) => {
+  try {
+    const userId = toUserId(req.body.userId);
+    const postId = toUserId(req.body.postId);
+    await mediaAssetService.deletePostAssets(userId, postId);
+    CommunityService.deletePost(postId, userId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to delete post.' });
+  }
+});
+
 app.post('/community/react',
   APIGateway.rateLimit(200, 10 * 60_000, 'community-react'),
   requireSameUserIdFromBody('userId'),
