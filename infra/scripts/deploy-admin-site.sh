@@ -32,11 +32,7 @@ upload_file() {
 upload_file "admin.html" "no-cache, no-store, must-revalidate"
 upload_file "admin.css" "no-cache, no-store, must-revalidate"
 upload_file "admin.js" "no-cache, no-store, must-revalidate"
-upload_file "privacy.html" "no-cache, no-store, must-revalidate"
-upload_file "terms.html" "no-cache, no-store, must-revalidate"
-upload_file "legal.css" "no-cache, no-store, must-revalidate"
 upload_file "logo.svg" "public, max-age=31536000, immutable"
-upload_file "logo-120.png" "public, max-age=31536000, immutable"
 
 if [[ ${#invalidation_paths[@]} -gt 0 ]]; then
   aws cloudfront create-invalidation \
