@@ -21,8 +21,8 @@ function VerifyEmailScreen() {
   );
   const [error, setError] = useState('');
 
-  const postVerifyUrl = redirect === 'welcome'
-    ? `/login?email=${encodeURIComponent(email)}&next=welcome`
+  const postVerifyUrl = redirect === 'app'
+    ? `/login?email=${encodeURIComponent(email)}&next=app`
     : '/login';
 
   useEffect(() => {
@@ -94,7 +94,7 @@ function VerifyEmailScreen() {
         {verified && (
           <div className="mt-6 grid gap-3">
             <button className="btn btn-primary text-sm" type="button" onClick={() => router.push(postVerifyUrl)}>
-              {redirect === 'welcome' ? 'Sign in to finish setup' : 'Back to login'}
+              {redirect === 'app' ? 'Sign in to continue' : 'Back to login'}
             </button>
           </div>
         )}

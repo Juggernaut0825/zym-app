@@ -308,6 +308,7 @@ export interface CoachTrainingRecord {
 
 export interface CoachTrainingPlanExercise {
   id: string;
+  exercise_key?: string;
   order: number;
   name: string;
   sets: number;

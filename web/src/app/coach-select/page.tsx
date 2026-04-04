@@ -13,7 +13,7 @@ export default function CoachSelectPage() {
       router.replace('/login');
       return;
     }
-    router.replace(auth.selectedCoach ? '/app' : '/welcome');
+    router.replace('/app');
   }, [router]);
 
   return (

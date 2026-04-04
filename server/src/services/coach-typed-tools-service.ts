@@ -9,6 +9,11 @@ import { SessionStore } from '../context/session-store.js';
 import { MediaAssetService, type MediaAssetRecord } from './media-asset-service.js';
 import { knowledgeService } from './knowledge-service.js';
 import { OpenRouterUsageContext, OpenRouterUsageService } from './openrouter-usage-service.js';
+import {
+  getExerciseLibraryEntry,
+  resolveExerciseLibraryEntry,
+  searchExerciseLibrary as searchExerciseLibraryEntries,
+} from './exercise-library-service.js';
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
@@ -42,6 +47,7 @@ interface MealEstimateResult {
 
 interface TrainingPlanExercise {
   id: string;
+  exercise_key?: string;
   order: number;
   name: string;
   sets: number;
@@ -392,6 +398,19 @@ function buildYouTubeThumbnailUrl(raw: string): string {
   return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : '';
 }
 
+function isImageLikeUrl(raw: string): boolean {
+  return /\.(?:png|jpe?g|webp|gif)(?:\?|#|$)/i.test(String(raw || '').trim());
+}
+
+function buildDemoThumbnailUrl(raw: string, fallback?: string): string {
+  const value = safeString(raw, 1000);
+  if (!value) return safeString(fallback, 1000);
+  const youtubeThumb = buildYouTubeThumbnailUrl(value);
+  if (youtubeThumb) return youtubeThumb;
+  if (isImageLikeUrl(value)) return value;
+  return safeString(fallback, 1000);
+}
+
 function getLocalDateTimeParts(date: Date, timeZone: string): { day: string; time: string } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -646,6 +665,7 @@ export class CoachTypedToolsService {
           : {};
         return {
           id: safeString(item.id, 120) || createTrainingPlanExerciseId(day),
+          exercise_key: safeString(item.exercise_key, 120) || undefined,
           order: clampInt(item.order, 1, 20, index + 1),
           name: safeString(item.name, 120) || `Exercise ${index + 1}`,
           sets: clampInt(item.sets, 1, 20, 3),
@@ -687,28 +707,65 @@ export class CoachTypedToolsService {
     return safeString(row?.selected_coach, 10) === 'lc' ? 'lc' : 'zj';
   }
 
+  private async hydrateTrainingPlanEntry(
+    userId: string,
+    day: string,
+    entry: TrainingPlanEntry,
+    plans?: TrainingPlanIndex,
+  ): Promise<TrainingPlanEntry> {
+    const exercises = await Promise.all(entry.exercises.map((exercise) => this.hydrateTrainingExerciseDemo(exercise)));
+    const changed = exercises.some((exercise, index) => JSON.stringify(exercise) !== JSON.stringify(entry.exercises[index]));
+    if (!changed) {
+      return entry;
+    }
+
+    const next = {
+      ...entry,
+      exercises,
+    };
+
+    if (plans) {
+      plans[day] = next;
+      await this.writeTrainingPlanIndex(userId, plans);
+    }
+
+    return next;
+  }
+
   private async hydrateTrainingExerciseDemo(input: TrainingPlanExercise): Promise<TrainingPlanExercise> {
-    if (input.demo_url) {
+    const keyedEntry = input.exercise_key ? getExerciseLibraryEntry(input.exercise_key) : null;
+    const matchedEntry = keyedEntry || resolveExerciseLibraryEntry(input.name);
+    const base: TrainingPlanExercise = matchedEntry
+      ? {
+          ...input,
+          exercise_key: matchedEntry.key,
+          name: matchedEntry.name,
+          demo_url: input.demo_url || matchedEntry.demoUrl,
+          demo_thumbnail: input.demo_thumbnail || matchedEntry.thumbnailUrl,
+        }
+      : input;
+
+    if (base.demo_url) {
       return {
-        ...input,
-        demo_thumbnail: input.demo_thumbnail || buildYouTubeThumbnailUrl(input.demo_url),
+        ...base,
+        demo_thumbnail: buildDemoThumbnailUrl(base.demo_url, base.demo_thumbnail),
       };
     }
 
     try {
       const result = await this.searchExerciseVideos({
-        query: input.name,
+        query: base.name,
         maxResults: 1,
       });
       const first = Array.isArray(result.results) ? result.results[0] as Record<string, unknown> | undefined : undefined;
       const url = safeString(first?.url, 1000);
       return {
-        ...input,
+        ...base,
         demo_url: url || undefined,
-        demo_thumbnail: url ? buildYouTubeThumbnailUrl(url) : undefined,
+        demo_thumbnail: buildDemoThumbnailUrl(url, base.demo_thumbnail),
       };
     } catch {
-      return input;
+      return base;
     }
   }
 
@@ -775,10 +832,13 @@ export class CoachTypedToolsService {
         }
       : await this.resolveLogStamp(userId, { timezone: input.timezone });
     const plans = await this.readTrainingPlanIndex(userId);
+    const plan = plans[stamp.day]
+      ? await this.hydrateTrainingPlanEntry(userId, stamp.day, plans[stamp.day], plans)
+      : null;
     return {
       day: stamp.day,
       timezone: stamp.timezone,
-      plan: plans[stamp.day] || null,
+      plan,
     };
   }
 
@@ -803,6 +863,7 @@ export class CoachTypedToolsService {
 
         acc.push({
           id: safeString(item.id, 120) || createTrainingPlanExerciseId(day),
+          exercise_key: safeString(item.exercise_key, 120) || undefined,
           order: clampInt(item.order, 1, 20, index + 1),
           name,
           sets: clampInt(item.sets, 1, 20, 3),
@@ -1518,6 +1579,35 @@ ${domainPrompt[domain]}`;
           ? `[${idx + 1}](${safeString(item.pdfUrl || item.referenceUrl, 500)})`
           : '',
         snippet: safeString(item.text, 1200),
+      })),
+    };
+  }
+
+  async searchExerciseLibrary(input: {
+    query: unknown;
+    limit?: unknown;
+  }): Promise<Record<string, unknown>> {
+    const query = safeString(input.query, 240);
+    if (!query) {
+      throw new Error('Query is required');
+    }
+
+    const limit = clampInt(input.limit, 1, 8, 5);
+    const matches = searchExerciseLibraryEntries(query, limit);
+    return {
+      query,
+      total: matches.length,
+      matches: matches.map((match, idx) => ({
+        rank: idx + 1,
+        exercise_key: match.entry.key,
+        name: match.entry.name,
+        group: match.entry.group,
+        equipment: match.entry.equipment,
+        aliases: match.entry.aliases,
+        score: Number(match.score.toFixed(4)),
+        thumbnailUrl: match.entry.thumbnailUrl,
+        demoUrl: match.entry.demoUrl,
+        imageUrls: match.entry.imageUrls,
       })),
     };
   }

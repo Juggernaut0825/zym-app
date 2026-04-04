@@ -42,7 +42,7 @@ export default function RegisterPage() {
         healthDisclaimerAccepted: true,
         consentVersion: HEALTH_DISCLAIMER_VERSION,
       });
-      router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}&sent=1&redirect=welcome`);
+      router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}&sent=1&redirect=app`);
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
     } finally {

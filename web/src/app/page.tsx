@@ -13,7 +13,7 @@ export default function HomePage() {
       router.replace('/login');
       return;
     }
-    router.replace(auth.selectedCoach ? '/app' : '/welcome');
+    router.replace('/app');
   }, [router]);
 
   return <div style={{ minHeight: '100vh' }} />;

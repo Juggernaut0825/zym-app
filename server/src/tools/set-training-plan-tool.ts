@@ -5,13 +5,13 @@ import { requireUserId, toJson } from './base-tool-helpers.js';
 export class SetTrainingPlanTool implements Tool {
   definition: ToolDefinition = {
     name: 'set_training_plan',
-    description: 'Create or replace a structured training plan for a day, including exercises, sets, reps, rest, and optional demo links.',
+    description: 'Create or replace a structured training plan for a day, including exercises, sets, reps, rest, and optional exercise_key values from the internal exercise library.',
     parameters: {
       type: 'object',
       properties: {
         plan: {
           type: 'object',
-          description: 'Training plan object with day, title, summary, and exercises.',
+          description: 'Training plan object with day, title, summary, and exercises. Each exercise may include exercise_key, name, sets, reps, rest_seconds, cue, notes, and optional demo URLs.',
         },
       },
       required: ['plan'],

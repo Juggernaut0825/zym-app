@@ -48,7 +48,7 @@ export class AuthEmailService {
     const verifyUrl = buildLink('/verify-email', {
       token,
       email: user.email,
-      redirect: 'coach-select',
+      redirect: 'app',
     });
     const safeName = escapeHtml(user.username || 'there');
 

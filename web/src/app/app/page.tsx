@@ -53,6 +53,7 @@ import { RealtimeClient } from '@/lib/realtime';
 import { ConversationTile } from '@/components/chat/ConversationTile';
 import { CoachWorkspacePanel, type CoachWorkspaceMode } from '@/components/chat/CoachWorkspacePanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
+import { WelcomeFlow } from '@/components/onboarding/WelcomeFlow';
 import {
   AppSocketEvent,
   ChatMessage,
@@ -451,6 +452,15 @@ function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
 
+function buildAppUrl(tab: TabKey = 'messages', welcomeState?: 'done'): string {
+  const params = new URLSearchParams();
+  params.set('tab', tab);
+  if (welcomeState) {
+    params.set('welcome', welcomeState);
+  }
+  return `/app?${params.toString()}`;
+}
+
 function createClientMessageId(): string {
   return `web_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -626,7 +636,9 @@ export default function AppPage() {
   const [isOnline, setIsOnline] = useState(true);
   const [authUserId, setAuthUserId] = useState<number>(0);
   const [authUsername, setAuthUsername] = useState('');
+  const [authSelectedCoach, setAuthSelectedCoach] = useState<'zj' | 'lc' | null>(null);
   const [selectedCoach, setSelectedCoach] = useState<'zj' | 'lc'>('zj');
+  const [welcomeFlowOpen, setWelcomeFlowOpen] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -1030,6 +1042,18 @@ export default function AppPage() {
     }, 2400);
   };
 
+  const handleWelcomeComplete = (coach: 'zj' | 'lc') => {
+    setAuthSelectedCoach(coach);
+    if (selectedCoachRef.current !== coach) {
+      window.location.replace(buildAppUrl(tab, 'done'));
+      return;
+    }
+    setSelectedCoach(coach);
+    selectedCoachRef.current = coach;
+    setWelcomeFlowOpen(false);
+    showNotice('Coach profile saved.');
+  };
+
   const forceReauth = (message = 'Session expired. Please sign in again.') => {
     if (reauthTriggeredRef.current) return;
     reauthTriggeredRef.current = true;
@@ -1057,7 +1081,7 @@ export default function AppPage() {
     }
 
     setNotice(message);
-      window.location.replace(auth.selectedCoach ? '/app' : '/welcome');
+    window.location.replace(buildAppUrl(tab));
   };
 
   const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
@@ -1397,17 +1421,23 @@ export default function AppPage() {
       router.replace('/login');
       return;
     }
-    if (!auth.selectedCoach) {
-      router.replace('/welcome');
-      return;
+
+    const bootstrapCoach = auth.selectedCoach || 'zj';
+    const params = new URLSearchParams(window.location.search);
+    const suppressWelcome = params.get('welcome') === 'done';
+    if (suppressWelcome) {
+      params.delete('welcome');
+      const nextSearch = params.toString();
+      window.history.replaceState({}, '', nextSearch ? `/app?${nextSearch}` : '/app');
     }
 
     setAuthUserId(auth.userId);
     setAuthUsername(auth.username);
-    setSelectedCoach(auth.selectedCoach);
-    selectedCoachRef.current = auth.selectedCoach;
-    const bootstrapCoachName = coachDisplayName(auth.selectedCoach);
-    const defaultCoachTopic = buildCoachTopic(auth.userId, auth.selectedCoach);
+    setAuthSelectedCoach(auth.selectedCoach);
+    setSelectedCoach(bootstrapCoach);
+    selectedCoachRef.current = bootstrapCoach;
+    const bootstrapCoachName = coachDisplayName(bootstrapCoach);
+    const defaultCoachTopic = buildCoachTopic(auth.userId, bootstrapCoach);
     messageDraftsRef.current = loadMessageDrafts(auth.userId);
     setConversations([
       {
@@ -1423,7 +1453,6 @@ export default function AppPage() {
     setComposer(messageDraftsRef.current[defaultCoachTopic] || '');
     setPostText(loadPostDraft(auth.userId));
 
-    const params = new URLSearchParams(window.location.search);
     setTab(normalizeTabKey(params.get('tab')));
 
     const client = new RealtimeClient();
@@ -1432,10 +1461,11 @@ export default function AppPage() {
     realtimeRef.current = client;
 
     setReady(true);
+    setWelcomeFlowOpen(!suppressWelcome);
 
     const initialFriends = await loadFriendsData(auth.userId);
     await Promise.all([
-      loadInbox(auth.userId, auth.selectedCoach, initialFriends),
+      loadInbox(auth.userId, bootstrapCoach, initialFriends),
       loadFeed(auth.userId),
       loadLeaderboard(auth.userId),
       loadProfile(auth.userId),
@@ -1495,7 +1525,8 @@ export default function AppPage() {
         return;
       }
 
-      if (auth.userId !== currentUserId || auth.selectedCoach !== selectedCoachRef.current) {
+      const effectiveStoredCoach = auth.selectedCoach || selectedCoachRef.current;
+      if (auth.userId !== currentUserId || effectiveStoredCoach !== selectedCoachRef.current) {
         syncAppToStoredAuth(message);
       }
     };
@@ -4161,6 +4192,16 @@ export default function AppPage() {
 
   return (
     <>
+      {welcomeFlowOpen && authUserId > 0 ? (
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[rgba(244,239,232,0.78)] backdrop-blur-xl">
+          <WelcomeFlow
+            userId={authUserId}
+            initialCoach={authSelectedCoach}
+            onComplete={handleWelcomeComplete}
+          />
+        </div>
+      ) : null}
+
       <main className="relative h-screen overflow-hidden">
         {!isOnline ? (
           <div className="absolute left-4 right-4 top-3 z-20 rounded-full border border-[rgba(242,138,58,0.24)] bg-white/85 px-4 py-2 text-center text-xs font-semibold text-[color:var(--coach-lc-ink)] shadow-[0_10px_20px_rgba(177,99,34,0.12)] backdrop-blur-xl">
