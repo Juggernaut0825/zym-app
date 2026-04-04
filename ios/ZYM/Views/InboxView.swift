@@ -78,6 +78,9 @@ struct InboxView: View {
                 )
             }
             .onAppear(perform: loadInbox)
+            .onChange(of: appState.selectedCoach) { _, _ in
+                loadInbox()
+            }
         }
     }
 

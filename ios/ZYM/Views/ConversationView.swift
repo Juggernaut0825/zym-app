@@ -33,7 +33,7 @@ struct ConversationView: View {
     @State private var groupMembers: [ConversationGroupMember] = []
     @State private var inviteUsername = ""
     @State private var groupActionPending = false
-    @State private var coachReplyPending = false
+    @State private var coachWorkspaceMode: CoachWorkspaceMode?
     @State private var infoNotice = ""
     @State private var showProfileSheet = false
     @State private var profileLoading = false
@@ -66,117 +66,128 @@ struct ConversationView: View {
             ZYMBackgroundLayer().ignoresSafeArea()
 
             VStack(spacing: 0) {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
-                            ConversationMessageBubble(message: msg, currentUserId: appState.userId ?? 0)
-                                .zymAppear(delay: Double(min(index, 5)) * 0.02)
-                        }
-
-                        if !typingLabel.isEmpty {
-                            HStack {
-                                TypingIndicator(label: typingLabel)
-                                Spacer()
+                if let coachWorkspaceMode, conversation.isCoach {
+                    CoachWorkspaceView(
+                        mode: coachWorkspaceMode,
+                        coachId: appState.selectedCoach ?? "zj",
+                        onBackToChat: {
+                            withAnimation(.zymSoft) {
+                                self.coachWorkspaceMode = nil
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.top, 4)
-                            .transition(.opacity)
+                        },
+                        onNotice: { notice in
+                            infoNotice = notice
+                        },
+                        onError: { error in
+                            infoNotice = error
                         }
+                    )
+                    .environmentObject(appState)
+                    .transition(.opacity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
+                                ConversationMessageBubble(message: msg, currentUserId: appState.userId ?? 0)
+                                    .zymAppear(delay: Double(min(index, 5)) * 0.02)
+                            }
 
-                        if coachReplyPending {
+                            if !typingLabel.isEmpty {
+                                HStack {
+                                    TypingIndicator(label: typingLabel)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.top, 4)
+                                .transition(.opacity)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                    }
+                }
+
+                if coachWorkspaceMode == nil || !infoNotice.isEmpty {
+                    VStack(spacing: 8) {
+                        if !infoNotice.isEmpty {
                             HStack {
-                                Label("Coach mention sent, waiting for reply...", systemImage: "sparkles")
-                                    .font(.system(size: 12, weight: .medium))
+                                Text(infoNotice)
+                                    .font(.system(size: 12))
                                     .foregroundColor(Color.zymPrimaryDark)
                                 Spacer()
                             }
-                            .padding(10)
-                            .background(Color.zymSurfaceSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .padding(.horizontal, 12)
-                            .zymAppear(delay: 0.02)
+                            .padding(.horizontal, 14)
                         }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                }
 
-                VStack(spacing: 8) {
-                    if !draftAttachments.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(draftAttachments) { attachment in
-                                    DraftAttachmentPreview(attachment: attachment)
+                        if coachWorkspaceMode == nil {
+                            if !draftAttachments.isEmpty {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(draftAttachments) { attachment in
+                                            DraftAttachmentPreview(attachment: attachment)
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
                                 }
                             }
-                            .padding(.horizontal, 12)
-                        }
-                    }
 
-                    HStack(spacing: 10) {
-                        Button(action: { showMediaPicker = true }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(Color.zymPrimary)
-                        }
-
-                        TextField("Type message...", text: $newMessage)
-                            .padding(12)
-                            .background(Color.zymSurface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.zymLine, lineWidth: 1)
-                            )
-                            .cornerRadius(12)
-
-                        if conversation.isGroup && groupCoachEnabled {
-                            Button("@coach") {
-                                if !newMessage.lowercased().contains("@coach") {
-                                    newMessage = newMessage.isEmpty ? "@coach " : "@coach \(newMessage)"
+                            HStack(spacing: 10) {
+                                Button(action: { showMediaPicker = true }) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(Color.zymPrimary)
                                 }
+
+                                TextField("", text: $newMessage)
+                                    .padding(12)
+                                    .background(Color.zymSurface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.zymLine, lineWidth: 1)
+                                    )
+                                    .cornerRadius(12)
+                                    .accessibilityLabel("Message")
+
+                                if conversation.isGroup && groupCoachEnabled {
+                                    Button("@coach") {
+                                        if !newMessage.lowercased().contains("@coach") {
+                                            newMessage = newMessage.isEmpty ? "@coach " : "@coach \(newMessage)"
+                                        }
+                                    }
+                                    .buttonStyle(ZYMGhostButton())
+                                }
+
+                                Button(action: sendMessage) {
+                                    Text(isSending ? "..." : "Send")
+                                }
+                                .buttonStyle(ZYMPrimaryButton())
+                                .disabled(isSending)
                             }
-                            .buttonStyle(ZYMGhostButton())
-                        }
+                            .padding(.horizontal, 12)
 
-                        Button(action: sendMessage) {
-                            Text(isSending ? "..." : "Send")
+                            if conversation.isGroup {
+                                HStack {
+                                    Text(groupCoachEnabled
+                                         ? "Tip: mention @coach in group to trigger AI reply."
+                                         : "Coach is disabled in this group.")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 14)
+                            }
                         }
-                        .buttonStyle(ZYMPrimaryButton())
-                        .disabled(isSending)
                     }
-                    .padding(.horizontal, 12)
-
-                    if conversation.isGroup {
-                        HStack {
-                            Text(groupCoachEnabled
-                                 ? "Tip: mention @coach in group to trigger AI reply."
-                                 : "Coach is disabled in this group.")
-                                .font(.system(size: 12))
-                                .foregroundColor(Color.zymSubtext)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                    }
-
-                    if !infoNotice.isEmpty {
-                        HStack {
-                            Text(infoNotice)
-                                .font(.system(size: 12))
-                                .foregroundColor(Color.zymPrimaryDark)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                    }
+                    .padding(.bottom, 10)
+                    .padding(.top, 6)
+                    .background(Color.zymSurface)
+                    .overlay(
+                        Rectangle()
+                            .fill(Color.zymLine)
+                            .frame(height: 1),
+                        alignment: .top
+                    )
                 }
-                .padding(.bottom, 10)
-                .padding(.top, 6)
-                .background(Color.zymSurface)
-                .overlay(
-                    Rectangle()
-                        .fill(Color.zymLine)
-                        .frame(height: 1),
-                    alignment: .top
-                )
             }
         }
         .navigationTitle(conversation.name)
@@ -216,7 +227,30 @@ struct ConversationView: View {
                 .disabled(conversation.isGroup)
             }
 
-            if groupId != nil {
+            if conversation.isCoach {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button("Info") {
+                            withAnimation(.zymSoft) {
+                                coachWorkspaceMode = .info
+                            }
+                        }
+                        Button("Meals") {
+                            withAnimation(.zymSoft) {
+                                coachWorkspaceMode = .meals
+                            }
+                        }
+                        Button("Trains") {
+                            withAnimation(.zymSoft) {
+                                coachWorkspaceMode = .trains
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(Color.zymPrimary)
+                    }
+                }
+            } else if groupId != nil {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         showGroupSheet = true
@@ -318,9 +352,6 @@ struct ConversationView: View {
                     markConversationRead(messageId: mapped.id)
                 }
 
-                if mapped.from_user_id == 0 {
-                    coachReplyPending = false
-                }
             case .typing(let topic, let userId, let isTyping):
                 guard topic == conversation.id else { return }
                 if String(appState.userId ?? 0) == userId { return }
@@ -593,10 +624,6 @@ struct ConversationView: View {
             body["mediaIds"] = mediaIds
         }
 
-        if conversation.isGroup && groupCoachEnabled && trimmed.lowercased().contains("@coach") {
-            coachReplyPending = true
-        }
-
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         authorizedDataTask(appState: appState, request: request) { _, _, _ in
@@ -865,9 +892,7 @@ struct ConversationMessageBubble: View {
                 }
 
                 if let content = message.content {
-                    Text(content)
-                        .font(.system(size: 15))
-                        .foregroundColor(isMine ? .white : Color.zymText)
+                    ConversationMarkdownText(content: content, isMine: isMine)
                 }
 
                 if let mediaUrls = message.media_urls, !mediaUrls.isEmpty {
@@ -883,6 +908,32 @@ struct ConversationMessageBubble: View {
             .cornerRadius(14)
 
             if !isMine { Spacer() }
+        }
+    }
+}
+
+private struct ConversationMarkdownText: View {
+    let content: String
+    let isMine: Bool
+
+    private var attributed: AttributedString? {
+        try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )
+    }
+
+    var body: some View {
+        if let attributed {
+            Text(attributed)
+                .font(.system(size: 15))
+                .foregroundColor(isMine ? .white : Color.zymText)
+                .tint(isMine ? Color.white.opacity(0.92) : Color.zymPrimaryDark)
+        } else {
+            Text(content)
+                .font(.system(size: 15))
+                .foregroundColor(isMine ? .white : Color.zymText)
+                .tint(isMine ? Color.white.opacity(0.92) : Color.zymPrimaryDark)
         }
     }
 }

@@ -9,13 +9,8 @@ struct ZYMApp: App {
         WindowGroup {
             ZStack {
                 if appState.isLoggedIn {
-                    if appState.selectedCoach == nil {
-                        CoachSelectView()
-                            .environmentObject(appState)
-                    } else {
-                        MainTabView()
-                            .environmentObject(appState)
-                    }
+                    MainTabView()
+                        .environmentObject(appState)
                 } else {
                     NavigationView {
                         LoginView()

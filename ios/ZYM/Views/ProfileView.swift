@@ -5,7 +5,6 @@ struct ProfileView: View {
     @State private var profile: APIProfile?
     @State private var showEditor = false
     @State private var showSessionsSheet = false
-    @State private var showCoachRecordsSheet = false
     @State private var coachPending = false
     @State private var coachError = ""
     @State private var sessions: [AuthSessionRow] = []
@@ -190,12 +189,12 @@ struct ProfileView: View {
                         .buttonStyle(ZYMGhostButton())
                         .zymAppear(delay: 0.17)
 
-                        Button(action: { showCoachRecordsSheet = true }) {
-                            Text("Coach Records Details")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(ZYMGhostButton())
-                        .zymAppear(delay: 0.175)
+                        Text("Coach info, meals, and training logs now live inside your coach conversation.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(Color.zymSubtext)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 2)
+                            .zymAppear(delay: 0.175)
 
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
@@ -225,10 +224,6 @@ struct ProfileView: View {
                 onRevoke: revokeSession,
                 onLogoutOthers: logoutOtherSessions
             )
-        }
-        .sheet(isPresented: $showCoachRecordsSheet) {
-            CoachRecordsDetailsSheet()
-                .environmentObject(appState)
         }
         .onAppear(perform: loadProfile)
     }
@@ -1095,9 +1090,9 @@ private struct CoachRecordsDetailsSheet: View {
 private struct CoachRecordsPayload: Codable {
     var profile: CoachRecordProfile
     var records: [CoachDayRecordEntry]
-    var stats: CoachRecordsStats
+    var stats: LegacyCoachRecordsStats
 
-    init(profile: CoachRecordProfile = CoachRecordProfile(), records: [CoachDayRecordEntry] = [], stats: CoachRecordsStats = CoachRecordsStats()) {
+    init(profile: CoachRecordProfile = CoachRecordProfile(), records: [CoachDayRecordEntry] = [], stats: LegacyCoachRecordsStats = LegacyCoachRecordsStats()) {
         self.profile = profile
         self.records = records
         self.stats = stats
@@ -1107,11 +1102,11 @@ private struct CoachRecordsPayload: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         profile = (try? container.decode(CoachRecordProfile.self, forKey: .profile)) ?? CoachRecordProfile()
         records = (try? container.decode([CoachDayRecordEntry].self, forKey: .records)) ?? []
-        stats = (try? container.decode(CoachRecordsStats.self, forKey: .stats)) ?? CoachRecordsStats()
+        stats = (try? container.decode(LegacyCoachRecordsStats.self, forKey: .stats)) ?? LegacyCoachRecordsStats()
     }
 }
 
-private struct CoachRecordsStats: Codable {
+private struct LegacyCoachRecordsStats: Codable {
     var days: Int
     var mealCount: Int
     var trainingCount: Int
