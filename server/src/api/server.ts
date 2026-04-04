@@ -95,12 +95,33 @@ const mediaAssetService = MediaAssetService.createFromEnvironment({ uploadsDir }
 const MODERATION_TARGET_TYPES = ['user', 'post', 'message', 'group'] as const;
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
+
+function normalizeOrigin(raw: unknown): string {
+  return String(raw || '').trim().replace(/\/+$/, '');
+}
+
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://app.zym8.com',
+  'https://zym8.com',
+  'https://www.zym8.com',
+];
+
+const configuredAllowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => normalizeOrigin(origin))
+  .filter(Boolean);
+
 const allowedOrigins = new Set(
-  String(process.env.CORS_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((origin) => origin.trim())
+  [...defaultAllowedOrigins, ...configuredAllowedOrigins]
+    .map((origin) => normalizeOrigin(origin))
     .filter(Boolean),
 );
+
+if (isProduction && configuredAllowedOrigins.length === 0) {
+  logger.warn('[api] CORS_ALLOWED_ORIGINS is empty in production; using built-in allowlist for zym8 web origins');
+}
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -113,16 +134,12 @@ app.use(cors({
       return;
     }
 
-    if (allowedOrigins.size === 0) {
-      callback(null, !isProduction);
-      return;
-    }
-
-    callback(null, allowedOrigins.has(origin));
+    const normalizedOrigin = normalizeOrigin(origin);
+    callback(null, allowedOrigins.has(normalizedOrigin) || (!isProduction && allowedOrigins.size === 0));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
   maxAge: 86400,
 }));
 
@@ -2413,12 +2430,14 @@ app.post('/messages/send',
   mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },
   mediaIds: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 128 },
   replyTo: { type: 'number', integer: true, min: 1 },
+  clientMessageId: { type: 'string', minLength: 1, maxLength: 80, pattern: /^[a-zA-Z0-9._:-]{1,80}$/ },
 }),
   async (req, res) => {
   try {
     const fromUserId = toUserId(req.body.fromUserId);
     const topic = String(req.body.topic || '').trim();
     const content = String(req.body.content || '').trim().slice(0, 8000);
+    const clientMessageId = String(req.body.clientMessageId || '').trim().slice(0, 80) || null;
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
     const resolvedAssetIds = resolveOwnedAssetIds(fromUserId, mediaIds, mediaUrls);
@@ -2455,6 +2474,7 @@ app.post('/messages/send',
     const deliveredMessage = newMessage
       ? {
           ...newMessage,
+          client_message_id: clientMessageId,
           avatar_url: mediaUrlForClient(req, newMessage.avatar_url),
           media_urls: mediaUrlsForClient(req, Array.isArray(newMessage.media_urls) ? newMessage.media_urls : []),
         }
@@ -2463,6 +2483,7 @@ app.post('/messages/send',
     await publishRealtimeEventSafely({
       type: 'message_created',
       topic,
+      clientMessageId,
       message: deliveredMessage || {
       id: messageId,
       topic,
@@ -2475,6 +2496,7 @@ app.post('/messages/send',
       username: req.body.username || `User ${fromUserId}`,
         avatar_url: null,
         is_coach: false,
+        client_message_id: clientMessageId,
       },
     }, 'message-created');
     await publishRealtimeEventSafely({
@@ -2506,7 +2528,7 @@ app.post('/messages/send',
       }
     }
 
-    res.json({ success: true, messageId });
+    res.json({ success: true, messageId, clientMessageId, message: deliveredMessage });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -3217,6 +3239,68 @@ app.post('/coach/records/training/update',
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to update training record' });
+    }
+  });
+
+app.get('/coach/training-plan/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const day = String(req.query.day || '').trim() || undefined;
+    const timezone = String(req.query.timezone || '').trim() || undefined;
+    const result = await coachTypedToolsService.getTrainingPlan(String(userId), { day, timezone });
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load training plan' });
+  }
+});
+
+app.post('/coach/training-plan/toggle',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(90, 10 * 60_000, 'coach-training-plan-toggle'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    day: { required: true, type: 'string', pattern: COACH_DAY_PATTERN },
+    exerciseId: { required: true, type: 'string', pattern: COACH_RECORD_ID_PATTERN },
+    completed: { required: true, type: 'boolean' },
+    occurredAtUtc: { type: 'string', maxLength: 80 },
+    timezone: { type: 'string', maxLength: 80 },
+  }),
+  async (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const day = String(req.body.day || '').trim();
+      const exerciseId = sanitizePlainText(req.body.exerciseId, 120);
+      const timezone = req.body.timezone !== undefined ? sanitizePlainText(req.body.timezone, COACH_PROFILE_TEXT_MAX) : undefined;
+      if (!isValidDayKey(day)) {
+        return res.status(400).json({ error: 'Invalid day format' });
+      }
+      if (!COACH_RECORD_ID_PATTERN.test(exerciseId)) {
+        return res.status(400).json({ error: 'Invalid exerciseId format' });
+      }
+      if (timezone !== undefined && !isValidTimeZone(timezone)) {
+        return res.status(400).json({ error: 'Invalid timezone format' });
+      }
+
+      const result = await coachTypedToolsService.toggleTrainingPlanExerciseCompletion(String(userId), {
+        day,
+        exerciseId,
+        completed: Boolean(req.body.completed),
+        occurredAt: req.body.occurredAtUtc,
+        timezone,
+      });
+
+      trackSecurityEvent(req, 'coach_training_plan_toggled', {
+        userId,
+        metadata: {
+          day,
+          exerciseId,
+          completed: Boolean(req.body.completed),
+        },
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update training plan' });
     }
   });
 

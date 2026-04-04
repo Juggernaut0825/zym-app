@@ -197,6 +197,8 @@ function toolStatusLabel(toolName: string): string {
       return 'Analyzing attached media...';
     case 'search_knowledge':
       return 'Searching knowledge...';
+    case 'search_exercise_library':
+      return 'Matching exercise demos...';
     case 'search_exercise_videos':
       return 'Searching demo videos...';
     case 'log_meal':

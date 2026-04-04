@@ -12,6 +12,42 @@ export class LogTrainingTool implements Tool {
         entries: {
           type: 'array',
           description: 'Array of training entries with fields like name, sets, reps, weight_kg.',
+          itemType: 'object',
+          items: {
+            type: 'object',
+            description: 'A single exercise log entry.',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Exercise name.',
+                minLength: 1,
+                maxLength: 120,
+              },
+              sets: {
+                type: 'number',
+                description: 'Number of sets performed.',
+                minimum: 0,
+                maximum: 50,
+              },
+              reps: {
+                type: 'string',
+                description: 'Repetition count or rep range, for example 5 or 8-10.',
+                minLength: 1,
+                maxLength: 20,
+              },
+              weight_kg: {
+                type: 'number',
+                description: 'Optional working weight in kilograms.',
+                minimum: 0,
+                maximum: 500,
+              },
+              notes: {
+                type: 'string',
+                description: 'Optional short notes about the set or session.',
+                maxLength: 500,
+              },
+            },
+          },
         },
         localDate: {
           type: 'string',

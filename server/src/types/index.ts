@@ -47,6 +47,22 @@ export interface ToolDefinition {
       enum?: string[];
       itemType?: string;
       itemEnum?: string[];
+      items?: {
+        type: string;
+        description?: string;
+        enum?: string[];
+        properties?: Record<string, {
+          type: string;
+          description: string;
+          enum?: string[];
+          minLength?: number;
+          maxLength?: number;
+          minimum?: number;
+          maximum?: number;
+          pattern?: string;
+        }>;
+        required?: string[];
+      };
       maxItems?: number;
       minLength?: number;
       maxLength?: number;

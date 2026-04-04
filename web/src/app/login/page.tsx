@@ -20,8 +20,8 @@ function LoginScreen() {
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const googleConsentAcceptedRef = useRef(false);
 
-  const routeAfterLogin = (selectedCoach: 'zj' | 'lc' | null) => {
-    router.push(selectedCoach ? '/app' : '/coach-select');
+  const routeAfterLogin = (_selectedCoach: 'zj' | 'lc' | null) => {
+    router.push('/app');
   };
 
   useEffect(() => {

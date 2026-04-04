@@ -290,6 +290,7 @@ export class WSServer {
         this.broadcastToTopic(event.topic, {
           type: 'message_created',
           topic: event.topic,
+          clientMessageId: event.clientMessageId ? String(event.clientMessageId) : undefined,
           message: this.normalizeOutgoingMessage(event.message),
         });
         return;

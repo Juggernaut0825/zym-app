@@ -77,6 +77,7 @@ export interface ChatMessage {
   username: string;
   avatar_url: string | null;
   is_coach: boolean;
+  client_message_id?: string | null;
 }
 
 export interface Friend {
@@ -300,6 +301,43 @@ export interface CoachTrainingRecord {
   weight_kg?: number;
   volume_kg?: number;
   notes?: string;
+  source_plan_id?: string;
+  source_exercise_id?: string;
+  from_plan?: boolean;
+}
+
+export interface CoachTrainingPlanExercise {
+  id: string;
+  exercise_key?: string;
+  order: number;
+  name: string;
+  sets: number;
+  reps: string;
+  rest_seconds: number;
+  target_weight_kg?: number | null;
+  cue?: string;
+  notes?: string;
+  demo_url?: string;
+  demo_thumbnail?: string;
+  completed_at?: string | null;
+}
+
+export interface CoachTrainingPlan {
+  id: string;
+  day: string;
+  coach_id: 'zj' | 'lc';
+  title: string;
+  summary: string;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+  exercises: CoachTrainingPlanExercise[];
+}
+
+export interface CoachTrainingPlanResponse {
+  day: string;
+  timezone: string;
+  plan: CoachTrainingPlan | null;
 }
 
 export interface CoachDayRecord {
@@ -324,6 +362,7 @@ export interface MessageSocketEvent {
   type: 'message_created';
   topic: string;
   message: ChatMessage;
+  clientMessageId?: string | null;
 }
 
 export interface TypingSocketEvent {

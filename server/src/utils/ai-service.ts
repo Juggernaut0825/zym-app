@@ -17,6 +17,52 @@ export interface AIResponse {
   };
 }
 
+const OPENROUTER_ERROR_DETAIL_MAX = 800;
+
+function summarizeOpenRouterError(error: unknown): {
+  status: number | null;
+  detail: string;
+  wrappedError: Error;
+} {
+  if (!axios.isAxiosError(error)) {
+    const fallback = error instanceof Error ? error : new Error(String(error || 'OpenRouter request failed'));
+    return {
+      status: null,
+      detail: fallback.message,
+      wrappedError: fallback,
+    };
+  }
+
+  const status = Number.isInteger(Number(error.response?.status)) ? Number(error.response?.status) : null;
+  const responseData = error.response?.data;
+  let detail = '';
+
+  if (typeof responseData === 'string') {
+    detail = responseData;
+  } else if (responseData && typeof responseData === 'object') {
+    try {
+      detail = JSON.stringify(responseData);
+    } catch {
+      detail = '';
+    }
+  }
+
+  if (!detail) {
+    detail = error.message || 'OpenRouter request failed';
+  }
+
+  const normalizedDetail = detail.replace(/\s+/g, ' ').trim().slice(0, OPENROUTER_ERROR_DETAIL_MAX);
+  const message = status
+    ? `OpenRouter request failed (${status}): ${normalizedDetail || 'No response detail'}`
+    : `OpenRouter request failed: ${normalizedDetail || 'No response detail'}`;
+
+  return {
+    status,
+    detail: normalizedDetail,
+    wrappedError: new Error(message),
+  };
+}
+
 /**
  * AI service via OpenRouter (Gemini 3 Flash by default).
  */
@@ -71,8 +117,12 @@ export class AIService {
       OpenRouterUsageService.recordSuccessFromPayload(response.data, this.usageContext, startedAt);
       return this.parseResponse(response.data);
     } catch (error) {
-      OpenRouterUsageService.recordFailure(error, this.usageContext, startedAt);
-      throw error;
+      const summarized = summarizeOpenRouterError(error);
+      logger.error(
+        `[ai] chat request failed model=${this.model} tools=${tools.length} status=${summarized.status ?? 'unknown'} detail=${summarized.detail || 'n/a'}`,
+      );
+      OpenRouterUsageService.recordFailure(summarized.wrappedError, this.usageContext, startedAt);
+      throw summarized.wrappedError;
     }
   }
 
@@ -120,8 +170,12 @@ export class AIService {
 
       return result;
     } catch (error) {
-      OpenRouterUsageService.recordFailure(error, this.usageContext, startedAt);
-      throw error;
+      const summarized = summarizeOpenRouterError(error);
+      logger.error(
+        `[ai] chatStream request failed model=${this.model} tools=${tools.length} status=${summarized.status ?? 'unknown'} detail=${summarized.detail || 'n/a'}`,
+      );
+      OpenRouterUsageService.recordFailure(summarized.wrappedError, this.usageContext, startedAt);
+      throw summarized.wrappedError;
     }
   }
 

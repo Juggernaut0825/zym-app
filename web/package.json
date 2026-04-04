@@ -6,7 +6,8 @@
     "predev": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
     "dev": "next dev",
     "build": "NEXT_DIST_DIR=.next-prod next build",
-    "start": "NEXT_DIST_DIR=.next-prod node .next-prod/standalone/server.js"
+    "prepare:standalone": "NEXT_DIST_DIR=.next-prod node scripts/prepare-standalone.cjs",
+    "start": "npm run prepare:standalone && NEXT_DIST_DIR=.next-prod node .next-prod/standalone/server.js"
   },
   "dependencies": {
     "next": "15.5.14",
