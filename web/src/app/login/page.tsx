@@ -21,7 +21,7 @@ function LoginScreen() {
   const googleConsentAcceptedRef = useRef(false);
 
   const routeAfterLogin = (selectedCoach: 'zj' | 'lc' | null) => {
-    router.push(selectedCoach ? '/app' : '/coach-select');
+    router.push(selectedCoach ? '/app' : '/welcome');
   };
 
   useEffect(() => {

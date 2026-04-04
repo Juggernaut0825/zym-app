@@ -70,6 +70,13 @@ export class SearchMessageHistoryTool implements Tool {
         roles: {
           type: 'array',
           description: 'Optional role filter. Supported roles: user, assistant, tool.',
+          itemType: 'string',
+          itemEnum: ['user', 'assistant', 'tool'],
+          items: {
+            type: 'string',
+            description: 'Transcript role to include.',
+            enum: ['user', 'assistant', 'tool'],
+          },
         },
         includeToolMessages: {
           type: 'boolean',

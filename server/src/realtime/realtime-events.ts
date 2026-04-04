@@ -10,6 +10,7 @@ export type RealtimeEvent =
       type: 'message_created';
       topic: string;
       message: unknown;
+      clientMessageId?: string | null;
     }
   | {
       type: 'typing';

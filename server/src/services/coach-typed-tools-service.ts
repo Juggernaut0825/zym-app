@@ -9,6 +9,7 @@ import { SessionStore } from '../context/session-store.js';
 import { MediaAssetService, type MediaAssetRecord } from './media-asset-service.js';
 import { knowledgeService } from './knowledge-service.js';
 import { OpenRouterUsageContext, OpenRouterUsageService } from './openrouter-usage-service.js';
+import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
@@ -39,6 +40,35 @@ interface MealEstimateResult {
   };
 }
 
+interface TrainingPlanExercise {
+  id: string;
+  order: number;
+  name: string;
+  sets: number;
+  reps: string;
+  rest_seconds: number;
+  target_weight_kg?: number | null;
+  cue?: string;
+  notes?: string;
+  demo_url?: string;
+  demo_thumbnail?: string;
+  completed_at?: string | null;
+}
+
+interface TrainingPlanEntry {
+  id: string;
+  day: string;
+  coach_id: 'zj' | 'lc';
+  title: string;
+  summary: string;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+  exercises: TrainingPlanExercise[];
+}
+
+type TrainingPlanIndex = Record<string, TrainingPlanEntry>;
+
 interface LogTimeInput {
   localDate?: unknown;
   occurredAt?: unknown;
@@ -52,6 +82,16 @@ function nowIso(): string {
 function createLogEntryId(prefix: 'meal' | 'train', day: string): string {
   const stamp = String(day || nowIso().slice(0, 10)).replace(/[^0-9]/g, '').slice(0, 8) || '00000000';
   return `${prefix}_${stamp}_${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function createTrainingPlanId(day: string): string {
+  const stamp = String(day || nowIso().slice(0, 10)).replace(/[^0-9]/g, '').slice(0, 8) || '00000000';
+  return `plan_${stamp}_${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function createTrainingPlanExerciseId(day: string): string {
+  const stamp = String(day || nowIso().slice(0, 10)).replace(/[^0-9]/g, '').slice(0, 8) || '00000000';
+  return `planex_${stamp}_${crypto.randomBytes(3).toString('hex')}`;
 }
 
 function safeString(value: unknown, maxLength = 400): string {
@@ -317,6 +357,41 @@ function normalizeDateOnly(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10) === text ? text : null;
 }
 
+function extractYouTubeVideoId(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.includes('youtu.be')) {
+      return parsed.pathname.replace(/^\/+/, '').split('/')[0] || '';
+    }
+    if (parsed.hostname.includes('youtube.com')) {
+      if (parsed.pathname === '/watch') {
+        return String(parsed.searchParams.get('v') || '').trim();
+      }
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const shortsIndex = parts.indexOf('shorts');
+      if (shortsIndex >= 0 && parts[shortsIndex + 1]) {
+        return parts[shortsIndex + 1];
+      }
+      const embedIndex = parts.indexOf('embed');
+      if (embedIndex >= 0 && parts[embedIndex + 1]) {
+        return parts[embedIndex + 1];
+      }
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
+function buildYouTubeThumbnailUrl(raw: string): string {
+  const videoId = extractYouTubeVideoId(raw);
+  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : '';
+}
+
 function getLocalDateTimeParts(date: Date, timeZone: string): { day: string; time: string } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -357,6 +432,10 @@ export class CoachTypedToolsService {
 
   private getDailyPath(userId: string): string {
     return path.join(this.getUserDataDir(userId), 'daily.json');
+  }
+
+  private getTrainingPlanPath(userId: string): string {
+    return path.join(this.getUserDataDir(userId), 'training-plan.json');
   }
 
   private assertMediaPathWithinUserRoot(userId: string, storedPath: string): string {
@@ -549,6 +628,90 @@ export class CoachTypedToolsService {
     };
   }
 
+  private async readTrainingPlanIndex(userId: string): Promise<TrainingPlanIndex> {
+    const raw = await readJson<Record<string, unknown>>(this.getTrainingPlanPath(userId), {});
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {};
+    }
+
+    const out: TrainingPlanIndex = {};
+    for (const [day, plan] of Object.entries(raw)) {
+      if (!normalizeDateOnly(day)) continue;
+      if (!plan || typeof plan !== 'object' || Array.isArray(plan)) continue;
+      const record = plan as Record<string, unknown>;
+      const exercisesRaw = Array.isArray(record.exercises) ? record.exercises : [];
+      const exercises = exercisesRaw.map((exercise, index) => {
+        const item = exercise && typeof exercise === 'object' && !Array.isArray(exercise)
+          ? exercise as Record<string, unknown>
+          : {};
+        return {
+          id: safeString(item.id, 120) || createTrainingPlanExerciseId(day),
+          order: clampInt(item.order, 1, 20, index + 1),
+          name: safeString(item.name, 120) || `Exercise ${index + 1}`,
+          sets: clampInt(item.sets, 1, 20, 3),
+          reps: safeString(item.reps, 30) || '8-12',
+          rest_seconds: clampInt(item.rest_seconds, 15, 600, 75),
+          target_weight_kg: toNumber(item.target_weight_kg, 0, 500),
+          cue: safeString(item.cue, 220),
+          notes: safeString(item.notes, 500),
+          demo_url: safeString(item.demo_url, 1000),
+          demo_thumbnail: safeString(item.demo_thumbnail, 1000),
+          completed_at: safeString(item.completed_at, 80) || null,
+        } satisfies TrainingPlanExercise;
+      });
+
+      out[day] = {
+        id: safeString(record.id, 120) || createTrainingPlanId(day),
+        day,
+        coach_id: safeString(record.coach_id, 10) === 'lc' ? 'lc' : 'zj',
+        title: safeString(record.title, 160) || 'Training plan',
+        summary: safeString(record.summary, 800),
+        timezone: safeString(record.timezone, 80) || 'UTC',
+        created_at: safeString(record.created_at, 80) || nowIso(),
+        updated_at: safeString(record.updated_at, 80) || nowIso(),
+        exercises: exercises.sort((left, right) => left.order - right.order),
+      };
+    }
+
+    return out;
+  }
+
+  private async writeTrainingPlanIndex(userId: string, payload: TrainingPlanIndex): Promise<void> {
+    const filePath = this.getTrainingPlanPath(userId);
+    await ensureDir(path.dirname(filePath));
+    await writeJsonAtomic(filePath, payload);
+  }
+
+  private resolveCoachId(userId: string): 'zj' | 'lc' {
+    const row = getDB().prepare('SELECT selected_coach FROM users WHERE id = ?').get(userId) as { selected_coach?: string | null } | undefined;
+    return safeString(row?.selected_coach, 10) === 'lc' ? 'lc' : 'zj';
+  }
+
+  private async hydrateTrainingExerciseDemo(input: TrainingPlanExercise): Promise<TrainingPlanExercise> {
+    if (input.demo_url) {
+      return {
+        ...input,
+        demo_thumbnail: input.demo_thumbnail || buildYouTubeThumbnailUrl(input.demo_url),
+      };
+    }
+
+    try {
+      const result = await this.searchExerciseVideos({
+        query: input.name,
+        maxResults: 1,
+      });
+      const first = Array.isArray(result.results) ? result.results[0] as Record<string, unknown> | undefined : undefined;
+      const url = safeString(first?.url, 1000);
+      return {
+        ...input,
+        demo_url: url || undefined,
+        demo_thumbnail: url ? buildYouTubeThumbnailUrl(url) : undefined,
+      };
+    } catch {
+      return input;
+    }
+  }
+
   async getContext(
     userId: string,
     input: { scope?: unknown; limit?: unknown; sessionFile?: unknown } = {},
@@ -597,6 +760,188 @@ export class CoachTypedToolsService {
     return {
       updatedFields: changedKeys,
       profile: next,
+    };
+  }
+
+  async getTrainingPlan(
+    userId: string,
+    input: { day?: unknown; timezone?: unknown } = {},
+  ): Promise<Record<string, unknown>> {
+    const requestedDay = normalizeDateOnly(input.day);
+    const stamp = requestedDay
+      ? {
+          day: requestedDay,
+          timezone: await this.resolvePreferredTimezone(userId, input.timezone),
+        }
+      : await this.resolveLogStamp(userId, { timezone: input.timezone });
+    const plans = await this.readTrainingPlanIndex(userId);
+    return {
+      day: stamp.day,
+      timezone: stamp.timezone,
+      plan: plans[stamp.day] || null,
+    };
+  }
+
+  async setTrainingPlan(userId: string, rawPlan: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const stamp = await this.resolveLogStamp(userId, {
+      localDate: rawPlan.day,
+      timezone: rawPlan.timezone,
+    });
+    const day = stamp.day;
+    const title = safeString(rawPlan.title, 160) || 'Training plan';
+    const summary = safeString(rawPlan.summary, 800);
+    const exercisesRaw = Array.isArray(rawPlan.exercises) ? rawPlan.exercises : [];
+
+    const cleanedBase = exercisesRaw
+      .slice(0, 12)
+      .reduce<TrainingPlanExercise[]>((acc, entry, index) => {
+        const item = entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? entry as Record<string, unknown>
+          : {};
+        const name = safeString(item.name, 120);
+        if (!name) return acc;
+
+        acc.push({
+          id: safeString(item.id, 120) || createTrainingPlanExerciseId(day),
+          order: clampInt(item.order, 1, 20, index + 1),
+          name,
+          sets: clampInt(item.sets, 1, 20, 3),
+          reps: safeString(item.reps, 30) || '8-12',
+          rest_seconds: clampInt(item.rest_seconds, 15, 600, 75),
+          target_weight_kg: toNumber(item.target_weight_kg, 0, 500) ?? undefined,
+          cue: safeString(item.cue, 220),
+          notes: safeString(item.notes, 500),
+          demo_url: safeString(item.demo_url, 1000) || undefined,
+          demo_thumbnail: safeString(item.demo_thumbnail, 1000) || undefined,
+          completed_at: null,
+        });
+        return acc;
+      }, [])
+      .sort((left, right) => left.order - right.order);
+
+    if (cleanedBase.length === 0) {
+      throw new Error('A training plan requires at least one exercise');
+    }
+
+    const exercises: TrainingPlanExercise[] = [];
+    for (const exercise of cleanedBase) {
+      exercises.push(await this.hydrateTrainingExerciseDemo(exercise));
+    }
+
+    const plans = await this.readTrainingPlanIndex(userId);
+    const previous = plans[day];
+    plans[day] = {
+      id: previous?.id || createTrainingPlanId(day),
+      day,
+      coach_id: this.resolveCoachId(userId),
+      title,
+      summary,
+      timezone: stamp.timezone,
+      created_at: previous?.created_at || nowIso(),
+      updated_at: nowIso(),
+      exercises,
+    };
+    await this.writeTrainingPlanIndex(userId, plans);
+
+    return {
+      day,
+      timezone: stamp.timezone,
+      plan: plans[day],
+    };
+  }
+
+  async toggleTrainingPlanExerciseCompletion(
+    userId: string,
+    input: { day?: unknown; exerciseId?: unknown; completed?: unknown; occurredAt?: unknown; timezone?: unknown },
+  ): Promise<Record<string, unknown>> {
+    const day = normalizeDateOnly(input.day);
+    const exerciseId = safeString(input.exerciseId, 120);
+    if (!day) {
+      throw new Error('Valid day is required');
+    }
+    if (!exerciseId) {
+      throw new Error('exerciseId is required');
+    }
+
+    const plans = await this.readTrainingPlanIndex(userId);
+    const plan = plans[day];
+    if (!plan) {
+      throw new Error('Training plan not found');
+    }
+
+    const exercise = plan.exercises.find((item) => item.id === exerciseId);
+    if (!exercise) {
+      throw new Error('Training plan exercise not found');
+    }
+
+    const shouldComplete = Boolean(input.completed);
+    const stamp = await this.resolveLogStamp(userId, {
+      localDate: day,
+      occurredAt: input.occurredAt,
+      timezone: input.timezone || plan.timezone,
+    });
+
+    const dailyPath = this.getDailyPath(userId);
+    await ensureDir(path.dirname(dailyPath));
+    const daily = await readJson<Record<string, any>>(dailyPath, {});
+    if (!daily[day] || typeof daily[day] !== 'object') {
+      daily[day] = { meals: [], training: [], total_intake: 0, total_burned: 0 };
+    }
+    if (!Array.isArray(daily[day].training)) {
+      daily[day].training = [];
+    }
+
+    const trainingEntries = daily[day].training as Array<Record<string, unknown>>;
+    const existingIndex = trainingEntries.findIndex((entry) => (
+      safeString(entry.source_plan_id, 120) === plan.id
+      && safeString(entry.source_exercise_id, 120) === exercise.id
+    ));
+
+    if (shouldComplete) {
+      exercise.completed_at = nowIso();
+      if (existingIndex === -1) {
+        trainingEntries.push({
+          id: createLogEntryId('train', day),
+          time: stamp.time,
+          timezone: stamp.timezone,
+          occurred_at_utc: stamp.occurredAtUtc,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          weight_kg: Number.isFinite(Number(exercise.target_weight_kg)) ? Number(exercise.target_weight_kg) : 0,
+          notes: exercise.notes || exercise.cue || '',
+          source_plan_id: plan.id,
+          source_exercise_id: exercise.id,
+          from_plan: true,
+        });
+      }
+    } else {
+      exercise.completed_at = null;
+      if (existingIndex >= 0) {
+        trainingEntries.splice(existingIndex, 1);
+      }
+    }
+
+    plan.updated_at = nowIso();
+    await this.writeTrainingPlanIndex(userId, plans);
+
+    daily[day].training = trainingEntries;
+    daily[day].total_burned = Math.round(
+      trainingEntries.reduce((sum, entry) => {
+        const sets = clampInt(entry.sets, 0, 60, 0);
+        const repsText = safeString(entry.reps, 20) || '0';
+        const reps = clampInt(repsText, 0, 200, 0);
+        const weightKg = Number.isFinite(Number(entry.weight_kg)) ? Number(entry.weight_kg) : 0;
+        return sum + Math.round((sets * reps * weightKg) / 10);
+      }, 0),
+    );
+    await writeJsonAtomic(dailyPath, daily);
+
+    return {
+      day,
+      completed: shouldComplete,
+      exercise,
+      plan,
     };
   }
 

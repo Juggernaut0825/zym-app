@@ -51,8 +51,8 @@ import { resolveApiAssetUrl } from '@/lib/config';
 import { clearAuth, getAuth, setCoach } from '@/lib/auth-storage';
 import { RealtimeClient } from '@/lib/realtime';
 import { ConversationTile } from '@/components/chat/ConversationTile';
+import { CoachWorkspacePanel, type CoachWorkspaceMode } from '@/components/chat/CoachWorkspacePanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
-import { CoachRecordsPanel } from '@/components/profile/CoachRecordsPanel';
 import {
   AppSocketEvent,
   ChatMessage,
@@ -89,6 +89,7 @@ type VisibleTabKey = (typeof tabs)[number]['key'];
 type TabKey = VisibleTabKey | 'friends';
 type TabIcon = (typeof tabs)[number]['icon'];
 type CoachId = 'zj' | 'lc';
+type CoachPanelMode = 'chat' | CoachWorkspaceMode;
 
 type ConversationType = 'coach' | 'dm' | 'group';
 interface Conversation {
@@ -282,6 +283,42 @@ function isVideoUrl(url: string): boolean {
   return lower.includes('.mp4') || lower.includes('.mov') || lower.includes('.webm') || lower.includes('.m4v');
 }
 
+function toEmbeddableVideoUrl(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.includes('youtu.be')) {
+      const videoId = parsed.pathname.replace(/^\/+/, '').split('/')[0] || '';
+      return videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` : '';
+    }
+    if (parsed.hostname.includes('youtube.com')) {
+      if (parsed.pathname === '/watch') {
+        const videoId = String(parsed.searchParams.get('v') || '').trim();
+        return videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` : '';
+      }
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const shortsIndex = parts.indexOf('shorts');
+      if (shortsIndex >= 0 && parts[shortsIndex + 1]) {
+        return `https://www.youtube.com/embed/${parts[shortsIndex + 1]}?autoplay=1&rel=0`;
+      }
+      const embedIndex = parts.indexOf('embed');
+      if (embedIndex >= 0 && parts[embedIndex + 1]) {
+        return `https://www.youtube.com/embed/${parts[embedIndex + 1]}?autoplay=1&rel=0`;
+      }
+    }
+    if (parsed.hostname.includes('vimeo.com')) {
+      const videoId = parsed.pathname.replace(/^\/+/, '').split('/')[0] || '';
+      return videoId ? `https://player.vimeo.com/video/${videoId}?autoplay=1` : '';
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
 function messageDraftsStorageKey(userId: number): string {
   return `${MESSAGE_DRAFTS_STORAGE_KEY_PREFIX}.${userId}`;
 }
@@ -412,6 +449,10 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
 
 function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
+}
+
+function createClientMessageId(): string {
+  return `web_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function coachTheme(coach: 'zj' | 'lc') {
@@ -568,6 +609,7 @@ export default function AppPage() {
   const authStorageSyncTriggeredRef = useRef(false);
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatStreamRef = useRef<HTMLDivElement | null>(null);
+  const coachMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
   const conversationSearchRef = useRef<HTMLInputElement | null>(null);
   const messageDraftsRef = useRef<Record<string, string>>({});
@@ -598,7 +640,8 @@ export default function AppPage() {
   const [attachmentPreviews, setAttachmentPreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
   const [composerActionsOpen, setComposerActionsOpen] = useState(false);
   const [pendingSend, setPendingSend] = useState(false);
-  const [coachReplyPending, setCoachReplyPending] = useState(false);
+  const [coachPanelMode, setCoachPanelMode] = useState<CoachPanelMode>('chat');
+  const [coachMenuOpen, setCoachMenuOpen] = useState(false);
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<Friend[]>([]);
@@ -697,11 +740,13 @@ export default function AppPage() {
     open: boolean;
     url: string;
     isVideo: boolean;
+    embedUrl: string;
     label: string;
   }>({
     open: false,
     url: '',
     isVideo: false,
+    embedUrl: '',
     label: 'Media',
   });
 
@@ -960,10 +1005,12 @@ export default function AppPage() {
   const openMediaLightbox = (url: string, label = 'Media') => {
     const resolved = resolveApiAssetUrl(url);
     if (!resolved) return;
+    const embedUrl = toEmbeddableVideoUrl(resolved);
     setMediaLightbox({
       open: true,
       url: resolved,
-      isVideo: isVideoUrl(resolved),
+      isVideo: Boolean(embedUrl) || isVideoUrl(resolved),
+      embedUrl,
       label,
     });
   };
@@ -1010,7 +1057,7 @@ export default function AppPage() {
     }
 
     setNotice(message);
-    window.location.replace(auth.selectedCoach ? '/app' : '/coach-select');
+      window.location.replace(auth.selectedCoach ? '/app' : '/welcome');
   };
 
   const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth') => {
@@ -1205,6 +1252,44 @@ export default function AppPage() {
     }
   };
 
+  const upsertActiveTopicMessage = (message: ChatMessage, clientMessageId?: string | null): boolean => {
+    if (!message || activeTopicRef.current !== message.topic) {
+      return false;
+    }
+
+    const normalizedClientMessageId = String(clientMessageId || message.client_message_id || '').trim();
+    const normalizedMessage: ChatMessage = {
+      ...message,
+      client_message_id: normalizedClientMessageId || message.client_message_id || null,
+    };
+
+    const existingIndex = messagesRef.current.findIndex((item) => (
+      item.id === normalizedMessage.id
+      || (normalizedClientMessageId && item.client_message_id === normalizedClientMessageId)
+    ));
+
+    let inserted = false;
+    let nextMessages = messagesRef.current.slice();
+
+    if (existingIndex >= 0) {
+      nextMessages[existingIndex] = normalizedMessage;
+    } else {
+      inserted = true;
+      nextMessages = [...nextMessages, normalizedMessage];
+    }
+
+    nextMessages.sort((left, right) => {
+      const leftTime = Date.parse(left.created_at || '') || 0;
+      const rightTime = Date.parse(right.created_at || '') || 0;
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return Number(left.id) - Number(right.id);
+    });
+
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    return inserted;
+  };
+
   const handleSocketEvent = (event: AppSocketEvent | { type: string; [key: string]: unknown }) => {
     if (event.type === 'auth_failed') {
       forceReauth('Invalid or expired token.');
@@ -1222,6 +1307,7 @@ export default function AppPage() {
     if (event.type === 'message_created') {
       const topic = String(event.topic);
       const message = event.message as ChatMessage;
+      const clientMessageId = String(event.clientMessageId || message.client_message_id || '').trim() || null;
       const isActiveTopic = topic === activeTopicRef.current;
       const isCoachMessage = Number(message.from_user_id) === 0;
       const fromCurrentUser = Number(message.from_user_id) === authUserIdRef.current;
@@ -1246,10 +1332,8 @@ export default function AppPage() {
         };
       }));
 
-      if (isActiveTopic && !messagesRef.current.some((item) => item.id === message.id)) {
-        const nextMessages = [...messagesRef.current, message];
-        messagesRef.current = nextMessages;
-        setMessages(nextMessages);
+      if (isActiveTopic) {
+        const inserted = upsertActiveTopicMessage(message, clientMessageId);
 
         if (authUserIdRef.current > 0) {
           void markMessagesRead({
@@ -1259,15 +1343,11 @@ export default function AppPage() {
           }).catch(() => undefined);
         }
 
-        if (isCoachMessage) {
+        if (isCoachMessage && inserted) {
           enqueueCoachReplyReveal(message);
-        } else {
+        } else if (inserted || fromCurrentUser) {
           scrollChatToBottom('smooth');
         }
-      }
-
-      if (isActiveTopic && isCoachMessage) {
-        setCoachReplyPending(false);
       }
 
       void loadInbox(authUserIdRef.current, selectedCoachRef.current, friendsRef.current);
@@ -1318,7 +1398,7 @@ export default function AppPage() {
       return;
     }
     if (!auth.selectedCoach) {
-      router.replace('/coach-select');
+      router.replace('/welcome');
       return;
     }
 
@@ -1486,7 +1566,6 @@ export default function AppPage() {
     setComposer(messageDraftsRef.current[activeTopic] || '');
     Object.values(typingTimeoutRef.current).forEach((timer) => clearTimeout(timer));
     typingTimeoutRef.current = {};
-    setCoachReplyPending(false);
     realtimeRef.current?.subscribe(activeTopic);
   }, [activeTopic]);
 
@@ -1495,7 +1574,6 @@ export default function AppPage() {
     clearCoachReplyRevealQueue();
     setAnimatedCoachReplies({});
     setTypingUsers({});
-    setCoachReplyPending(false);
     messagesRef.current = [];
     setMessages([]);
     const scopedDrafts = loadMessageDrafts(authUserId);
@@ -1531,7 +1609,25 @@ export default function AppPage() {
   }, [activeConversation?.topic]);
 
   useEffect(() => {
+    setCoachMenuOpen(false);
+    if (!activeConversation || activeConversation.type !== 'coach') {
+      setCoachPanelMode('chat');
+      return;
+    }
+    setCoachPanelMode('chat');
+  }, [activeConversation?.topic]);
+
+  useEffect(() => {
+    if (coachPanelMode === 'chat') return;
+    setComposerActionsOpen(false);
+  }, [coachPanelMode]);
+
+  useEffect(() => {
     if (!activeTopic) return;
+    if (activeConversation?.type === 'coach' && coachPanelMode !== 'chat') {
+      realtimeRef.current?.typing(activeTopic, false);
+      return;
+    }
     if (skipTypingPulseRef.current) {
       skipTypingPulseRef.current = false;
       return;
@@ -1542,7 +1638,7 @@ export default function AppPage() {
     return () => {
       realtimeRef.current?.typing(activeTopic, false);
     };
-  }, [composer, activeTopic]);
+  }, [composer, activeTopic, activeConversation?.type, coachPanelMode]);
 
   useEffect(() => {
     return () => {
@@ -1633,6 +1729,30 @@ export default function AppPage() {
       window.removeEventListener('keydown', onEscape);
     };
   }, [composerActionsOpen]);
+
+  useEffect(() => {
+    if (!coachMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!coachMenuRef.current?.contains(target)) {
+        setCoachMenuOpen(false);
+      }
+    };
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCoachMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onEscape);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onEscape);
+    };
+  }, [coachMenuOpen]);
 
   useEffect(() => {
     const onHotkey = (event: KeyboardEvent) => {
@@ -2089,6 +2209,7 @@ export default function AppPage() {
     if (pendingSend || !activeTopic || (!composer.trim() && attachments.length === 0)) return;
 
     const optimisticId = -Date.now();
+    const clientMessageId = createClientMessageId();
 
     try {
       setPendingSend(true);
@@ -2103,7 +2224,6 @@ export default function AppPage() {
         .map((item) => item.mediaId)
         .filter((item): item is string => Boolean(item));
       const text = composer.trim();
-      const hasCoachMention = activeConversation?.type === 'group' && /(^|\s)@coach\b/i.test(text);
 
       setComposer('');
       setAttachments([]);
@@ -2121,30 +2241,30 @@ export default function AppPage() {
         username: authUsername,
         avatar_url: null,
         is_coach: false,
+        client_message_id: clientMessageId,
       };
       const nextMessages = [...messagesRef.current, optimistic];
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
       scrollChatToBottom('smooth');
 
-      await sendMessage({
+      const response = await sendMessage({
         fromUserId: authUserId,
         topic: activeTopic,
         content: text,
         mediaUrls: uploadedUrls,
         mediaIds: uploadedMediaIds,
+        clientMessageId,
       });
 
-      if (hasCoachMention) {
-        setCoachReplyPending(true);
-        scrollChatToBottom('smooth');
+      if (response?.message) {
+        upsertActiveTopicMessage(response.message, response.clientMessageId || clientMessageId);
       }
 
       showNotice('Message sent.');
-      await loadMessagesForTopic(activeTopic);
       await loadInbox();
     } catch (err: any) {
-      const nextMessages = messagesRef.current.filter((item) => item.id !== optimisticId);
+      const nextMessages = messagesRef.current.filter((item) => item.id !== optimisticId && item.client_message_id !== clientMessageId);
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
       setError(err.message || 'Failed to send message.');
@@ -2828,6 +2948,8 @@ export default function AppPage() {
   const activeConversationTheme = coachTheme(activeConversationCoach);
   const selectedCoachTheme = coachTheme(selectedCoach);
   const selectedCoachButtonClass = coachButtonClass(selectedCoach);
+  const isCoachWorkspaceOpen = activeConversation?.type === 'coach' && coachPanelMode !== 'chat';
+  const activeCoachWorkspaceMode: CoachWorkspaceMode = coachPanelMode === 'chat' ? 'info' : coachPanelMode;
   const activeConversationButtonClass = coachButtonClass(activeConversation?.type === 'group'
     ? normalizeCoachId(activeConversation.coachEnabled)
     : activeConversationCoach);
@@ -2978,17 +3100,50 @@ export default function AppPage() {
                 <div className="flex items-center gap-2">
                   <h2 className="truncate text-xl font-bold text-slate-900">{activeConversation?.name || 'Select a chat'}</h2>
                   {activeConversation?.type === 'coach' ? (
-                    <div className="group relative">
+                    <div ref={coachMenuRef} className="relative flex items-center gap-2">
+                      <div className="group relative">
+                        <button
+                          type="button"
+                          className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
+                          aria-label="Coach safety notice"
+                        >
+                          i
+                        </button>
+                        <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
+                          {COACH_SAFETY_TOOLTIP}
+                        </div>
+                      </div>
                       <button
                         type="button"
-                        className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
-                        aria-label="Coach safety notice"
+                        className="flex size-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100/80 text-slate-500 transition hover:bg-slate-200/80"
+                        aria-label="Open coach workspace"
+                        onClick={() => setCoachMenuOpen((prev) => !prev)}
                       >
-                        i
+                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
                       </button>
-                      <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
-                        {COACH_SAFETY_TOOLTIP}
-                      </div>
+                      {coachMenuOpen ? (
+                        <div className="absolute right-0 top-[calc(100%+12px)] z-30 flex min-w-[180px] flex-col rounded-[22px] border border-white/70 bg-white/95 p-2 shadow-xl">
+                          {([
+                            ['info', 'Info'],
+                            ['meals', 'Meals'],
+                            ['trains', 'Trains'],
+                          ] as Array<[CoachWorkspaceMode, string]>).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
+                                coachPanelMode === value ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-100/80'
+                              }`}
+                              onClick={() => {
+                                setCoachPanelMode(value);
+                                setCoachMenuOpen(false);
+                              }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {activeConversation?.type === 'group' ? (
@@ -3006,313 +3161,309 @@ export default function AppPage() {
             </div>
           </header>
 
-          <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-5 py-5 md:px-6">
-            {messages.map((message, index) => {
-              const mine = message.from_user_id === authUserId;
-              const previous = index > 0 ? messages[index - 1] : null;
-              const previousDate = parseDisplayDate(previous?.created_at)?.toDateString() || null;
-              const currentDate = parseDisplayDate(message.created_at)?.toDateString() || null;
-              const showDateDivider = !previous || previousDate !== currentDate;
-              const compact = !!previous && previous.from_user_id === message.from_user_id && !showDateDivider;
-              const showMetaLine = !compact || mine;
-              const counterpartyName = message.is_coach
-                ? coachDisplayName(activeConversationCoach)
-                : message.username || (activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
-              const senderLabel = mine ? 'You' : counterpartyName;
-              const avatarText = avatarInitial(counterpartyName);
-              const counterpartyAvatarUrl = !mine && !message.is_coach
-                ? resolveApiAssetUrl(
-                    message.avatar_url
-                    || (activeConversation?.type === 'dm' ? activeConversation.avatarUrl || '' : ''),
-                  )
-                : '';
-              const isCoachReply = !mine && message.is_coach;
-              const revealedCoachSegmentCount = isCoachReply ? animatedCoachReplies[String(message.id)] : undefined;
-              const contentSegments = isCoachReply ? splitReplySegments(message.content) : [];
-              const isInlineCoachReveal = isCoachReply && typeof revealedCoachSegmentCount === 'number';
-              const hasRemainingCoachSegments = isCoachReply
-                && (revealedCoachSegmentCount ?? contentSegments.length) < contentSegments.length;
-              const renderedSegments = isCoachReply
-                ? contentSegments.slice(0, revealedCoachSegmentCount ?? contentSegments.length)
-                : (message.content ? [message.content] : []);
-              const senderMetaLabel = !mine && activeConversation?.type === 'coach' ? '' : senderLabel;
-              const showMessageMedia = !isCoachReply || !isInlineCoachReveal || !hasRemainingCoachSegments;
+          {isCoachWorkspaceOpen ? (
+            <CoachWorkspacePanel
+              userId={authUserId}
+              active={ready && authUserId > 0}
+              mode={activeCoachWorkspaceMode}
+              coachId={activeConversationCoach}
+              onNotice={showNotice}
+              onError={setError}
+              onBackToChat={() => setCoachPanelMode('chat')}
+              onOpenMedia={openMediaLightbox}
+            />
+          ) : (
+            <>
+              <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-5 py-5 md:px-6">
+                {messages.map((message, index) => {
+                  const mine = message.from_user_id === authUserId;
+                  const previous = index > 0 ? messages[index - 1] : null;
+                  const previousDate = parseDisplayDate(previous?.created_at)?.toDateString() || null;
+                  const currentDate = parseDisplayDate(message.created_at)?.toDateString() || null;
+                  const showDateDivider = !previous || previousDate !== currentDate;
+                  const compact = !!previous && previous.from_user_id === message.from_user_id && !showDateDivider;
+                  const showMetaLine = !compact || mine;
+                  const counterpartyName = message.is_coach
+                    ? coachDisplayName(activeConversationCoach)
+                    : message.username || (activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
+                  const senderLabel = mine ? 'You' : counterpartyName;
+                  const avatarText = avatarInitial(counterpartyName);
+                  const counterpartyAvatarUrl = !mine && !message.is_coach
+                    ? resolveApiAssetUrl(
+                        message.avatar_url
+                        || (activeConversation?.type === 'dm' ? activeConversation.avatarUrl || '' : ''),
+                      )
+                    : '';
+                  const isCoachReply = !mine && message.is_coach;
+                  const revealedCoachSegmentCount = isCoachReply ? animatedCoachReplies[String(message.id)] : undefined;
+                  const contentSegments = isCoachReply ? splitReplySegments(message.content) : [];
+                  const isInlineCoachReveal = isCoachReply && typeof revealedCoachSegmentCount === 'number';
+                  const hasRemainingCoachSegments = isCoachReply
+                    && (revealedCoachSegmentCount ?? contentSegments.length) < contentSegments.length;
+                  const renderedSegments = isCoachReply
+                    ? contentSegments.slice(0, revealedCoachSegmentCount ?? contentSegments.length)
+                    : (message.content ? [message.content] : []);
+                  const senderMetaLabel = !mine && activeConversation?.type === 'coach' ? '' : senderLabel;
+                  const showMessageMedia = !isCoachReply || !isInlineCoachReveal || !hasRemainingCoachSegments;
 
-              return (
-                <div key={`${message.id}-${message.created_at}`} className="mb-5">
-                  {showDateDivider ? (
-                    <div className="mb-4 flex items-center gap-4 py-2">
-                      <div className="h-px flex-1 bg-slate-200/60" />
-                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">{formatDayLabel(message.created_at)}</span>
-                      <div className="h-px flex-1 bg-slate-200/60" />
-                    </div>
-                  ) : null}
+                  return (
+                    <div key={`${message.id}-${message.created_at}`} className="mb-5">
+                      {showDateDivider ? (
+                        <div className="mb-4 flex items-center gap-4 py-2">
+                          <div className="h-px flex-1 bg-slate-200/60" />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">{formatDayLabel(message.created_at)}</span>
+                          <div className="h-px flex-1 bg-slate-200/60" />
+                        </div>
+                      ) : null}
 
-                  <div className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-2' : ''}`}>
-                    {!mine ? (
-                      <div
-                        className={`mt-1 flex size-8 items-center justify-center rounded-full text-xs font-semibold ${compact ? 'opacity-0' : ''}`}
-                        style={{
-                          background: message.is_coach
-                            ? (activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.12)')
-                            : 'rgba(148,163,184,0.16)',
-                          color: message.is_coach
-                            ? (activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)')
-                            : 'rgb(71 85 105)',
-                        }}
-                      >
-                        {compact ? '' : counterpartyAvatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={counterpartyAvatarUrl}
-                            alt={counterpartyName}
-                            className="h-full w-full rounded-full object-cover"
-                          />
-                        ) : avatarText}
-                      </div>
-                    ) : null}
+                      <div className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-2' : ''}`}>
+                        {!mine ? (
+                          <div
+                            className={`mt-1 flex size-8 items-center justify-center rounded-full text-xs font-semibold ${compact ? 'opacity-0' : ''}`}
+                            style={{
+                              background: message.is_coach
+                                ? (activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.12)')
+                                : 'rgba(148,163,184,0.16)',
+                              color: message.is_coach
+                                ? (activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)')
+                                : 'rgb(71 85 105)',
+                            }}
+                          >
+                            {compact ? '' : counterpartyAvatarUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={counterpartyAvatarUrl}
+                                alt={counterpartyName}
+                                className="h-full w-full rounded-full object-cover"
+                              />
+                            ) : avatarText}
+                          </div>
+                        ) : null}
 
-                    <article className={`max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-                      {showMetaLine ? (
-                        <div className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-400 ${mine ? 'justify-end' : 'justify-start'}`}>
-                          {senderMetaLabel ? (
-                            <strong
-                              className="font-semibold"
+                        <article className={`max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                          {showMetaLine ? (
+                            <div className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-400 ${mine ? 'justify-end' : 'justify-start'}`}>
+                              {senderMetaLabel ? (
+                                <strong
+                                  className="font-semibold"
+                                  style={{
+                                    color: !mine && message.is_coach
+                                      ? activeConversationTheme.ink
+                                      : 'var(--ink-500)',
+                                  }}
+                                >
+                                  {senderMetaLabel}
+                                </strong>
+                              ) : null}
+                              <span>{formatTime(message.created_at)}</span>
+                            </div>
+                          ) : null}
+
+                          {showMessageMedia && message.media_urls?.length > 0 ? (
+                            <div
+                              className={`mb-2 flex max-w-full gap-2 overflow-x-auto pb-1 ${mine ? 'justify-end' : 'justify-start'}`}
                               style={{
-                                color: !mine && message.is_coach
-                                  ? activeConversationTheme.ink
-                                  : 'var(--ink-500)',
+                                scrollbarWidth: 'none',
                               }}
                             >
-                              {senderMetaLabel}
-                            </strong>
+                              {message.media_urls.map((url) => {
+                                const mediaUrl = resolveApiAssetUrl(url);
+                                if (!mediaUrl) return null;
+                                return (
+                                  <button
+                                    key={mediaUrl}
+                                    type="button"
+                                    className="relative h-32 w-32 shrink-0 overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 md:h-36 md:w-36"
+                                    onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
+                                  >
+                                    {isVideoUrl(mediaUrl) ? (
+                                      <>
+                                        <video
+                                          src={mediaUrl}
+                                          muted
+                                          playsInline
+                                          preload="metadata"
+                                          className="h-full w-full object-cover"
+                                        />
+                                        <span className="pointer-events-none absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+                                          Video
+                                        </span>
+                                      </>
+                                    ) : (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={mediaUrl}
+                                        alt="attachment"
+                                        className="h-full w-full object-cover"
+                                      />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           ) : null}
-                          <span>{formatTime(message.created_at)}</span>
-                        </div>
-                      ) : null}
 
-                      {showMessageMedia && message.media_urls?.length > 0 ? (
-                        <div
-                          className={`mb-2 flex max-w-full gap-2 overflow-x-auto pb-1 ${mine ? 'justify-end' : 'justify-start'}`}
-                          style={{
-                            scrollbarWidth: 'none',
-                          }}
-                        >
-                          {message.media_urls.map((url) => {
-                            const mediaUrl = resolveApiAssetUrl(url);
-                            if (!mediaUrl) return null;
-                            return (
-                              <button
-                                key={mediaUrl}
-                                type="button"
-                                className="relative h-32 w-32 shrink-0 overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 md:h-36 md:w-36"
-                                onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
-                              >
-                                {isVideoUrl(mediaUrl) ? (
-                                  <>
-                                    <video
-                                      src={mediaUrl}
-                                      muted
-                                      playsInline
-                                      preload="metadata"
-                                      className="h-full w-full object-cover"
-                                    />
-                                    <span className="pointer-events-none absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
-                                      Video
-                                    </span>
-                                  </>
-                                ) : (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={mediaUrl}
-                                    alt="attachment"
-                                    className="h-full w-full object-cover"
-                                  />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
+                          {renderedSegments.map((segment, segmentIndex) => (
+                            <div
+                              key={`${message.id}-segment-${segmentIndex}`}
+                              className={`rounded-[22px] px-4 py-3 shadow-sm ${
+                                mine
+                                  ? 'rounded-tr-md border border-white/80 bg-white/80 text-slate-800'
+                                  : 'rounded-tl-md text-white'
+                              } ${segmentIndex > 0 ? 'mt-2' : ''}`}
+                              style={!mine ? (
+                                message.is_coach
+                                  ? {
+                                      background: activeConversationTheme.gradient,
+                                      boxShadow: activeConversationCoach === 'lc'
+                                        ? '0 18px 36px rgba(242,138,58,0.22)'
+                                        : '0 18px 36px rgba(105,121,247,0.22)',
+                                    }
+                                  : {
+                                      background: 'rgba(100,116,139,0.95)',
+                                      boxShadow: '0 18px 36px rgba(100,116,139,0.22)',
+                                    }
+                              ) : undefined}
+                            >
+                              {segment ? <p className="text-sm leading-6">{renderMessageInlineLinks(segment)}</p> : null}
+                            </div>
+                          ))}
 
-                      {renderedSegments.map((segment, segmentIndex) => (
-                        <div
-                          key={`${message.id}-segment-${segmentIndex}`}
-                          className={`rounded-[22px] px-4 py-3 shadow-sm ${
-                            mine
-                              ? 'rounded-tr-md border border-white/80 bg-white/80 text-slate-800'
-                              : 'rounded-tl-md text-white'
-                          } ${segmentIndex > 0 ? 'mt-2' : ''}`}
-                          style={!mine ? (
-                            message.is_coach
-                              ? {
-                                  background: activeConversationTheme.gradient,
-                                  boxShadow: activeConversationCoach === 'lc'
-                                    ? '0 18px 36px rgba(242,138,58,0.22)'
-                                    : '0 18px 36px rgba(105,121,247,0.22)',
-                                }
-                              : {
-                                  background: 'rgba(100,116,139,0.95)',
-                                  boxShadow: '0 18px 36px rgba(100,116,139,0.22)',
-                                }
-                          ) : undefined}
-                        >
-                          {segment ? <p className="text-sm leading-6">{renderMessageInlineLinks(segment)}</p> : null}
-                        </div>
-                      ))}
+                          {isCoachReply && hasRemainingCoachSegments ? (
+                            <div
+                              className="mt-2 inline-flex items-center gap-3 rounded-full border border-white/60 bg-white/75 px-4 py-2 text-sm shadow-sm"
+                              style={{
+                                color: activeConversationTheme.ink,
+                              }}
+                            >
+                              <span>{avatarText} is typing...</span>
+                              <span className="typing-dots" aria-hidden="true">
+                                <i />
+                                <i />
+                                <i />
+                              </span>
+                            </div>
+                          ) : null}
+                        </article>
+                      </div>
+                    </div>
+                  );
+                })}
 
-                      {isCoachReply && hasRemainingCoachSegments ? (
-                        <div
-                          className="mt-2 inline-flex items-center gap-3 rounded-full border border-white/60 bg-white/75 px-4 py-2 text-sm shadow-sm"
-                          style={{
-                            color: activeConversationTheme.ink,
-                          }}
-                        >
-                          <span>{avatarText} is typing...</span>
-                          <span className="typing-dots" aria-hidden="true">
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                        </div>
-                      ) : null}
-                    </article>
+                {typingLabel ? (
+                  <div className="mt-4 flex justify-start">
+                    <div className="inline-flex items-center gap-3 rounded-full bg-white/70 px-4 py-2 text-sm text-slate-500">
+                      <span>{typingLabel}</span>
+                      <span className="typing-dots" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                ) : null}
 
-            {typingLabel ? (
-              <div className="mt-4 flex justify-start">
-                <div className="inline-flex items-center gap-3 rounded-full bg-white/70 px-4 py-2 text-sm text-slate-500">
-                  <span>{typingLabel}</span>
-                  <span className="typing-dots" aria-hidden="true">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                </div>
               </div>
-            ) : null}
 
-            {coachReplyPending ? (
-              <div className="mt-4 flex justify-start">
-                <div
-                  className="inline-flex items-center gap-3 rounded-full px-4 py-2 text-sm"
-                  style={{
-                    background: activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                    color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
-                  }}
-                >
-                  <span>@coach detected, waiting for reply...</span>
-                  <span className="typing-dots" aria-hidden="true">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                </div>
-              </div>
-            ) : null}
-          </div>
+              <footer className="border-t border-slate-200/50 bg-white/35 px-5 py-4 md:px-6">
+                <MediaPreviewGrid
+                  items={attachmentPreviews}
+                  onRemove={(index) => removeAttachmentAt(index, setAttachments)}
+                  wrapperClassName="chat-preview-grid"
+                  itemClassName="chat-preview-item"
+                  mediaHeight={128}
+                  showVideoControls={false}
+                />
 
-          <footer className="border-t border-slate-200/50 bg-white/35 px-5 py-4 md:px-6">
-            <MediaPreviewGrid
-              items={attachmentPreviews}
-              onRemove={(index) => removeAttachmentAt(index, setAttachments)}
-              wrapperClassName="chat-preview-grid"
-              itemClassName="chat-preview-item"
-              mediaHeight={128}
-              showVideoControls={false}
-            />
-
-            <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 md:flex-row md:items-end">
-              <div ref={composerMenuRef} className="relative">
-                <button
-                  className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
-                  type="button"
-                  onClick={() => setComposerActionsOpen((prev) => !prev)}
-                  aria-label="Open attachment actions"
-                >
-                  <span className="material-symbols-outlined">add_circle</span>
-                </button>
-                {composerActionsOpen ? (
-                  <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[240px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
-                    <label className="btn btn-ghost flex-col items-start gap-0.5" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
-                      <span>Photo / Video</span>
-                      <span className="text-xs font-normal text-slate-400">Up to 50MB each</span>
-                      <input
-                        hidden
-                        type="file"
-                        multiple
-                        accept="image/*,video/*"
-                        onChange={(event) => {
-                          onFileSelect(attachments, setAttachments)(event);
-                          setComposerActionsOpen(false);
-                        }}
-                      />
-                    </label>
-                    {attachments.length > 0 ? (
-                      <button
-                        className="btn btn-ghost"
-                        type="button"
-                        style={{ justifyContent: 'flex-start' }}
-                        onClick={() => {
-                          setAttachments([]);
-                          setComposerActionsOpen(false);
-                        }}
-                      >
-                        Clear attachments
-                      </button>
+                <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 md:flex-row md:items-end">
+                  <div ref={composerMenuRef} className="relative">
+                    <button
+                      className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                      type="button"
+                      onClick={() => setComposerActionsOpen((prev) => !prev)}
+                      aria-label="Open attachment actions"
+                    >
+                      <span className="material-symbols-outlined">add_circle</span>
+                    </button>
+                    {composerActionsOpen ? (
+                      <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[240px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
+                        <label className="btn btn-ghost flex-col items-start gap-0.5" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
+                          <span>Photo / Video</span>
+                          <span className="text-xs font-normal text-slate-400">Up to 50MB each</span>
+                          <input
+                            hidden
+                            type="file"
+                            multiple
+                            accept="image/*,video/*"
+                            onChange={(event) => {
+                              onFileSelect(attachments, setAttachments)(event);
+                              setComposerActionsOpen(false);
+                            }}
+                          />
+                        </label>
+                        {attachments.length > 0 ? (
+                          <button
+                            className="btn btn-ghost"
+                            type="button"
+                            style={{ justifyContent: 'flex-start' }}
+                            onClick={() => {
+                              setAttachments([]);
+                              setComposerActionsOpen(false);
+                            }}
+                          >
+                            Clear attachments
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
-                ) : null}
-              </div>
 
-              <input
-                className="flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                value={composer}
-                onChange={(event) => setComposer(event.target.value)}
-                placeholder="Type an encouraging message..."
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleSendMessage();
-                  }
-                }}
-              />
-
-              <div className="flex items-center gap-2 self-end">
-                {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      if (!/(^|\s)@coach\b/i.test(composer)) {
-                        setComposer((prev) => (prev.trim() ? `@coach ${prev}` : '@coach '));
+                  <input
+                    className="flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                    value={composer}
+                    onChange={(event) => setComposer(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        void handleSendMessage();
                       }
                     }}
-                    type="button"
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    @coach
-                  </button>
-                ) : null}
-                <button
-                  className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
-                  disabled={pendingSend || !isOnline}
-                  onClick={() => void handleSendMessage()}
-                >
-                  <span className="material-symbols-outlined">send</span>
-                </button>
-              </div>
-            </div>
+                  />
 
-            {attachments.length > 0 ? (
-              <p className="mt-3 text-xs text-slate-500">
-                {attachments.length}/{MAX_MEDIA_ATTACHMENTS} file(s) ready
-              </p>
-            ) : null}
-            {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
-          </footer>
+                  <div className="flex items-center gap-2 self-end">
+                    {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          if (!/(^|\s)@coach\b/i.test(composer)) {
+                            setComposer((prev) => (prev.trim() ? `@coach ${prev}` : '@coach '));
+                          }
+                        }}
+                        type="button"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        @coach
+                      </button>
+                    ) : null}
+                    <button
+                      className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                      disabled={pendingSend || !isOnline}
+                      onClick={() => void handleSendMessage()}
+                    >
+                      <span className="material-symbols-outlined">send</span>
+                    </button>
+                  </div>
+                </div>
+
+                {attachments.length > 0 ? (
+                  <p className="mt-3 text-xs text-slate-500">
+                    {attachments.length}/{MAX_MEDIA_ATTACHMENTS} file(s) ready
+                  </p>
+                ) : null}
+                {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
+              </footer>
+            </>
+          )}
         </section>
       </div>
     </div>
@@ -3968,15 +4119,6 @@ export default function AppPage() {
               </div>
             </section>
         </div>
-
-        <CoachRecordsPanel
-          userId={authUserId}
-          active={ready && activeTab === 'profile' && authUserId > 0}
-          coachId={selectedCoach}
-          onNotice={showNotice}
-          onError={setError}
-        />
-
         <section className="rounded-[28px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-5 backdrop-blur-xl">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -4280,7 +4422,15 @@ export default function AppPage() {
               </div>
             </header>
             <div className="media-lightbox-body">
-              {mediaLightbox.isVideo ? (
+              {mediaLightbox.embedUrl ? (
+                <iframe
+                  src={mediaLightbox.embedUrl}
+                  title={mediaLightbox.label}
+                  allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                  allowFullScreen
+                  style={{ width: '100%', height: '70vh', border: 0, borderRadius: 12 }}
+                />
+              ) : mediaLightbox.isVideo ? (
                 <video src={mediaLightbox.url} controls autoPlay style={{ width: '100%', maxHeight: '70vh', borderRadius: 12 }} />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element

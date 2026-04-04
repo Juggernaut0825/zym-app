@@ -19,6 +19,12 @@ export class SearchKnowledgeTool implements Tool {
           type: 'array',
           description: 'Optional domain hints, for example fitness, nutrition, training, workout, food, or diet.',
           itemType: 'string',
+          itemEnum: ['fitness', 'nutrition', 'training', 'workout', 'food', 'diet'],
+          items: {
+            type: 'string',
+            description: 'Domain hint string.',
+            enum: ['fitness', 'nutrition', 'training', 'workout', 'food', 'diet'],
+          },
           maxItems: 2,
         },
         topK: {
