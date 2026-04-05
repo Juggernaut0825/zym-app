@@ -350,6 +350,56 @@ function getCoachDailyPath(userId: number): string {
   return path.join(resolveUserDataDir(String(userId)), 'daily.json');
 }
 
+function normalizeSelectedCoach(value: unknown): 'zj' | 'lc' | null {
+  return value === 'lc' || value === 'zj' ? value : null;
+}
+
+function inferSelectedCoachFromHistory(userId: number): 'zj' | 'lc' | null {
+  const db = getDB();
+  const legacyTopic = `coach_${userId}`;
+  const zjTopic = `coach_zj_${userId}`;
+  const lcTopic = `coach_lc_${userId}`;
+
+  const latestMessage = db.prepare(`
+    SELECT topic
+    FROM messages
+    WHERE topic IN (?, ?, ?)
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(legacyTopic, zjTopic, lcTopic) as { topic?: string | null } | undefined;
+
+  const latestTopic = String(latestMessage?.topic || '').trim();
+  if (latestTopic === lcTopic) return 'lc';
+  if (latestTopic === zjTopic || latestTopic === legacyTopic) return 'zj';
+
+  const latestOutreach = db.prepare(`
+    SELECT coach_id
+    FROM coach_outreach_events
+    WHERE user_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(userId) as { coach_id?: string | null } | undefined;
+
+  return normalizeSelectedCoach(latestOutreach?.coach_id);
+}
+
+function resolveSelectedCoachForUser(userId: number): 'zj' | 'lc' | null {
+  const db = getDB();
+  const user = db
+    .prepare('SELECT selected_coach FROM users WHERE id = ?')
+    .get(userId) as { selected_coach?: string | null } | undefined;
+  const persisted = normalizeSelectedCoach(user?.selected_coach);
+  if (persisted) {
+    return persisted;
+  }
+
+  const inferred = inferSelectedCoachFromHistory(userId);
+  if (inferred) {
+    db.prepare('UPDATE users SET selected_coach = ? WHERE id = ?').run(inferred, userId);
+  }
+  return inferred;
+}
+
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   try {
     const raw = await fsPromises.readFile(filePath, 'utf8');
@@ -1340,7 +1390,8 @@ app.post('/auth/login',
     }
 
     const db = getDB();
-    const user = db.prepare('SELECT id, username, selected_coach, timezone FROM users WHERE id = ?').get(result.userId) as any;
+    const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(result.userId) as any;
+    const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
     if (Array.isArray(result.revokedSessionIds) && result.revokedSessionIds.length > 0) {
       const ws = WSServer.getInstance();
       for (const revokedSessionId of result.revokedSessionIds) {
@@ -1358,7 +1409,7 @@ app.post('/auth/login',
     res.json({
       ...result,
       username: user?.username,
-      selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
+      selectedCoach,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -1410,7 +1461,8 @@ app.post('/auth/google',
       }
 
       const db = getDB();
-      const user = db.prepare('SELECT id, username, selected_coach, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+      const user = db.prepare('SELECT id, username, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+      const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
 
       trackSecurityEvent(req, 'auth_google_login_success', {
         userId: Number(result.userId),
@@ -1423,7 +1475,7 @@ app.post('/auth/google',
       res.json({
         ...result,
         username: user?.username,
-        selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
+        selectedCoach,
         timezone: user?.timezone || null,
       });
     } catch (err: any) {
@@ -1479,12 +1531,13 @@ app.post('/auth/refresh',
     }
 
     const db = getDB();
-    const user = db.prepare('SELECT id, username, selected_coach, timezone FROM users WHERE id = ?').get(refreshed.userId) as any;
+    const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(refreshed.userId) as any;
+    const selectedCoach = resolveSelectedCoachForUser(Number(refreshed.userId));
 
     res.json({
       ...refreshed,
       username: user?.username,
-      selectedCoach: user?.selected_coach === 'lc' || user?.selected_coach === 'zj' ? user.selected_coach : null,
+      selectedCoach,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -2987,12 +3040,7 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
 
     const mealCount = records.reduce((sum, day) => sum + day.meals.length, 0);
     const trainingCount = records.reduce((sum, day) => sum + day.training.length, 0);
-    const user = getDB()
-      .prepare('SELECT selected_coach FROM users WHERE id = ?')
-      .get(userId) as { selected_coach?: string | null } | undefined;
-    const selectedCoach = user?.selected_coach === 'lc' || user?.selected_coach === 'zj'
-      ? user.selected_coach
-      : null;
+    const selectedCoach = resolveSelectedCoachForUser(userId);
 
     res.json({
       selectedCoach,

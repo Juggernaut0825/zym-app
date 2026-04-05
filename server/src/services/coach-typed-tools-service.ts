@@ -261,6 +261,10 @@ function normalizeFreeformProfileText(value: unknown, maxLength = 120): string {
     .slice(0, maxLength);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function parseHeightCm(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const text = normalizeFreeformProfileText(value, 40).toLowerCase();
@@ -527,6 +531,21 @@ export class CoachTypedToolsService {
     }
 
     return out;
+  }
+
+  private unwrapLegacyProfileShape(raw: Record<string, unknown>): Record<string, unknown> {
+    const nested = isPlainRecord(raw.profile) ? raw.profile : null;
+    if (!nested) {
+      return raw;
+    }
+
+    const merged = {
+      ...nested,
+      ...Object.fromEntries(
+        Object.entries(raw).filter(([key]) => key !== 'profile' && key !== 'updatedFields' && key !== 'success'),
+      ),
+    };
+    return merged;
   }
 
   private recomputeProfileDerived(profile: Record<string, unknown>): void {
@@ -798,8 +817,25 @@ export class CoachTypedToolsService {
   async getProfile(userId: string): Promise<Record<string, unknown>> {
     const profilePath = this.getProfilePath(userId);
     const rawProfile = await readJson<Record<string, unknown>>(profilePath, {});
-    const profile = rawProfile && typeof rawProfile === 'object' ? rawProfile : {};
+    const profile = rawProfile && typeof rawProfile === 'object'
+      ? this.unwrapLegacyProfileShape(rawProfile)
+      : {};
     const normalized = { ...profile, ...this.sanitizeProfilePatch(profile) } as Record<string, unknown>;
+    const userRow = getDB()
+      .prepare('SELECT fitness_goal, timezone FROM users WHERE id = ?')
+      .get(userId) as { fitness_goal?: string | null; timezone?: string | null } | undefined;
+    if (!normalizeFreeformProfileText(normalized.goal, 120)) {
+      const fallbackGoal = normalizeFreeformProfileText(userRow?.fitness_goal, 120);
+      if (fallbackGoal) {
+        normalized.goal = fallbackGoal;
+      }
+    }
+    if (!normalizeFreeformProfileText(normalized.timezone, 120)) {
+      const fallbackTimezone = safeString(userRow?.timezone, 120).replace(/\s+/g, '');
+      if (fallbackTimezone && isValidTimeZone(fallbackTimezone)) {
+        normalized.timezone = fallbackTimezone;
+      }
+    }
     this.recomputeProfileDerived(normalized);
 
     if (JSON.stringify(profile) !== JSON.stringify(normalized)) {

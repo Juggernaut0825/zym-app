@@ -219,7 +219,7 @@ struct LoginView: View {
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId
-                appState.selectedCoach = loginResponse.selectedCoach
+                appState.selectedCoach = loginResponse.selectedCoach ?? appState.selectedCoach ?? "zj"
                 appState.isLoggedIn = true
             }
         }.resume()

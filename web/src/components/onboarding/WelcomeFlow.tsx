@@ -120,13 +120,23 @@ function buildSetupState(
   initialCoach: CoachId | null,
   selectedCoachOverride?: CoachId | null,
 ): SetupState {
-  const source = (profile || {}) as CoachProfileData & {
+  const rawSource = (profile || {}) as CoachProfileData & {
+    profile?: CoachProfileData | null;
     body_fat?: number | null;
     activity?: string | null;
     experience?: string | null;
+    fitness_goal?: string | null;
   };
+  const source = ((rawSource.profile && typeof rawSource.profile === 'object')
+    ? { ...rawSource.profile, ...rawSource }
+    : rawSource) as CoachProfileData & {
+      body_fat?: number | null;
+      activity?: string | null;
+      experience?: string | null;
+      fitness_goal?: string | null;
+    };
   return {
-    coach: selectedCoachOverride || initialCoach || '',
+    coach: selectedCoachOverride || initialCoach || 'zj',
     height: String(source.height || source.height_cm || '').trim(),
     weight: String(source.weight || source.weight_kg || '').trim(),
     age: source.age ? String(source.age) : '',
@@ -134,7 +144,7 @@ function buildSetupState(
     trainingDays: source.training_days ? String(source.training_days) : '',
     gender: String(source.gender || ''),
     activityLevel: String(source.activity_level || source.activity || ''),
-    goal: String(source.goal || ''),
+    goal: String(source.goal || source.fitness_goal || ''),
     experienceLevel: String(source.experience_level || source.experience || ''),
     notes: String(source.notes || ''),
   };
