@@ -17,7 +17,7 @@ import {
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
-import { resolveAppDataRoot, resolveUploadsDir } from '../config/app-paths.js';
+import { resolveUploadsDir } from '../config/app-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -474,21 +474,6 @@ export class CoachTypedToolsService {
     return path.join(this.getUserDataDir(userId), 'profile.json');
   }
 
-  private getLegacyProfilePaths(userId: string): string[] {
-    const root = resolveAppDataRoot();
-    const safeUserId = String(userId || '').trim();
-    const candidates = [
-      path.join(root, `user${safeUserId}`, 'profile.json'),
-      path.join(root, `user_${safeUserId}`, 'profile.json'),
-      path.join(root, `user-${safeUserId}`, 'profile.json'),
-      path.join(root, 'users', safeUserId, 'profile.json'),
-      path.join(root, 'user', safeUserId, 'profile.json'),
-      path.join(root, 'profiles', `${safeUserId}.json`),
-      path.join(root, 'profiles', `user${safeUserId}.json`),
-    ];
-    return Array.from(new Set(candidates)).filter((candidate) => candidate !== this.getProfilePath(userId));
-  }
-
   private getDailyPath(userId: string): string {
     return path.join(this.getUserDataDir(userId), 'daily.json');
   }
@@ -582,92 +567,6 @@ export class CoachTypedToolsService {
       ),
     };
     return merged;
-  }
-
-  private hasMeaningfulProfileValue(value: unknown): boolean {
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') return value.trim().length > 0;
-    if (Array.isArray(value)) return value.length > 0;
-    return true;
-  }
-
-  private mergeProfileFields(target: Record<string, unknown>, source: Record<string, unknown>): void {
-    for (const [key, value] of Object.entries(source)) {
-      if (this.hasMeaningfulProfileValue(value)) {
-        target[key] = value;
-      }
-    }
-  }
-
-  private async getProfileSnapshotPaths(userId: string): Promise<string[]> {
-    const candidates = new Set<string>([
-      this.getProfilePath(userId),
-      ...this.getLegacyProfilePaths(userId),
-    ]);
-
-    const bases = Array.from(candidates);
-    for (const basePath of bases) {
-      const dirPath = path.dirname(basePath);
-      const fileName = path.basename(basePath);
-      try {
-        const entries = await fs.readdir(dirPath);
-        for (const entry of entries) {
-          if (
-            entry === `${fileName}.tmp`
-            || (entry.startsWith(`${fileName}.`) && entry.endsWith('.tmp'))
-            || entry === `${fileName}.bak`
-            || (entry.startsWith(`${fileName}.`) && entry.endsWith('.bak'))
-          ) {
-            candidates.add(path.join(dirPath, entry));
-          }
-        }
-      } catch {
-        // Ignore missing legacy directories; they are optional.
-      }
-    }
-
-    return Array.from(candidates);
-  }
-
-  private async loadMergedProfileState(userId: string): Promise<{
-    merged: Record<string, unknown>;
-    canonical: Record<string, unknown>;
-    usedRecoverySources: boolean;
-  }> {
-    const profilePath = this.getProfilePath(userId);
-    const snapshotPaths = await this.getProfileSnapshotPaths(userId);
-    const snapshots: Array<{ filePath: string; mtimeMs: number; raw: Record<string, unknown> }> = [];
-
-    for (const filePath of snapshotPaths) {
-      const raw = await readJsonOptional<Record<string, unknown>>(filePath);
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).length === 0) {
-        continue;
-      }
-      let mtimeMs = 0;
-      try {
-        mtimeMs = (await fs.stat(filePath)).mtimeMs;
-      } catch {
-        mtimeMs = 0;
-      }
-      snapshots.push({ filePath, mtimeMs, raw });
-    }
-
-    snapshots.sort((left, right) => left.mtimeMs - right.mtimeMs);
-
-    const merged: Record<string, unknown> = {};
-    const canonical = snapshots.find((snapshot) => snapshot.filePath === profilePath)?.raw || {};
-
-    for (const snapshot of snapshots) {
-      const unwrapped = this.unwrapLegacyProfileShape(snapshot.raw);
-      this.mergeProfileFields(merged, unwrapped);
-      this.mergeProfileFields(merged, this.sanitizeProfilePatch(unwrapped));
-    }
-
-    return {
-      merged,
-      canonical: this.unwrapLegacyProfileShape(canonical),
-      usedRecoverySources: snapshots.some((snapshot) => snapshot.filePath !== profilePath),
-    };
   }
 
   private recomputeProfileDerived(profile: Record<string, unknown>): void {
@@ -938,8 +837,11 @@ export class CoachTypedToolsService {
 
   async getProfile(userId: string): Promise<Record<string, unknown>> {
     const profilePath = this.getProfilePath(userId);
-    const { merged, canonical, usedRecoverySources } = await this.loadMergedProfileState(userId);
-    const normalized = { ...merged, ...this.sanitizeProfilePatch(merged) } as Record<string, unknown>;
+    const rawProfile = await readJsonOptional<Record<string, unknown>>(profilePath);
+    const profile = rawProfile && typeof rawProfile === 'object' && !Array.isArray(rawProfile)
+      ? this.unwrapLegacyProfileShape(rawProfile)
+      : {};
+    const normalized = { ...profile, ...this.sanitizeProfilePatch(profile) } as Record<string, unknown>;
     const userRow = getDB()
       .prepare('SELECT fitness_goal, timezone FROM users WHERE id = ?')
       .get(userId) as { fitness_goal?: string | null; timezone?: string | null } | undefined;
@@ -957,10 +859,7 @@ export class CoachTypedToolsService {
     }
     this.recomputeProfileDerived(normalized);
 
-    const normalizedCanonical = { ...canonical, ...this.sanitizeProfilePatch(canonical) } as Record<string, unknown>;
-    this.recomputeProfileDerived(normalizedCanonical);
-
-    if (usedRecoverySources || JSON.stringify(normalizedCanonical) !== JSON.stringify(normalized)) {
+    if (JSON.stringify(profile) !== JSON.stringify(normalized)) {
       await ensureDir(path.dirname(profilePath));
       await writeJsonAtomic(profilePath, normalized);
     }
@@ -977,7 +876,10 @@ export class CoachTypedToolsService {
 
     const profilePath = this.getProfilePath(userId);
     await ensureDir(path.dirname(profilePath));
-    const { merged: current } = await this.loadMergedProfileState(userId);
+    const rawCurrent = await readJson<Record<string, unknown>>(profilePath, {});
+    const current = rawCurrent && typeof rawCurrent === 'object' && !Array.isArray(rawCurrent)
+      ? this.unwrapLegacyProfileShape(rawCurrent)
+      : {};
     const next = { ...current, ...sanitized };
     this.recomputeProfileDerived(next);
     await writeJsonAtomic(profilePath, next);
