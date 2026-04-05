@@ -455,7 +455,7 @@ struct CoachWelcomeFlowView: View {
                 loadingExisting = false
                 if let profile = decoded?.profile {
                     state = CoachWelcomeSetupState(
-                        coach: appState.selectedCoach ?? "",
+                        coach: decoded?.selectedCoach ?? appState.selectedCoach ?? "",
                         height: coachWelcomeString(profile.height) ?? coachWelcomeNumber(profile.height_cm),
                         weight: coachWelcomeString(profile.weight) ?? coachWelcomeNumber(profile.weight_kg),
                         age: profile.age.map(String.init) ?? "",
@@ -467,8 +467,11 @@ struct CoachWelcomeFlowView: View {
                         experienceLevel: profile.experience_level ?? "",
                         notes: profile.notes ?? ""
                     )
+                    if let selectedCoach = decoded?.selectedCoach, !selectedCoach.isEmpty {
+                        appState.selectedCoach = selectedCoach
+                    }
                 } else {
-                    state.coach = appState.selectedCoach ?? ""
+                    state.coach = decoded?.selectedCoach ?? appState.selectedCoach ?? ""
                 }
             }
         }.resume()

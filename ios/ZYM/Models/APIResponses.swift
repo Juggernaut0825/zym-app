@@ -1,5 +1,63 @@
 import Foundation
 
+private extension KeyedDecodingContainer {
+    func decodeFlexibleString(forKey key: Key) -> String? {
+        if let stringValue = try? decodeIfPresent(String.self, forKey: key) {
+            let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let intValue = try? decodeIfPresent(Int.self, forKey: key) {
+            return String(intValue)
+        }
+        if let doubleValue = try? decodeIfPresent(Double.self, forKey: key) {
+            if abs(doubleValue.rounded() - doubleValue) < 0.00001 {
+                return String(Int(doubleValue.rounded()))
+            }
+            return String(doubleValue)
+        }
+        return nil
+    }
+
+    func decodeFlexibleDouble(forKeys keys: [Key]) -> Double? {
+        for key in keys {
+            if let doubleValue = try? decodeIfPresent(Double.self, forKey: key) {
+                return doubleValue
+            }
+            if let intValue = try? decodeIfPresent(Int.self, forKey: key) {
+                return Double(intValue)
+            }
+            if let stringValue = try? decodeIfPresent(String.self, forKey: key) {
+                let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let parsed = Double(trimmed) {
+                    return parsed
+                }
+            }
+        }
+        return nil
+    }
+
+    func decodeFlexibleInt(forKeys keys: [Key]) -> Int? {
+        for key in keys {
+            if let intValue = try? decodeIfPresent(Int.self, forKey: key) {
+                return intValue
+            }
+            if let doubleValue = try? decodeIfPresent(Double.self, forKey: key) {
+                return Int(doubleValue.rounded())
+            }
+            if let stringValue = try? decodeIfPresent(String.self, forKey: key) {
+                let trimmed = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let parsed = Int(trimmed) {
+                    return parsed
+                }
+                if let parsed = Double(trimmed) {
+                    return Int(parsed.rounded())
+                }
+            }
+        }
+        return nil
+    }
+}
+
 struct APIErrorResponse: Codable {
     let error: String
 }
@@ -117,7 +175,7 @@ func coachBodyFatValueToRange(_ value: Double?) -> String {
     return best.value
 }
 
-struct CoachProfileData: Codable {
+struct CoachProfileData: Decodable {
     let height: String?
     let weight: String?
     let height_cm: Double?
@@ -134,6 +192,49 @@ struct CoachProfileData: Codable {
     let bmr: Double?
     let tdee: Double?
     let daily_target: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case height
+        case weight
+        case height_cm
+        case weight_kg
+        case age
+        case body_fat_pct
+        case body_fat
+        case training_days
+        case gender
+        case activity_level
+        case activity
+        case goal
+        case experience_level
+        case experience
+        case notes
+        case timezone
+        case bmr
+        case tdee
+        case daily_target
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        height = container.decodeFlexibleString(forKey: .height)
+        weight = container.decodeFlexibleString(forKey: .weight)
+        height_cm = container.decodeFlexibleDouble(forKeys: [.height_cm, .height])
+        weight_kg = container.decodeFlexibleDouble(forKeys: [.weight_kg, .weight])
+        age = container.decodeFlexibleInt(forKeys: [.age])
+        body_fat_pct = container.decodeFlexibleDouble(forKeys: [.body_fat_pct, .body_fat])
+        training_days = container.decodeFlexibleInt(forKeys: [.training_days])
+        gender = container.decodeFlexibleString(forKey: .gender)
+        activity_level = container.decodeFlexibleString(forKey: .activity_level) ?? container.decodeFlexibleString(forKey: .activity)
+        goal = container.decodeFlexibleString(forKey: .goal)
+        experience_level = container.decodeFlexibleString(forKey: .experience_level) ?? container.decodeFlexibleString(forKey: .experience)
+        notes = container.decodeFlexibleString(forKey: .notes)
+        timezone = container.decodeFlexibleString(forKey: .timezone)
+        bmr = container.decodeFlexibleDouble(forKeys: [.bmr])
+        tdee = container.decodeFlexibleDouble(forKeys: [.tdee])
+        daily_target = container.decodeFlexibleDouble(forKeys: [.daily_target])
+    }
 }
 
 struct CoachMealRecord: Codable, Identifiable {
@@ -214,7 +315,8 @@ struct CoachRecordsStats: Codable {
     let trainingCount: Int
 }
 
-struct CoachRecordsResponse: Codable {
+struct CoachRecordsResponse: Decodable {
+    let selectedCoach: String?
     let profile: CoachProfileData
     let records: [CoachDayRecord]
     let stats: CoachRecordsStats

@@ -349,6 +349,7 @@ export interface CoachDayRecord {
 }
 
 export interface CoachRecordsResponse {
+  selectedCoach?: 'zj' | 'lc' | null;
   profile: CoachProfileData;
   records: CoachDayRecord[];
   stats: {

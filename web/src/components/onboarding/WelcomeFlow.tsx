@@ -115,19 +115,27 @@ function stepSubtitle(step: number): string {
   }
 }
 
-function buildSetupState(profile: CoachProfileData | null | undefined, initialCoach: CoachId | null): SetupState {
-  const source = profile || {};
+function buildSetupState(
+  profile: CoachProfileData | null | undefined,
+  initialCoach: CoachId | null,
+  selectedCoachOverride?: CoachId | null,
+): SetupState {
+  const source = (profile || {}) as CoachProfileData & {
+    body_fat?: number | null;
+    activity?: string | null;
+    experience?: string | null;
+  };
   return {
-    coach: initialCoach || '',
+    coach: selectedCoachOverride || initialCoach || '',
     height: String(source.height || source.height_cm || '').trim(),
     weight: String(source.weight || source.weight_kg || '').trim(),
     age: source.age ? String(source.age) : '',
-    bodyFatRange: bodyFatValueToRange(source.body_fat_pct as number | null | undefined),
+    bodyFatRange: bodyFatValueToRange((source.body_fat_pct ?? source.body_fat) as number | null | undefined),
     trainingDays: source.training_days ? String(source.training_days) : '',
     gender: String(source.gender || ''),
-    activityLevel: String(source.activity_level || ''),
+    activityLevel: String(source.activity_level || source.activity || ''),
     goal: String(source.goal || ''),
-    experienceLevel: String(source.experience_level || ''),
+    experienceLevel: String(source.experience_level || source.experience || ''),
     notes: String(source.notes || ''),
   };
 }
@@ -154,7 +162,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     void getCoachRecords(userId, 45)
       .then((result) => {
         if (cancelled) return;
-        setState(buildSetupState(result.profile, initialCoach));
+        setState(buildSetupState(result.profile, initialCoach, result.selectedCoach || null));
       })
       .catch(() => {
         if (cancelled) return;

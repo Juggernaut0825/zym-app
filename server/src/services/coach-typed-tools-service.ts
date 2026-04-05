@@ -796,8 +796,18 @@ export class CoachTypedToolsService {
   }
 
   async getProfile(userId: string): Promise<Record<string, unknown>> {
-    const profile = await readJson<Record<string, unknown>>(this.getProfilePath(userId), {});
-    return profile && typeof profile === 'object' ? profile : {};
+    const profilePath = this.getProfilePath(userId);
+    const rawProfile = await readJson<Record<string, unknown>>(profilePath, {});
+    const profile = rawProfile && typeof rawProfile === 'object' ? rawProfile : {};
+    const normalized = { ...profile, ...this.sanitizeProfilePatch(profile) } as Record<string, unknown>;
+    this.recomputeProfileDerived(normalized);
+
+    if (JSON.stringify(profile) !== JSON.stringify(normalized)) {
+      await ensureDir(path.dirname(profilePath));
+      await writeJsonAtomic(profilePath, normalized);
+    }
+
+    return normalized;
   }
 
   async setProfile(userId: string, profilePatch: Record<string, unknown>): Promise<Record<string, unknown>> {

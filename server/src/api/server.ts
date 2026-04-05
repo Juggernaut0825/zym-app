@@ -2987,8 +2987,15 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
 
     const mealCount = records.reduce((sum, day) => sum + day.meals.length, 0);
     const trainingCount = records.reduce((sum, day) => sum + day.training.length, 0);
+    const user = getDB()
+      .prepare('SELECT selected_coach FROM users WHERE id = ?')
+      .get(userId) as { selected_coach?: string | null } | undefined;
+    const selectedCoach = user?.selected_coach === 'lc' || user?.selected_coach === 'zj'
+      ? user.selected_coach
+      : null;
 
     res.json({
+      selectedCoach,
       profile,
       records,
       stats: {
