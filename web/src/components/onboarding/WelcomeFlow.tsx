@@ -9,8 +9,15 @@ import {
   bodyFatRangeToValue,
   bodyFatValueToRange,
   experienceLevelOptions,
+  formatNumericProfileValue,
   genderOptions,
   goalOptions,
+  normalizeActivityLevelValue,
+  normalizeExperienceLevelValue,
+  normalizeGenderValue,
+  normalizeGoalValue,
+  normalizeTrainingDaysValue,
+  optionLabelForValue,
   trainingDayOptions,
 } from '@/lib/coach-profile-options';
 import type { CoachProfileData } from '@/lib/types';
@@ -146,15 +153,15 @@ function buildSetupState(
     };
   return {
     coach: selectedCoachOverride || initialCoach || '',
-    height: String(source.height || source.height_cm || source.heightCm || '').trim(),
-    weight: String(source.weight || source.weight_kg || source.weightKg || '').trim(),
-    age: String(source.age || source.ageYears || '').trim(),
+    height: formatNumericProfileValue(source.height_cm ?? source.heightCm ?? source.height, 1),
+    weight: formatNumericProfileValue(source.weight_kg ?? source.weightKg ?? source.weight, 2),
+    age: formatNumericProfileValue(source.age ?? source.ageYears, 0),
     bodyFatRange: bodyFatValueToRange((source.body_fat_pct ?? source.body_fat ?? source.bodyFatPct) as number | null | undefined),
-    trainingDays: String(source.training_days || source.trainingDays || '').trim(),
-    gender: String(source.gender || ''),
-    activityLevel: String(source.activity_level || source.activity || source.activityLevel || ''),
-    goal: String(source.goal || source.fitness_goal || source.fitnessGoal || ''),
-    experienceLevel: String(source.experience_level || source.experience || source.experienceLevel || ''),
+    trainingDays: normalizeTrainingDaysValue(source.training_days ?? source.trainingDays),
+    gender: normalizeGenderValue(source.gender),
+    activityLevel: normalizeActivityLevelValue(source.activity_level || source.activity || source.activityLevel),
+    goal: normalizeGoalValue(source.goal || source.fitness_goal || source.fitnessGoal),
+    experienceLevel: normalizeExperienceLevelValue(source.experience_level || source.experience || source.experienceLevel),
     notes: String(source.notes || ''),
   };
 }
@@ -389,11 +396,11 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Saved context</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Coach: {state.coach ? state.coach.toUpperCase() : 'Not selected'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Goal: {state.goal || 'Not set'}</div>
+            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Goal: {state.goal ? optionLabelForValue(goalOptions, state.goal) : 'Not set'}</div>
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Height: {state.height || 'Not set'}</div>
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Weight: {state.weight || 'Not set'}</div>
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Age: {state.age || 'Not set'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Experience: {state.experienceLevel || 'Not set'}</div>
+            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Experience: {state.experienceLevel ? optionLabelForValue(experienceLevelOptions, state.experienceLevel) : 'Not set'}</div>
           </div>
         </section>
 

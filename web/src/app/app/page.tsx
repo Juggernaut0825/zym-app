@@ -448,6 +448,12 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? 'LC Coach' : 'ZJ Coach';
 }
 
+function coachWorkspaceLabel(mode: CoachWorkspaceMode): string {
+  if (mode === 'info') return 'Info';
+  if (mode === 'meals') return 'Meals';
+  return 'Trains';
+}
+
 function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
@@ -3077,6 +3083,9 @@ export default function AppPage() {
   const renderMessagePage = () => {
     const showConversationList = isWideMessageLayout || mobileConversationListOpen || !activeConversation;
     const showConversationPane = isWideMessageLayout || !mobileConversationListOpen;
+    const coachWorkspaceHeaderTitle = coachWorkspaceLabel(activeCoachWorkspaceMode);
+    const showChatListBackButton = !isWideMessageLayout && !isCoachWorkspaceOpen;
+    const showWorkspaceBackButton = isCoachWorkspaceOpen;
 
     return (
     <div className="flex h-full flex-col">
@@ -3146,107 +3155,132 @@ export default function AppPage() {
         </section>
 
         <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[28px] border border-white/60 bg-white/35 backdrop-blur-xl xl:flex`}>
-          <header className="flex items-center gap-3 border-b border-slate-200/50 bg-white/25 px-5 py-3 md:px-6 rounded-t-[28px]">
-            {!isWideMessageLayout ? (
-              <button
-                type="button"
-                className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
-                onClick={() => setMobileConversationListOpen(true)}
-                aria-label="Back to chats"
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
-              </button>
-            ) : null}
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                type="button"
-                className="flex size-10 items-center justify-center rounded-[14px]"
-                style={{
-                  background: activeConversation?.type === 'coach'
-                    ? activeConversationCoach === 'lc'
-                      ? 'rgba(242,138,58,0.14)'
-                      : 'rgba(105,121,247,0.14)'
-                    : 'rgba(255,255,255,0.75)',
-                  color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
-                }}
-                onClick={() => void openConversationProfile()}
-                disabled={!activeConversation || activeConversation.type === 'group'}
-                title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
-              >
-                {activeConversation?.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={resolveApiAssetUrl(activeConversation.avatarUrl)}
-                    alt={activeConversation.name}
-                    style={{ width: 40, height: 40, borderRadius: 14, objectFit: 'cover' }}
-                  />
-                ) : (
-                  <span className="text-base font-semibold">{avatarInitial(activeConversation?.name || 'Chat')}</span>
-                )}
-              </button>
+          <header className="flex items-center justify-between gap-3 rounded-t-[28px] border-b border-slate-200/50 bg-white/25 px-5 py-3 md:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              {showChatListBackButton ? (
+                <button
+                  type="button"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
+                  onClick={() => setMobileConversationListOpen(true)}
+                  aria-label="Back to chats"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
+                </button>
+              ) : null}
+              {showWorkspaceBackButton ? (
+                <button
+                  type="button"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
+                  onClick={() => setCoachPanelMode('chat')}
+                  aria-label="Back to chat"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
+                </button>
+              ) : null}
+              {!isCoachWorkspaceOpen ? (
+                <button
+                  type="button"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px]"
+                  style={{
+                    background: activeConversation?.type === 'coach'
+                      ? activeConversationCoach === 'lc'
+                        ? 'rgba(242,138,58,0.14)'
+                        : 'rgba(105,121,247,0.14)'
+                      : 'rgba(255,255,255,0.75)',
+                    color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
+                  }}
+                  onClick={() => void openConversationProfile()}
+                  disabled={!activeConversation || activeConversation.type === 'group'}
+                  title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
+                >
+                  {activeConversation?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={resolveApiAssetUrl(activeConversation.avatarUrl)}
+                      alt={activeConversation.name}
+                      style={{ width: 40, height: 40, borderRadius: 14, objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <span className="text-base font-semibold">{avatarInitial(activeConversation?.name || 'Chat')}</span>
+                  )}
+                </button>
+              ) : null}
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="truncate text-xl font-bold text-slate-900">{activeConversation?.name || 'Select a chat'}</h2>
-                  {activeConversation?.type === 'coach' ? (
-                    <div ref={coachMenuRef} className="relative flex items-center gap-2">
-                      <div className="group relative">
-                        <button
-                          type="button"
-                          className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
-                          aria-label="Coach safety notice"
-                        >
-                          i
-                        </button>
-                        <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
-                          {COACH_SAFETY_TOOLTIP}
-                        </div>
-                      </div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="truncate text-xl font-bold text-slate-900">
+                    {isCoachWorkspaceOpen ? coachWorkspaceHeaderTitle : activeConversation?.name || 'Select a chat'}
+                  </h2>
+                  {activeConversation?.type === 'coach' && !isCoachWorkspaceOpen ? (
+                    <div className="group relative">
                       <button
                         type="button"
-                        className="flex size-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100/80 text-slate-500 transition hover:bg-slate-200/80"
-                        aria-label="Open coach workspace"
-                        onClick={() => setCoachMenuOpen((prev) => !prev)}
+                        className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
+                        aria-label="Coach safety notice"
                       >
-                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+                        i
                       </button>
-                      {coachMenuOpen ? (
-                        <div className="absolute right-0 top-[calc(100%+12px)] z-30 flex min-w-[180px] flex-col rounded-[22px] border border-white/70 bg-white/95 p-2 shadow-xl">
-                          {([
-                            ['info', 'Info'],
-                            ['meals', 'Meals'],
-                            ['trains', 'Trains'],
-                          ] as Array<[CoachWorkspaceMode, string]>).map(([value, label]) => (
-                            <button
-                              key={value}
-                              type="button"
-                              className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
-                                coachPanelMode === value ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-100/80'
-                              }`}
-                              onClick={() => {
-                                setCoachPanelMode(value);
-                                setCoachMenuOpen(false);
-                              }}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
+                      <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
+                        {COACH_SAFETY_TOOLTIP}
+                      </div>
                     </div>
                   ) : null}
-                  {activeConversation?.type === 'group' ? (
-                    <button
-                      type="button"
-                      className="flex size-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100/80 text-slate-500 transition hover:bg-slate-200/80"
-                      aria-label="Open group settings"
-                      onClick={() => setGroupSettingsOpen(true)}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
-                    </button>
-                  ) : null}
                 </div>
+                {isCoachWorkspaceOpen && activeConversation?.type === 'coach' ? (
+                  <p className="mt-0.5 truncate text-sm text-slate-500">{coachDisplayName(activeConversationCoach)}</p>
+                ) : null}
               </div>
             </div>
+
+            {activeConversation?.type === 'coach' ? (
+              <div ref={coachMenuRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  className={`flex size-10 items-center justify-center rounded-[12px] text-slate-500 transition ${
+                    coachMenuOpen
+                      ? 'bg-slate-200/90 shadow-[0_12px_28px_rgba(15,23,42,0.14)]'
+                      : 'bg-transparent hover:bg-slate-100/85'
+                  }`}
+                  aria-label="Open coach workspace"
+                  onClick={() => setCoachMenuOpen((prev) => !prev)}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+                </button>
+                {coachMenuOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+12px)] z-30 flex min-w-[180px] flex-col rounded-[18px] border border-white/70 bg-white/95 p-2 shadow-xl">
+                    {([
+                      ['info', 'Info'],
+                      ['meals', 'Meals'],
+                      ['trains', 'Trains'],
+                    ] as Array<[CoachWorkspaceMode, string]>).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`rounded-[14px] px-4 py-3 text-left text-sm font-semibold transition ${
+                          coachPanelMode === value ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-100/80'
+                        }`}
+                        onClick={() => {
+                          setCoachPanelMode(value);
+                          setCoachMenuOpen(false);
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {activeConversation?.type === 'group' ? (
+              <button
+                type="button"
+                className="flex size-10 shrink-0 items-center justify-center rounded-[12px] text-slate-500 transition hover:bg-slate-100/85"
+                aria-label="Open group settings"
+                onClick={() => setGroupSettingsOpen(true)}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+              </button>
+            ) : null}
           </header>
 
           {isCoachWorkspaceOpen ? (
@@ -3257,7 +3291,6 @@ export default function AppPage() {
               coachId={activeConversationCoach}
               onNotice={showNotice}
               onError={setError}
-              onBackToChat={() => setCoachPanelMode('chat')}
               onOpenMedia={openMediaLightbox}
             />
           ) : (

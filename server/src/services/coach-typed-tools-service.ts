@@ -344,7 +344,7 @@ function inferGoal(value: unknown): 'cut' | 'bulk' | 'maintain' | null {
   if (!text) return null;
   if (/\b(cut|fat loss|lose fat|lean out|slim)\b/.test(text)) return 'cut';
   if (/\b(bulk|gain|muscle gain|size)\b/.test(text)) return 'bulk';
-  if (/\b(maintain|maintenance|recomp|recomposition)\b/.test(text)) return 'maintain';
+  if (/\b(maintain|maintenance|keep|recomp|recomposition)\b/.test(text)) return 'maintain';
   return null;
 }
 
@@ -531,10 +531,10 @@ export class CoachTypedToolsService {
     if (age !== null) out.age = age;
     if (bodyFat !== null) out.body_fat_pct = bodyFat;
     if (trainingDays !== null) out.training_days = trainingDays;
-    if (gender) out.gender = gender;
-    if (activity) out.activity_level = activity;
-    if (goal) out.goal = goal;
-    if (experience) out.experience_level = experience;
+    if (gender) out.gender = inferGender(gender) || gender;
+    if (activity) out.activity_level = inferActivityLevel(activity) || activity;
+    if (goal) out.goal = inferGoal(goal) || goal;
+    if (experience) out.experience_level = inferExperienceLevel(experience) || experience;
     if (timezone && isValidTimeZone(timezone)) out.timezone = timezone;
 
     const notes = safeString(raw.notes, 2000);

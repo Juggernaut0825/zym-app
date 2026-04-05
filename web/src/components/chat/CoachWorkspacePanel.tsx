@@ -15,8 +15,14 @@ import {
   bodyFatRangeToValue,
   bodyFatValueToRange,
   experienceLevelOptions,
+  formatNumericProfileValue,
   genderOptions,
   goalOptions,
+  normalizeActivityLevelValue,
+  normalizeExperienceLevelValue,
+  normalizeGenderValue,
+  normalizeGoalValue,
+  normalizeTrainingDaysValue,
   trainingDayOptions,
   type SelectOption,
 } from '@/lib/coach-profile-options';
@@ -39,7 +45,6 @@ interface CoachWorkspacePanelProps {
   coachId: 'zj' | 'lc';
   onNotice: (message: string) => void;
   onError: (message: string) => void;
-  onBackToChat: () => void;
   onOpenMedia: (url: string, label: string) => void;
 }
 
@@ -120,21 +125,17 @@ function formatRest(seconds?: number): string {
   return `${safeSeconds} sec rest`;
 }
 
-function findOptionLabel(options: SelectOption[], value: string): string {
-  return options.find((option) => option.value === value)?.label || value;
-}
-
 function buildProfileDraft(profile: CoachProfileData): CoachProfileDraft {
   return {
-    height: toText(profile.height ?? profile.height_cm ?? profile.heightCm),
-    weight: toText(profile.weight ?? profile.weight_kg ?? profile.weightKg),
-    age: toText(profile.age),
+    height: formatNumericProfileValue(profile.height_cm ?? profile.heightCm ?? profile.height, 1),
+    weight: formatNumericProfileValue(profile.weight_kg ?? profile.weightKg ?? profile.weight, 2),
+    age: formatNumericProfileValue(profile.age, 0),
     bodyFatRange: bodyFatValueToRange((profile.body_fat_pct ?? profile.bodyFatPct) as number | null | undefined),
-    trainingDays: toText(profile.training_days ?? profile.trainingDays),
-    gender: toText(profile.gender).slice(0, 40),
-    activityLevel: toText(profile.activity_level ?? profile.activityLevel).slice(0, 60),
-    goal: toText(profile.goal ?? profile.fitnessGoal).slice(0, 120),
-    experienceLevel: toText(profile.experience_level ?? profile.experienceLevel).slice(0, 40),
+    trainingDays: normalizeTrainingDaysValue(profile.training_days ?? profile.trainingDays),
+    gender: normalizeGenderValue(profile.gender).slice(0, 40),
+    activityLevel: normalizeActivityLevelValue(profile.activity_level ?? profile.activityLevel).slice(0, 60),
+    goal: normalizeGoalValue(profile.goal ?? profile.fitness_goal ?? profile.fitnessGoal).slice(0, 120),
+    experienceLevel: normalizeExperienceLevelValue(profile.experience_level ?? profile.experienceLevel).slice(0, 40),
     notes: toText(profile.notes).slice(0, 2000),
   };
 }
@@ -169,12 +170,6 @@ function selectClassName(value: string): string {
   return `input-shell ${value ? 'text-slate-700' : 'text-slate-400'}`;
 }
 
-function modeTitle(mode: CoachWorkspaceMode): string {
-  if (mode === 'info') return 'Info';
-  if (mode === 'meals') return 'Meals';
-  return 'Trains';
-}
-
 function coachDisplayName(coachId: 'zj' | 'lc'): string {
   return coachId === 'lc' ? 'LC Coach' : 'ZJ Coach';
 }
@@ -192,7 +187,6 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     coachId,
     onNotice,
     onError,
-    onBackToChat,
     onOpenMedia,
   } = props;
 
@@ -437,29 +431,14 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
   }
 
   function renderInfoView() {
-    const profile = records?.profile || {};
-    const derivedSummary = [
-      profile.goal ? `Goal: ${findOptionLabel(goalOptions, String(profile.goal))}` : '',
-      profile.training_days ? `Training days: ${profile.training_days}/week` : '',
-      profile.activity_level ? `Activity: ${findOptionLabel(activityLevelOptions, String(profile.activity_level))}` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
-
     return (
       <div className="space-y-6">
-        <div className="rounded-[24px] border border-white/70 bg-white/72 p-5">
-          <p className="text-sm leading-7 text-slate-600">
-            {derivedSummary || 'A faster setup here helps the coach produce more believable plans, meal guidance, and follow-ups.'}
-          </p>
-        </div>
-
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label className="flex flex-col gap-2">
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Height</span>
             <input
               className="input-shell"
-              placeholder="179 cm"
+              placeholder="Height"
               value={profileDraft.height}
               onChange={(event) => setProfileDraft((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))}
             />
@@ -468,7 +447,7 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Weight</span>
             <input
               className="input-shell"
-              placeholder="83 kg"
+              placeholder="Weight"
               value={profileDraft.weight}
               onChange={(event) => setProfileDraft((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))}
             />
@@ -507,9 +486,6 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
           <button className={primaryButtonClass} type="button" onClick={() => void handleSaveProfile()} disabled={saving || loadingRecords}>
             {saving ? 'Saving...' : 'Save coach info'}
           </button>
-          <button className="btn btn-ghost" type="button" onClick={onBackToChat}>
-            Back to chat
-          </button>
         </div>
       </div>
     );
@@ -521,17 +497,10 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     return (
       <div className="space-y-6">
         <div className="rounded-[24px] border border-white/70 bg-white/72 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">{formatDay(effectiveDay)}</p>
-              <p className="mt-1 text-sm text-slate-500">
-                Intake {Math.round(selectedDayRecord?.total_intake || 0)} kcal
-              </p>
-            </div>
-            <button className="btn btn-ghost" type="button" onClick={onBackToChat}>
-              Back to chat
-            </button>
-          </div>
+          <p className="text-sm font-semibold text-slate-900">{formatDay(effectiveDay)}</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Intake {Math.round(selectedDayRecord?.total_intake || 0)} kcal
+          </p>
         </div>
 
         {meals.length === 0 ? (
@@ -616,17 +585,10 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     return (
       <div className="space-y-6">
         <div className="rounded-[24px] border border-white/70 bg-white/72 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">{formatDay(effectiveDay)}</p>
-              <p className="mt-1 text-sm text-slate-500">
-                Burned {Math.round(selectedDayRecord?.total_burned || 0)} kcal
-              </p>
-            </div>
-            <button className="btn btn-ghost" type="button" onClick={onBackToChat}>
-              Back to chat
-            </button>
-          </div>
+          <p className="text-sm font-semibold text-slate-900">{formatDay(effectiveDay)}</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Burned {Math.round(selectedDayRecord?.total_burned || 0)} kcal
+          </p>
         </div>
 
         <section className="space-y-4">
@@ -734,15 +696,11 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-200/50 bg-white/25 px-5 py-4 md:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{modeTitle(mode)}</p>
-            <h3 className="mt-1 text-xl font-semibold text-slate-900">{modeTitle(mode)} Workspace</h3>
-          </div>
+          <div className="min-w-0 flex-1">{renderHeaderExtras()}</div>
           <button className="btn btn-ghost" type="button" onClick={() => void handleRefresh()} disabled={loadingRecords || loadingPlan || saving}>
             {loadingRecords || loadingPlan ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
-        <div className="mt-4">{renderHeaderExtras()}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-5 md:px-6">

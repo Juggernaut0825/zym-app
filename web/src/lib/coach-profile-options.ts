@@ -23,7 +23,7 @@ export const activityLevelOptions: SelectOption[] = [
 
 export const goalOptions: SelectOption[] = [
   { value: 'cut', label: 'Cut', description: 'Lean out and reduce body fat' },
-  { value: 'maintain', label: 'Maintain', description: 'Keep bodyweight steady and improve consistency' },
+  { value: 'maintain', label: 'Keep', description: 'Keep bodyweight steady and improve consistency' },
   { value: 'bulk', label: 'Bulk', description: 'Build size and increase bodyweight' },
 ];
 
@@ -66,4 +66,81 @@ export function bodyFatValueToRange(value: number | null | undefined): string {
     return Math.abs(option.midpoint - numeric) < Math.abs(best.midpoint - numeric) ? option : best;
   }, null);
   return closest?.value || '';
+}
+
+function normalizeOptionText(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+}
+
+export function normalizeGenderValue(value: unknown): string {
+  const text = normalizeOptionText(value);
+  if (!text) return '';
+  if (text === 'male' || text === 'man' || text === 'men' || text === 'm') return 'male';
+  if (text === 'female' || text === 'woman' || text === 'women' || text === 'f') return 'female';
+  return text;
+}
+
+export function normalizeActivityLevelValue(value: unknown): string {
+  const text = normalizeOptionText(value);
+  if (!text) return '';
+  if (text === 'very_active' || text === 'veryactive') return 'very_active';
+  if (text.includes('very') && text.includes('active')) return 'very_active';
+  if (text.includes('sedentary')) return 'sedentary';
+  if (text.includes('light')) return 'light';
+  if (text.includes('moderate')) return 'moderate';
+  if (text === 'active' || text.includes('active')) return 'active';
+  return text;
+}
+
+export function normalizeGoalValue(value: unknown): string {
+  const text = normalizeOptionText(value);
+  if (!text) return '';
+  if (text === 'maintain' || text === 'maintenance' || text === 'keep' || text === 'recomp' || text === 'recomposition') {
+    return 'maintain';
+  }
+  if (text === 'cut' || text === 'fat_loss' || text === 'lose_fat' || text === 'lean_out' || text === 'lean') {
+    return 'cut';
+  }
+  if (text === 'bulk' || text === 'gain' || text === 'muscle_gain' || text === 'size') {
+    return 'bulk';
+  }
+  return text;
+}
+
+export function normalizeExperienceLevelValue(value: unknown): string {
+  const text = normalizeOptionText(value);
+  if (!text) return '';
+  if (text.includes('beginner')) return 'beginner';
+  if (text.includes('intermediate')) return 'intermediate';
+  if (text.includes('advanced')) return 'advanced';
+  return text;
+}
+
+export function normalizeTrainingDaysValue(value: unknown): string {
+  const direct = String(value ?? '').trim();
+  if (!direct) return '';
+  if (/^[1-7]$/.test(direct)) return direct;
+  const match = direct.match(/[1-7]/);
+  return match ? match[0] : '';
+}
+
+export function optionLabelForValue(options: SelectOption[], value: unknown, fallback = ''): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return fallback;
+  return options.find((option) => option.value === normalized)?.label || normalized;
+}
+
+export function formatNumericProfileValue(value: unknown, maxDecimals = 1): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return String(value || '').trim();
+  }
+  const safeDecimals = Math.max(0, Math.min(2, Math.floor(maxDecimals)));
+  if (safeDecimals === 0 || Number.isInteger(numeric)) {
+    return String(Math.round(numeric));
+  }
+  return String(Number(numeric.toFixed(safeDecimals)));
 }
