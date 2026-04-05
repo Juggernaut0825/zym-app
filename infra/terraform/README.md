@@ -25,13 +25,15 @@ The authoritative environment snapshot lives in:
 
 ## GitHub deployment flow
 
-This repo now uses a half-automatic deployment model:
+This repo now uses an automatic build-and-deploy model for production application code:
 
 1. push to `main`
 2. GitHub Actions builds and pushes `zym-web` and `zym-server` images to ECR
-3. a human manually runs the production deploy workflow
-4. the deploy workflow updates ECS task definitions from the current AWS task families
-5. ECS rolls the services to the new image tag
+3. GitHub Actions deploys the new image tag to ECS
+4. ECS rolls the services to the new image tag
+5. the workflow runs production smoke checks against `web`, `api`, and `ws`
+
+The manual deploy workflow still exists for rollback and selective deploys.
 
 GitHub Actions builds Linux `arm64` images because the live ECS Fargate task definitions use `ARM64`.
 
@@ -50,7 +52,7 @@ Shared deploy helper:
 Before the workflows can run from GitHub, configure:
 
 - a repository variable named `AWS_GITHUB_ACTIONS_ROLE_ARN`
-- a GitHub Environment named `production` if you want reviewer approval on the manual deploy workflow
+- a GitHub Environment named `production` if you want reviewer approval on automatic and manual production deploys
 
 The AWS-side OIDC role has already been created for this repo:
 
@@ -134,6 +136,7 @@ Those files are meant to be imported before any plan/apply cycle is trusted.
 - `EFS` is still required because AI/session state still uses shared files
 - `Chroma` is an internal service and is not part of the GitHub image build workflow
 - the current production deploy workflow updates ECS from the live task family definitions already in AWS
+- both the automatic push deploy and the manual rollback path reuse the same shell deploy helpers in `infra/scripts/`
 
 ## Scheduler outage note (April 5, 2026)
 

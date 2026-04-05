@@ -25,9 +25,10 @@ Normal release flow:
 2. `Build And Push Images` workflow pushes:
    - `zym-web:<short-sha>`
    - `zym-server:<short-sha>`
-3. run `Deploy Production ECS`
-4. choose the same ref or image tag
-5. the workflow updates ECS task definitions and forces a fresh deployment
+3. the same workflow automatically deploys that image tag to ECS
+4. the workflow waits for service stability and runs smoke checks
+
+Manual `Deploy Production ECS` remains available for rollback or selective deploys by image tag.
 
 The workflow does not rebuild infrastructure.
 It only rolls application services to new images.

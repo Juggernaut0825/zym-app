@@ -32,6 +32,10 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.short_sha }}
+      web_image: ${{ steps.meta.outputs.web_image }}
+      server_image: ${{ steps.meta.outputs.server_image }}
 
     steps:
       - name: Checkout
@@ -108,5 +112,68 @@ jobs:
             echo "- Server: \`${{ steps.meta.outputs.server_image }}\`"
             echo "- Platform: \`${IMAGE_PLATFORM}\`"
             echo
-            echo "Deploy these images with the manual \`Deploy Production ECS\` workflow."
+            if [ "${{ github.event_name }}" = "push" ]; then
+              echo "An automatic production deploy job will run for this push to \`main\`."
+            else
+              echo "Automatic production deploy only runs for push events on \`main\`."
+            fi
+            echo "Use the manual \`Deploy Production ECS\` workflow for rollbacks or selective deploys."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.zym8.com
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate GitHub OIDC role variable
+        run: |
+          if [ -z "${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}" ]; then
+            echo "Repository variable AWS_GITHUB_ACTIONS_ROLE_ARN is required." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy production services
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./infra/scripts/deploy-prod-image-tag.sh "${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Smoke check production entrypoints
+        id: smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./infra/scripts/smoke-check-prod.sh --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish workflow summary
+        if: always()
+        run: |
+          {
+            echo "## Production deploy submitted"
+            echo
+            echo "- Image tag: \`${{ needs.build-and-push.outputs.image_tag }}\`"
+            echo "- Web image: \`${{ needs.build-and-push.outputs.web_image }}\`"
+            echo "- Server image: \`${{ needs.build-and-push.outputs.server_image }}\`"
+            echo
+            echo "## Smoke checks"
+            echo
+            echo "- API: \`${{ steps.smoke.outputs.api_status }}\`"
+            echo "- WS: \`${{ steps.smoke.outputs.ws_status }}\`"
+            echo "- Web: \`${{ steps.smoke.outputs.web_status }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

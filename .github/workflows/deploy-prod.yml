@@ -80,128 +80,42 @@ jobs:
           echo "web_image=${ECR_REGISTRY}/${WEB_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "server_image=${ECR_REGISTRY}/${SERVER_REPOSITORY}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify target images exist in ECR
+      - name: Deploy selected production services
         shell: bash
         run: |
           set -euo pipefail
+          args=("${{ steps.meta.outputs.image_tag }}")
 
-          if [ "${{ github.event.inputs.deploy_web }}" = "true" ]; then
-            aws ecr describe-images \
-              --region "${AWS_REGION}" \
-              --repository-name "${WEB_REPOSITORY}" \
-              --image-ids imageTag="${{ steps.meta.outputs.image_tag }}" \
-              >/dev/null
+          if [ "${{ github.event.inputs.deploy_web }}" = "true" ] && [ "${{ github.event.inputs.deploy_backend }}" != "true" ]; then
+            args+=("--web-only")
           fi
 
-          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
-            aws ecr describe-images \
-              --region "${AWS_REGION}" \
-              --repository-name "${SERVER_REPOSITORY}" \
-              --image-ids imageTag="${{ steps.meta.outputs.image_tag }}" \
-              >/dev/null
+          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ] && [ "${{ github.event.inputs.deploy_web }}" != "true" ]; then
+            args+=("--backend-only")
           fi
 
-      - name: Deploy web service
-        if: ${{ github.event.inputs.deploy_web == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./infra/scripts/deploy-ecs-service.sh \
-            "${AWS_REGION}" \
-            "${ECS_CLUSTER}" \
-            "zym-web-service" \
-            "zym-web-task" \
-            "zym-web" \
-            "${{ steps.meta.outputs.web_image }}"
-
-      - name: Deploy backend services
-        if: ${{ github.event.inputs.deploy_backend == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          ./infra/scripts/deploy-ecs-service.sh \
-            "${AWS_REGION}" \
-            "${ECS_CLUSTER}" \
-            "zym-api-service" \
-            "zym-api-task" \
-            "zym-api" \
-            "${{ steps.meta.outputs.server_image }}"
-
-          ./infra/scripts/deploy-ecs-service.sh \
-            "${AWS_REGION}" \
-            "${ECS_CLUSTER}" \
-            "zym-ws-service" \
-            "zym-ws-task" \
-            "zym-ws" \
-            "${{ steps.meta.outputs.server_image }}"
-
-          ./infra/scripts/deploy-ecs-service.sh \
-            "${AWS_REGION}" \
-            "${ECS_CLUSTER}" \
-            "zym-worker-service" \
-            "zym-worker-task" \
-            "zym-worker" \
-            "${{ steps.meta.outputs.server_image }}"
-
-          ./infra/scripts/deploy-ecs-service.sh \
-            "${AWS_REGION}" \
-            "${ECS_CLUSTER}" \
-            "zym-scheduler-service" \
-            "zym-scheduler-task" \
-            "zym-scheduler" \
-            "${{ steps.meta.outputs.server_image }}"
-
-      - name: Wait for ECS services to stabilize
-        if: ${{ github.event.inputs.wait_for_stable == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          SERVICES=()
-          if [ "${{ github.event.inputs.deploy_web }}" = "true" ]; then
-            SERVICES+=("zym-web-service")
-          fi
-          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
-            SERVICES+=("zym-api-service" "zym-ws-service" "zym-worker-service" "zym-scheduler-service")
+          if [ "${{ github.event.inputs.wait_for_stable }}" != "true" ]; then
+            args+=("--no-wait")
           fi
 
-          if [ "${#SERVICES[@]}" -gt 0 ]; then
-            aws ecs wait services-stable \
-              --region "${AWS_REGION}" \
-              --cluster "${ECS_CLUSTER}" \
-              --services "${SERVICES[@]}"
-          fi
+          bash ./infra/scripts/deploy-prod-image-tag.sh "${args[@]}"
 
       - name: Smoke check production entrypoints
         id: smoke
         shell: bash
         run: |
           set -euo pipefail
-          TMPDIR="$(mktemp -d)"
-          trap 'rm -rf "$TMPDIR"' EXIT
+          args=(--github-output "$GITHUB_OUTPUT")
 
-          api_status="skipped"
-          ws_status="skipped"
-          web_status="skipped"
-
-          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
-            curl -skf -H "Host: api.zym8.com" "https://${PROD_ALB_DNS_NAME}/health" > "$TMPDIR/api-health.json"
-            curl -skf -H "Host: ws.zym8.com" "https://${PROD_ALB_DNS_NAME}/health" > "$TMPDIR/ws-health.json"
-
-            api_status="$(jq -r '.ok as $ok | "ok=\($ok) database=\(.runtime.providers.database) redis=\(.dependencies.redis.ok) rateLimit=\(.runtime.providers.rateLimit)"' "$TMPDIR/api-health.json")"
-            ws_status="$(jq -r '.ok as $ok | "ok=\($ok) websocket=\(.runtime.roles.websocket) redis=\(.dependencies.redis.ok)"' "$TMPDIR/ws-health.json")"
+          if [ "${{ github.event.inputs.deploy_web }}" = "true" ] && [ "${{ github.event.inputs.deploy_backend }}" != "true" ]; then
+            args+=("--web-only")
           fi
 
-          if [ "${{ github.event.inputs.deploy_web }}" = "true" ]; then
-            curl -skf -H "Host: app.zym8.com" "https://${PROD_ALB_DNS_NAME}/" -o "$TMPDIR/app.html"
-            grep -qi "<!DOCTYPE html" "$TMPDIR/app.html"
-            web_status="ok html_bytes=$(wc -c < "$TMPDIR/app.html" | tr -d ' ')"
+          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ] && [ "${{ github.event.inputs.deploy_web }}" != "true" ]; then
+            args+=("--backend-only")
           fi
 
-          echo "api_status=${api_status}" >> "$GITHUB_OUTPUT"
-          echo "ws_status=${ws_status}" >> "$GITHUB_OUTPUT"
-          echo "web_status=${web_status}" >> "$GITHUB_OUTPUT"
+          PROD_ALB_DNS_NAME="${PROD_ALB_DNS_NAME}" bash ./infra/scripts/smoke-check-prod.sh "${args[@]}"
 
       - name: Publish workflow summary
         if: always()
