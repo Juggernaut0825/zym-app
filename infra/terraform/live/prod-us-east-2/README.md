@@ -104,6 +104,8 @@ The first concrete import-first resources already live in this directory:
 
 - [`ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
 - [`ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`ecs-runtime-services.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-runtime-services.tf)
+- [`security-groups.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/security-groups.tf)
 - [`alb.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alb.tf)
 - [`autoscaling.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/autoscaling.tf)
 - [`alarms.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alarms.tf)
@@ -112,11 +114,28 @@ The first concrete import-first resources already live in this directory:
 - [`github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
 - [`imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
 - [`imports-ops.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-ops.tf)
+- [`imports-runtime.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-runtime.tf)
+
+## Runtime resources now represented
+
+Terraform now models the runtime pieces that were involved in the April 5 scheduler outage:
+
+- ECS services `zym-worker-service` and `zym-scheduler-service`
+- security groups `zym-worker-sg`, `zym-scheduler-sg`, and `zym-redis-sg`
+- Redis ingress rules from `api`, `ws`, `worker`, and `scheduler`
+
+This is intentionally limited. The current release flow still rolls images by registering fresh ECS task definition revisions from AWS, so the service resources are configured to ignore drift on:
+
+- `task_definition`
+- `desired_count`
+
+That means Terraform now owns the stable service envelope and Redis connectivity contract, while image rollouts stay on the existing deploy scripts.
 
 ## What is not represented here yet
 
-- VPC, subnets, route tables, and security groups
-- EFS, RDS, Redis, ECS task definitions, and ECS services
+- VPC, subnets, route tables, and most security groups
+- EFS, RDS, Redis, and ECS task definitions
+- external-facing ECS services such as `web`, `api`, `ws`, and `chroma`
 - Cloudflare DNS resources
 
 Those are still external to this directory and should be added gradually through imports.

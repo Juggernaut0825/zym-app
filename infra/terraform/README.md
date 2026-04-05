@@ -103,17 +103,27 @@ Recommended import order:
 11. Redis
 12. Secrets Manager metadata
 
+We have now started that handoff for the internal runtime path:
+
+- `worker` and `scheduler` ECS services are represented in Terraform
+- the Redis ingress contract for `api`, `ws`, `worker`, and `scheduler` is represented in Terraform
+
+Those resources were chosen first because they are operationally important and relatively stable. The current image deploy flow still re-registers ECS task definition revisions outside Terraform, so task definitions themselves remain intentionally out of scope for now.
+
 ## First importable foundation resources
 
 The first production-safe Terraform resources now live in:
 
 - [`live/prod-us-east-2/ecr.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecr.tf)
 - [`live/prod-us-east-2/ecs-cluster.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-cluster.tf)
+- [`live/prod-us-east-2/ecs-runtime-services.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/ecs-runtime-services.tf)
+- [`live/prod-us-east-2/security-groups.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/security-groups.tf)
 - [`live/prod-us-east-2/alb.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/alb.tf)
 - [`live/prod-us-east-2/runtime-iam.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/runtime-iam.tf)
 - [`live/prod-us-east-2/cloudwatch-logs.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/cloudwatch-logs.tf)
 - [`live/prod-us-east-2/github-actions-oidc.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/github-actions-oidc.tf)
 - [`live/prod-us-east-2/imports-foundation.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-foundation.tf)
+- [`live/prod-us-east-2/imports-runtime.tf`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/imports-runtime.tf)
 
 Those files are meant to be imported before any plan/apply cycle is trusted.
 
@@ -145,7 +155,7 @@ Observed healthy signals after the fix:
 - CloudWatch logs showed `[outreach] sent ...`
 - outreach cycle logs showed non-zero `sent`
 
-Important: this repo does not yet declaratively own the live ECS task definitions or Redis ingress rules through Terraform. If those AWS resources are recreated or edited outside this memory, these scheduler prerequisites must be re-applied until ECS services and security groups are fully imported and managed here.
+Important: this repo now declaratively owns the Redis ingress rules and the `worker` / `scheduler` service envelopes through Terraform, but it still does not own the live ECS task definition revisions. If task families are recreated manually, the scheduler secrets contract still needs to be preserved until task definitions themselves are imported and managed here.
 
 If a future session needs to answer "how do we deploy this stack?", start in:
 
