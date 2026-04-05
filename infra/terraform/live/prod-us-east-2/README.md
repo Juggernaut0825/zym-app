@@ -58,6 +58,31 @@ That script always:
 
 This keeps the repo deploy logic aligned with the live AWS task definition until Terraform fully takes over ECS runtime management.
 
+## Scheduler prerequisites
+
+`zym-scheduler-service` is not just a cleanup process. It also composes proactive coach outreach messages, writes them into the shared message store, and publishes realtime inbox/message events.
+
+Because of that, the live scheduler runtime needs the same AI and Redis access assumptions as the worker for outreach to function:
+
+- Secrets Manager-backed container secret `OPENROUTER_API_KEY`
+- Secrets Manager-backed container secret `REDIS_URL`
+- network access from `zym-scheduler-sg` (`sg-0a85db4cbf6e32427`) to `zym-redis-sg` (`sg-03794f920ce55bd52`) on `tcp/6379`
+
+The production hotfix applied on April 5, 2026 added:
+
+- `OPENROUTER_API_KEY` and `REDIS_URL` to live task definition `zym-scheduler-task:29`
+- Redis ingress rule `sgr-049fbfea8132dda5d` allowing `sg-0a85db4cbf6e32427 -> sg-03794f920ce55bd52` on `6379`
+
+If scheduled reminders stop working again, check `/ecs/zym-scheduler` first. The two signatures from the broken state were:
+
+- `Please set the OPENROUTER_API_KEY environment variable.`
+- `ioredis ... connect ETIMEDOUT`
+
+The healthy signature is a cycle that includes lines like:
+
+- `[realtime] using redis event bus on zym:realtime`
+- `[outreach] sent trigger=...`
+
 ## What Terraform should eventually own
 
 Import-first candidates:

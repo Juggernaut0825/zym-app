@@ -125,6 +125,28 @@ Those files are meant to be imported before any plan/apply cycle is trusted.
 - `Chroma` is an internal service and is not part of the GitHub image build workflow
 - the current production deploy workflow updates ECS from the live task family definitions already in AWS
 
+## Scheduler outage note (April 5, 2026)
+
+The production `zym-scheduler-service` was confirmed healthy at the ECS level, but scheduled proactive coach messages were silently failing until two AWS-side runtime prerequisites were fixed:
+
+- the live scheduler task definition must include both `OPENROUTER_API_KEY` and `REDIS_URL` as Secrets Manager-backed container secrets
+- the Redis security group `sg-03794f920ce55bd52` (`zym-redis-sg`) must allow inbound `tcp/6379` from the scheduler security group `sg-0a85db4cbf6e32427` (`zym-scheduler-sg`)
+
+Observed failure symptoms before the fix:
+
+- CloudWatch logs in `/ecs/zym-scheduler` showed `Please set the OPENROUTER_API_KEY environment variable.`
+- after adding the key, the scheduler still logged repeated `ioredis ... connect ETIMEDOUT`
+- outreach cycles completed with `sent=0`
+
+Observed healthy signals after the fix:
+
+- live scheduler task definition revision `zym-scheduler-task:29`
+- CloudWatch logs showed `[realtime] using redis event bus on zym:realtime`
+- CloudWatch logs showed `[outreach] sent ...`
+- outreach cycle logs showed non-zero `sent`
+
+Important: this repo does not yet declaratively own the live ECS task definitions or Redis ingress rules through Terraform. If those AWS resources are recreated or edited outside this memory, these scheduler prerequisites must be re-applied until ECS services and security groups are fully imported and managed here.
+
 If a future session needs to answer "how do we deploy this stack?", start in:
 
 - [`live/prod-us-east-2/README.md`](/Users/zijianwang/zym/zym-app/infra/terraform/live/prod-us-east-2/README.md)
