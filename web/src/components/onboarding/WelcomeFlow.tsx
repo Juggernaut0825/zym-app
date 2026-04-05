@@ -130,22 +130,31 @@ function buildSetupState(
   const source = ((rawSource.profile && typeof rawSource.profile === 'object')
     ? { ...rawSource.profile, ...rawSource }
     : rawSource) as CoachProfileData & {
+      heightCm?: number | string | null;
+      weightKg?: number | string | null;
+      ageYears?: number | string | null;
       body_fat?: number | null;
+      bodyFatPct?: number | null;
+      trainingDays?: number | string | null;
       activity?: string | null;
+      activityLevel?: string | null;
       experience?: string | null;
+      experienceLevel?: string | null;
       fitness_goal?: string | null;
+      fitnessGoal?: string | null;
+      timeZone?: string | null;
     };
   return {
-    coach: selectedCoachOverride || initialCoach || 'zj',
-    height: String(source.height || source.height_cm || '').trim(),
-    weight: String(source.weight || source.weight_kg || '').trim(),
-    age: source.age ? String(source.age) : '',
-    bodyFatRange: bodyFatValueToRange((source.body_fat_pct ?? source.body_fat) as number | null | undefined),
-    trainingDays: source.training_days ? String(source.training_days) : '',
+    coach: selectedCoachOverride || initialCoach || '',
+    height: String(source.height || source.height_cm || source.heightCm || '').trim(),
+    weight: String(source.weight || source.weight_kg || source.weightKg || '').trim(),
+    age: String(source.age || source.ageYears || '').trim(),
+    bodyFatRange: bodyFatValueToRange((source.body_fat_pct ?? source.body_fat ?? source.bodyFatPct) as number | null | undefined),
+    trainingDays: String(source.training_days || source.trainingDays || '').trim(),
     gender: String(source.gender || ''),
-    activityLevel: String(source.activity_level || source.activity || ''),
-    goal: String(source.goal || source.fitness_goal || ''),
-    experienceLevel: String(source.experience_level || source.experience || ''),
+    activityLevel: String(source.activity_level || source.activity || source.activityLevel || ''),
+    goal: String(source.goal || source.fitness_goal || source.fitnessGoal || ''),
+    experienceLevel: String(source.experience_level || source.experience || source.experienceLevel || ''),
     notes: String(source.notes || ''),
   };
 }

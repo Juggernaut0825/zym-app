@@ -126,15 +126,15 @@ function findOptionLabel(options: SelectOption[], value: string): string {
 
 function buildProfileDraft(profile: CoachProfileData): CoachProfileDraft {
   return {
-    height: toText(profile.height ?? profile.height_cm),
-    weight: toText(profile.weight ?? profile.weight_kg),
+    height: toText(profile.height ?? profile.height_cm ?? profile.heightCm),
+    weight: toText(profile.weight ?? profile.weight_kg ?? profile.weightKg),
     age: toText(profile.age),
-    bodyFatRange: bodyFatValueToRange(profile.body_fat_pct as number | null | undefined),
-    trainingDays: toText(profile.training_days),
+    bodyFatRange: bodyFatValueToRange((profile.body_fat_pct ?? profile.bodyFatPct) as number | null | undefined),
+    trainingDays: toText(profile.training_days ?? profile.trainingDays),
     gender: toText(profile.gender).slice(0, 40),
-    activityLevel: toText(profile.activity_level).slice(0, 60),
-    goal: toText(profile.goal).slice(0, 120),
-    experienceLevel: toText(profile.experience_level).slice(0, 40),
+    activityLevel: toText(profile.activity_level ?? profile.activityLevel).slice(0, 60),
+    goal: toText(profile.goal ?? profile.fitnessGoal).slice(0, 120),
+    experienceLevel: toText(profile.experience_level ?? profile.experienceLevel).slice(0, 40),
     notes: toText(profile.notes).slice(0, 2000),
   };
 }

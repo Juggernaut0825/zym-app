@@ -17,7 +17,7 @@ import {
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
-import { resolveUploadsDir } from '../config/app-paths.js';
+import { resolveAppDataRoot, resolveUploadsDir } from '../config/app-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -228,6 +228,15 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
     return JSON.parse(raw) as T;
   } catch {
     return fallback;
+  }
+}
+
+async function readJsonOptional<T>(filePath: string): Promise<T | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -453,6 +462,17 @@ export class CoachTypedToolsService {
     return path.join(this.getUserDataDir(userId), 'profile.json');
   }
 
+  private getLegacyProfilePaths(userId: string): string[] {
+    const root = resolveAppDataRoot();
+    const safeUserId = String(userId || '').trim();
+    const candidates = [
+      path.join(root, `user${safeUserId}`, 'profile.json'),
+      path.join(root, `user_${safeUserId}`, 'profile.json'),
+      path.join(root, `user-${safeUserId}`, 'profile.json'),
+    ];
+    return Array.from(new Set(candidates)).filter((candidate) => candidate !== this.getProfilePath(userId));
+  }
+
   private getDailyPath(userId: string): string {
     return path.join(this.getUserDataDir(userId), 'daily.json');
   }
@@ -472,25 +492,25 @@ export class CoachTypedToolsService {
 
   private sanitizeProfilePatch(raw: Record<string, unknown>): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    const height = normalizeFreeformProfileText(raw.height ?? raw.height_cm, 40);
-    const weight = normalizeFreeformProfileText(raw.weight ?? raw.weight_kg, 40);
-    const gender = normalizeFreeformProfileText(raw.gender, 40);
-    const activity = normalizeFreeformProfileText(raw.activity_level ?? raw.activity, 60);
-    const goal = normalizeFreeformProfileText(raw.goal, 120);
-    const experience = normalizeFreeformProfileText(raw.experience_level ?? raw.experience, 40);
-    const timezone = safeString(raw.timezone ?? raw.tz, 120).replace(/\s+/g, '');
+    const height = normalizeFreeformProfileText(raw.height ?? raw.height_cm ?? raw.heightCm, 40);
+    const weight = normalizeFreeformProfileText(raw.weight ?? raw.weight_kg ?? raw.weightKg, 40);
+    const gender = normalizeFreeformProfileText(raw.gender ?? raw.sex, 40);
+    const activity = normalizeFreeformProfileText(raw.activity_level ?? raw.activity ?? raw.activityLevel, 60);
+    const goal = normalizeFreeformProfileText(raw.goal ?? raw.fitness_goal ?? raw.fitnessGoal, 120);
+    const experience = normalizeFreeformProfileText(raw.experience_level ?? raw.experience ?? raw.experienceLevel, 40);
+    const timezone = safeString(raw.timezone ?? raw.timeZone ?? raw.tz, 120).replace(/\s+/g, '');
 
     const heightCm = parseHeightCm(height);
     const weightKg = parseWeightKg(weight);
-    const age = toNumber(raw.age, 10, 100, true);
-    const bodyFat = toNumber(raw.body_fat_pct ?? raw.body_fat, 2, 70);
-    const trainingDays = toNumber(raw.training_days, 1, 7, true);
+    const age = toNumber(raw.age ?? raw.ageYears, 10, 100, true);
+    const bodyFat = toNumber(raw.body_fat_pct ?? raw.body_fat ?? raw.bodyFatPct ?? raw.bodyFat, 2, 70);
+    const trainingDays = toNumber(raw.training_days ?? raw.trainingDays ?? raw.training_days_per_week ?? raw.trainingDaysPerWeek, 1, 7, true);
 
     if (height) {
       out.height = height;
       out.height_cm = heightCm;
-    } else if (raw.height_cm !== undefined) {
-      const numericHeight = toNumber(raw.height_cm, 80, 260);
+    } else if (raw.height_cm !== undefined || raw.heightCm !== undefined) {
+      const numericHeight = toNumber(raw.height_cm ?? raw.heightCm, 80, 260);
       if (numericHeight !== null) {
         out.height_cm = numericHeight;
         out.height = String(numericHeight);
@@ -500,8 +520,8 @@ export class CoachTypedToolsService {
     if (weight) {
       out.weight = weight;
       out.weight_kg = weightKg;
-    } else if (raw.weight_kg !== undefined) {
-      const numericWeight = toNumber(raw.weight_kg, 20, 350);
+    } else if (raw.weight_kg !== undefined || raw.weightKg !== undefined) {
+      const numericWeight = toNumber(raw.weight_kg ?? raw.weightKg, 20, 350);
       if (numericWeight !== null) {
         out.weight_kg = numericWeight;
         out.weight = String(numericWeight);
@@ -816,7 +836,18 @@ export class CoachTypedToolsService {
 
   async getProfile(userId: string): Promise<Record<string, unknown>> {
     const profilePath = this.getProfilePath(userId);
-    const rawProfile = await readJson<Record<string, unknown>>(profilePath, {});
+    let rawProfile = await readJsonOptional<Record<string, unknown>>(profilePath);
+    let usedLegacyPath = false;
+    if (!rawProfile || typeof rawProfile !== 'object' || Object.keys(rawProfile).length === 0) {
+      for (const candidate of this.getLegacyProfilePaths(userId)) {
+        const legacyProfile = await readJsonOptional<Record<string, unknown>>(candidate);
+        if (legacyProfile && typeof legacyProfile === 'object' && Object.keys(legacyProfile).length > 0) {
+          rawProfile = legacyProfile;
+          usedLegacyPath = true;
+          break;
+        }
+      }
+    }
     const profile = rawProfile && typeof rawProfile === 'object'
       ? this.unwrapLegacyProfileShape(rawProfile)
       : {};
@@ -838,7 +869,7 @@ export class CoachTypedToolsService {
     }
     this.recomputeProfileDerived(normalized);
 
-    if (JSON.stringify(profile) !== JSON.stringify(normalized)) {
+    if (usedLegacyPath || JSON.stringify(profile) !== JSON.stringify(normalized)) {
       await ensureDir(path.dirname(profilePath));
       await writeJsonAtomic(profilePath, normalized);
     }
@@ -855,7 +886,10 @@ export class CoachTypedToolsService {
 
     const profilePath = this.getProfilePath(userId);
     await ensureDir(path.dirname(profilePath));
-    const current = await readJson<Record<string, unknown>>(profilePath, {});
+    const rawCurrent = await readJson<Record<string, unknown>>(profilePath, {});
+    const current = rawCurrent && typeof rawCurrent === 'object'
+      ? this.unwrapLegacyProfileShape(rawCurrent)
+      : {};
     const next = { ...current, ...sanitized };
     this.recomputeProfileDerived(next);
     await writeJsonAtomic(profilePath, next);

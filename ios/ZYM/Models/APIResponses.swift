@@ -197,19 +197,32 @@ struct CoachProfileData: Decodable {
         case height
         case weight
         case height_cm
+        case heightCm
         case weight_kg
+        case weightKg
         case age
+        case ageYears
         case body_fat_pct
         case body_fat
+        case bodyFatPct
+        case bodyFat
         case training_days
+        case trainingDays
+        case trainingDaysPerWeek
         case gender
+        case sex
         case activity_level
         case activity
+        case activityLevel
         case goal
+        case fitness_goal
+        case fitnessGoal
         case experience_level
         case experience
+        case experienceLevel
         case notes
         case timezone
+        case timeZone
         case bmr
         case tdee
         case daily_target
@@ -218,19 +231,25 @@ struct CoachProfileData: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        height = container.decodeFlexibleString(forKey: .height)
-        weight = container.decodeFlexibleString(forKey: .weight)
-        height_cm = container.decodeFlexibleDouble(forKeys: [.height_cm, .height])
-        weight_kg = container.decodeFlexibleDouble(forKeys: [.weight_kg, .weight])
-        age = container.decodeFlexibleInt(forKeys: [.age])
-        body_fat_pct = container.decodeFlexibleDouble(forKeys: [.body_fat_pct, .body_fat])
-        training_days = container.decodeFlexibleInt(forKeys: [.training_days])
-        gender = container.decodeFlexibleString(forKey: .gender)
-        activity_level = container.decodeFlexibleString(forKey: .activity_level) ?? container.decodeFlexibleString(forKey: .activity)
+        height = container.decodeFlexibleString(forKey: .height) ?? container.decodeFlexibleString(forKey: .heightCm) ?? container.decodeFlexibleString(forKey: .height_cm)
+        weight = container.decodeFlexibleString(forKey: .weight) ?? container.decodeFlexibleString(forKey: .weightKg) ?? container.decodeFlexibleString(forKey: .weight_kg)
+        height_cm = container.decodeFlexibleDouble(forKeys: [.height_cm, .heightCm, .height])
+        weight_kg = container.decodeFlexibleDouble(forKeys: [.weight_kg, .weightKg, .weight])
+        age = container.decodeFlexibleInt(forKeys: [.age, .ageYears])
+        body_fat_pct = container.decodeFlexibleDouble(forKeys: [.body_fat_pct, .body_fat, .bodyFatPct, .bodyFat])
+        training_days = container.decodeFlexibleInt(forKeys: [.training_days, .trainingDays, .trainingDaysPerWeek])
+        gender = container.decodeFlexibleString(forKey: .gender) ?? container.decodeFlexibleString(forKey: .sex)
+        activity_level = container.decodeFlexibleString(forKey: .activity_level)
+            ?? container.decodeFlexibleString(forKey: .activity)
+            ?? container.decodeFlexibleString(forKey: .activityLevel)
         goal = container.decodeFlexibleString(forKey: .goal)
-        experience_level = container.decodeFlexibleString(forKey: .experience_level) ?? container.decodeFlexibleString(forKey: .experience)
+            ?? container.decodeFlexibleString(forKey: .fitness_goal)
+            ?? container.decodeFlexibleString(forKey: .fitnessGoal)
+        experience_level = container.decodeFlexibleString(forKey: .experience_level)
+            ?? container.decodeFlexibleString(forKey: .experience)
+            ?? container.decodeFlexibleString(forKey: .experienceLevel)
         notes = container.decodeFlexibleString(forKey: .notes)
-        timezone = container.decodeFlexibleString(forKey: .timezone)
+        timezone = container.decodeFlexibleString(forKey: .timezone) ?? container.decodeFlexibleString(forKey: .timeZone)
         bmr = container.decodeFlexibleDouble(forKeys: [.bmr])
         tdee = container.decodeFlexibleDouble(forKeys: [.tdee])
         daily_target = container.decodeFlexibleDouble(forKeys: [.daily_target])

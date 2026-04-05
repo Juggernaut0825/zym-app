@@ -21,8 +21,11 @@ export function getAuth(): AuthPayload | null {
 }
 
 export function setAuth(payload: AuthPayload): void {
+  const existingUserId = Number(localStorage.getItem(USER_ID_KEY));
   const existingCoach = String(localStorage.getItem(COACH_KEY) || '').trim().toLowerCase();
-  const fallbackCoach = existingCoach === 'zj' || existingCoach === 'lc' ? existingCoach : null;
+  const fallbackCoach = existingUserId === payload.userId && (existingCoach === 'zj' || existingCoach === 'lc')
+    ? existingCoach
+    : null;
   localStorage.setItem(TOKEN_KEY, payload.token);
   localStorage.setItem(REFRESH_TOKEN_KEY, payload.refreshToken);
   localStorage.setItem(USER_ID_KEY, String(payload.userId));

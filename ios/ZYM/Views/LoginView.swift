@@ -219,7 +219,8 @@ struct LoginView: View {
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId
-                appState.selectedCoach = loginResponse.selectedCoach ?? appState.selectedCoach ?? "zj"
+                let preservedCoach = appState.userId == loginResponse.userId ? appState.selectedCoach : nil
+                appState.selectedCoach = loginResponse.selectedCoach ?? preservedCoach
                 appState.isLoggedIn = true
             }
         }.resume()
