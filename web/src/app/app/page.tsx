@@ -639,6 +639,8 @@ export default function AppPage() {
   const [authSelectedCoach, setAuthSelectedCoach] = useState<'zj' | 'lc' | null>(null);
   const [selectedCoach, setSelectedCoach] = useState<'zj' | 'lc'>('zj');
   const [welcomeFlowOpen, setWelcomeFlowOpen] = useState(false);
+  const [isWideMessageLayout, setIsWideMessageLayout] = useState(false);
+  const [mobileConversationListOpen, setMobileConversationListOpen] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -770,6 +772,31 @@ export default function AppPage() {
   const postMenuRef = useRef<HTMLDivElement | null>(null);
 
   const typingTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia('(min-width: 1280px)');
+    const sync = () => setIsWideMessageLayout(media.matches);
+    sync();
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', sync);
+      return () => media.removeEventListener('change', sync);
+    }
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
+
+  useEffect(() => {
+    if (isWideMessageLayout) {
+      setMobileConversationListOpen(false);
+    }
+  }, [isWideMessageLayout]);
+
+  useEffect(() => {
+    if (!isWideMessageLayout && activeTopic) {
+      setMobileConversationListOpen(false);
+    }
+  }, [activeTopic, isWideMessageLayout]);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.topic === activeTopic),
@@ -3047,11 +3074,26 @@ export default function AppPage() {
     </header>
   );
 
-  const renderMessagePage = () => (
+  const renderMessagePage = () => {
+    const showConversationList = isWideMessageLayout || mobileConversationListOpen || !activeConversation;
+    const showConversationPane = isWideMessageLayout || !mobileConversationListOpen;
+
+    return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
-        <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">Message</h1>
-        <label className="relative block w-full max-w-[320px]">
+      <header className="flex flex-col gap-3 border-b border-slate-200/50 bg-white/20 px-4 py-3 backdrop-blur-sm sm:px-5 md:flex-row md:items-center md:justify-between md:px-8">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[1.75rem] font-semibold tracking-tight text-slate-900 sm:text-[1.9rem] md:text-[2.15rem]">Message</h1>
+          {!isWideMessageLayout ? (
+            <button
+              type="button"
+              className="btn btn-ghost px-4 py-2 text-sm"
+              onClick={() => setMobileConversationListOpen((prev) => !prev)}
+            >
+              {showConversationList ? 'Chat' : 'Chats'}
+            </button>
+          ) : null}
+        </div>
+        <label className="relative block w-full md:max-w-[320px]">
           <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
           <input
             ref={conversationSearchRef}
@@ -3064,8 +3106,8 @@ export default function AppPage() {
         </label>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6 p-4 md:p-6 xl:flex-row">
-        <section className="flex w-full flex-col gap-3 xl:w-[320px]">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6 xl:flex-row xl:gap-6">
+        <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-3 xl:flex xl:w-[320px]`}>
           <button
             type="button"
             className="flex items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-4 py-3 text-sm font-semibold transition hover:bg-white/75"
@@ -3089,7 +3131,12 @@ export default function AppPage() {
                 key={conversation.topic}
                 item={conversation}
                 active={activeTopic === conversation.topic}
-                onSelect={setActiveTopic}
+                onSelect={(topic) => {
+                  setActiveTopic(topic);
+                  if (!isWideMessageLayout) {
+                    setMobileConversationListOpen(false);
+                  }
+                }}
                 resolveAssetUrl={resolveApiAssetUrl}
                 displayNameFromTopic={displayNameFromTopic}
                 avatarInitial={avatarInitial}
@@ -3098,8 +3145,18 @@ export default function AppPage() {
           </div>
         </section>
 
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[28px] border border-white/60 bg-white/35 backdrop-blur-xl">
+        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[28px] border border-white/60 bg-white/35 backdrop-blur-xl xl:flex`}>
           <header className="flex items-center gap-3 border-b border-slate-200/50 bg-white/25 px-5 py-3 md:px-6 rounded-t-[28px]">
+            {!isWideMessageLayout ? (
+              <button
+                type="button"
+                className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
+                onClick={() => setMobileConversationListOpen(true)}
+                aria-label="Back to chats"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
+              </button>
+            ) : null}
             <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
@@ -3396,7 +3453,7 @@ export default function AppPage() {
 
               </div>
 
-              <footer className="border-t border-slate-200/50 bg-white/35 px-5 py-4 md:px-6">
+              <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-4 py-4 sm:px-5 md:px-6">
                 <MediaPreviewGrid
                   items={attachmentPreviews}
                   onRemove={(index) => removeAttachmentAt(index, setAttachments)}
@@ -3406,7 +3463,7 @@ export default function AppPage() {
                   showVideoControls={false}
                 />
 
-                <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 md:flex-row md:items-end">
+                <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 sm:flex-row sm:items-end">
                   <div ref={composerMenuRef} className="relative">
                     <button
                       className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
@@ -3450,7 +3507,7 @@ export default function AppPage() {
                   </div>
 
                   <input
-                    className="flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                    className="min-w-0 flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
                     value={composer}
                     onChange={(event) => setComposer(event.target.value)}
                     onKeyDown={(event) => {
@@ -3461,10 +3518,10 @@ export default function AppPage() {
                     }}
                   />
 
-                  <div className="flex items-center gap-2 self-end">
+                  <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:self-end sm:justify-end">
                     {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
                       <button
-                        className="btn btn-ghost"
+                        className="btn btn-ghost px-4"
                         onClick={() => {
                           if (!/(^|\s)@coach\b/i.test(composer)) {
                             setComposer((prev) => (prev.trim() ? `@coach ${prev}` : '@coach '));
@@ -3477,7 +3534,7 @@ export default function AppPage() {
                       </button>
                     ) : null}
                     <button
-                      className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
                       disabled={pendingSend || !isOnline}
                       onClick={() => void handleSendMessage()}
                     >
@@ -3499,6 +3556,7 @@ export default function AppPage() {
       </div>
     </div>
   );
+  };
 
   const renderCommunityPage = () => (
     <div className="flex h-full flex-col">
@@ -4202,7 +4260,7 @@ export default function AppPage() {
         </div>
       ) : null}
 
-      <main className="relative h-screen overflow-hidden">
+      <main className="relative h-dvh overflow-hidden md:h-screen">
         {!isOnline ? (
           <div className="absolute left-4 right-4 top-3 z-20 rounded-full border border-[rgba(242,138,58,0.24)] bg-white/85 px-4 py-2 text-center text-xs font-semibold text-[color:var(--coach-lc-ink)] shadow-[0_10px_20px_rgba(177,99,34,0.12)] backdrop-blur-xl">
             Offline mode: browsing is available, but sending messages and posts is temporarily disabled.
@@ -4212,7 +4270,7 @@ export default function AppPage() {
         <div className="pointer-events-none absolute -left-16 -top-16 size-72 rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.14)_0%,_rgba(105,121,247,0)_72%)]" />
         <div className="pointer-events-none absolute -bottom-24 -right-24 size-96 rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.12)_0%,_rgba(242,138,58,0)_72%)]" />
 
-        <aside className="fixed left-0 top-0 z-30 flex h-screen w-20 flex-col items-center border-r border-slate-200/50 bg-[rgba(255,255,255,0.52)] py-6 backdrop-blur-xl">
+        <aside className="fixed left-0 top-0 z-30 hidden h-screen w-20 flex-col items-center border-r border-slate-200/50 bg-[rgba(255,255,255,0.52)] py-6 backdrop-blur-xl md:flex">
             <button
               type="button"
               onClick={() => setTab('messages')}
@@ -4271,12 +4329,39 @@ export default function AppPage() {
             </div>
         </aside>
 
-        <section className={`relative z-10 ml-20 h-screen min-w-0 overflow-hidden ${isOnline ? '' : 'pt-12'}`}>
+        <section className={`mobile-app-content relative z-10 h-dvh min-w-0 overflow-hidden md:ml-20 md:h-screen md:pb-0 ${isOnline ? '' : 'pt-12'}`}>
             {activeTab === 'messages' ? renderMessagePage() : null}
             {activeTab === 'community' ? renderCommunityPage() : null}
             {activeTab === 'leaderboard' ? renderLeaderboardPage() : null}
             {activeTab === 'profile' ? renderProfilePage() : null}
         </section>
+
+        <nav className="mobile-bottom-nav md:hidden" aria-label="Primary">
+          {visibleTabs.map((item) => {
+            const active = activeTab === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setTab(item.key)}
+                aria-label={item.label}
+                className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${active ? '' : 'text-slate-500'}`}
+                style={active ? {
+                  background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.14)',
+                  color: selectedCoachTheme.ink,
+                } : undefined}
+              >
+                <TabGlyph icon={item.icon} active={active} />
+                <span className="truncate">{item.label}</span>
+                {item.key === 'messages' && totalUnreadCount > 0 ? (
+                  <span className="absolute right-3 top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[10px] font-bold text-white">
+                    {Math.min(totalUnreadCount, 99)}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
       </main>
 
       {profileViewer.open ? (

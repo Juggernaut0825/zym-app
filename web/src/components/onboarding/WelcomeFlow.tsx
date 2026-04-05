@@ -410,7 +410,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   };
 
   return (
-    <div className="relative min-h-dvh overflow-hidden px-4 py-8 sm:px-6">
+    <div className="relative min-h-dvh overflow-x-hidden px-4 py-6 sm:px-6 sm:py-8">
       <div className="pointer-events-none absolute -left-24 -top-24 size-[28rem] rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.14)_0%,_rgba(105,121,247,0)_70%)]" />
       <div className="pointer-events-none absolute -bottom-24 -right-24 size-[30rem] rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.16)_0%,_rgba(242,138,58,0)_70%)]" />
 
@@ -447,7 +447,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
 
           {error ? <p className="mt-5 text-sm text-[color:var(--danger)]">{error}</p> : null}
 
-          <div className="mt-8 flex items-center justify-between gap-3">
+          <div className="welcome-action-bar mt-8 flex items-center justify-between gap-3">
             <button
               type="button"
               className="btn btn-ghost"

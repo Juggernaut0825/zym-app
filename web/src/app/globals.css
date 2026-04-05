@@ -181,6 +181,48 @@ select {
   box-shadow: 0 0 0 3px rgba(108, 124, 246, 0.12);
 }
 
+.mobile-app-content {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 5.5rem);
+}
+
+.mobile-bottom-nav {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0;
+  z-index: 35;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 0.6rem);
+  border: 1px solid rgba(219, 227, 238, 0.92);
+  border-bottom: 0;
+  border-top-left-radius: 1.5rem;
+  border-top-right-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 -16px 36px rgba(76, 92, 122, 0.12);
+}
+
+.chat-footer-safe {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  backdrop-filter: blur(14px);
+}
+
+.welcome-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-left: -0.25rem;
+  margin-right: -0.25rem;
+  padding: 0.85rem 0.25rem calc(env(safe-area-inset-bottom) + 0.35rem);
+  background: linear-gradient(180deg, rgba(244, 239, 232, 0), rgba(244, 239, 232, 0.88) 22%, rgba(244, 239, 232, 0.96) 100%);
+  backdrop-filter: blur(8px);
+}
+
 .btn {
   border: 0;
   border-radius: 14px;
@@ -1933,9 +1975,21 @@ select {
 }
 
 @media (min-width: 768px) {
+  .mobile-app-content {
+    padding-bottom: 0;
+  }
+
   .chat-preview-item {
     width: 144px;
     min-width: 144px;
+  }
+
+  .welcome-action-bar {
+    position: static;
+    margin: 2rem 0 0;
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
   }
 }
 
@@ -2440,6 +2494,10 @@ select {
 
   .composer-send-btn {
     min-width: 84px;
+  }
+
+  .input-shell {
+    font-size: 16px;
   }
 
   .split-input-row {
