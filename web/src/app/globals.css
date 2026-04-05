@@ -186,12 +186,12 @@ select {
 }
 
 .mobile-bottom-nav {
+  display: none;
   position: fixed;
   left: 0.75rem;
   right: 0.75rem;
   bottom: 0;
   z-index: 35;
-  display: flex;
   gap: 0.5rem;
   padding: 0.6rem;
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.6rem);
@@ -202,6 +202,12 @@ select {
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(14px);
   box-shadow: 0 -16px 36px rgba(76, 92, 122, 0.12);
+}
+
+@media (max-width: 767px) {
+  .mobile-bottom-nav {
+    display: flex;
+  }
 }
 
 .chat-footer-safe {

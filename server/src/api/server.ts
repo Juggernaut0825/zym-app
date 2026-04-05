@@ -411,9 +411,20 @@ async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
 
 async function writeJsonAtomic(filePath: string, payload: unknown): Promise<void> {
   await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+  const serialized = JSON.stringify(payload, null, 2);
   const tempPath = `${filePath}.${Date.now()}.tmp`;
-  await fsPromises.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
-  await fsPromises.rename(tempPath, filePath);
+  await fsPromises.writeFile(tempPath, serialized, 'utf8');
+  try {
+    await fsPromises.rename(tempPath, filePath);
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'EXDEV' && error?.code !== 'EPERM' && error?.code !== 'EACCES') {
+      throw error;
+    }
+    logger.warn(`[api] atomic rename failed for ${filePath}; falling back to direct write (${String(error?.code || 'unknown')})`);
+    await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+    await fsPromises.writeFile(filePath, serialized, 'utf8');
+    await fsPromises.rm(tempPath, { force: true }).catch(() => undefined);
+  }
 }
 
 function normalizeCoachDailyRecords(raw: unknown): CoachDailyRecords {
