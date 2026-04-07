@@ -253,6 +253,7 @@ export interface PublicProfileResponse {
 export interface CoachProfileData {
   height?: string | null;
   weight?: string | null;
+  starting_weight_kg?: number | null;
   height_cm?: number | null;
   heightCm?: number | string | null;
   weight_kg?: number | null;
@@ -275,9 +276,11 @@ export interface CoachProfileData {
   notes?: string | null;
   timezone?: string;
   timeZone?: string;
+  latest_checkin_at?: string | null;
   bmr?: number;
   tdee?: number;
   daily_target?: number;
+  progress_summary?: CoachProgressSummary;
   [key: string]: unknown;
 }
 
@@ -351,10 +354,48 @@ export interface CoachTrainingPlanResponse {
   plan: CoachTrainingPlan | null;
 }
 
+export interface CoachCheckInRecord {
+  weight_kg?: number | null;
+  body_fat_pct?: number | null;
+  waist_cm?: number | null;
+  energy?: number | null;
+  hunger?: number | null;
+  recovery?: number | null;
+  adherence?: 'on_track' | 'partial' | 'off_track' | null;
+  notes?: string | null;
+  timezone?: string | null;
+  occurred_at_utc?: string | null;
+  logged_at?: string | null;
+}
+
+export interface CoachProgressSummary {
+  latestCheckInDay: string | null;
+  latestCheckInAt: string | null;
+  latestWeightDay: string | null;
+  latestWeightKg: number | null;
+  latestBodyFatPct: number | null;
+  latestWaistCm: number | null;
+  weight7dAvg: number | null;
+  weight14dDelta: number | null;
+  weight30dDelta: number | null;
+  avgEnergy7d: number | null;
+  avgHunger7d: number | null;
+  avgRecovery7d: number | null;
+  adherence7d: 'on_track' | 'partial' | 'off_track' | 'mixed' | 'unknown';
+  lastBodyFatDay: string | null;
+  lastWaistDay: string | null;
+  checkInDays: number;
+  trendLine: 'down' | 'up' | 'flat' | 'unknown';
+  status: 'on_track' | 'watch' | 'off_track' | 'insufficient_data';
+  statusLabel: string;
+  trendNarrative: string;
+}
+
 export interface CoachDayRecord {
   day: string;
   total_intake: number;
   total_burned: number;
+  check_in?: CoachCheckInRecord | null;
   meals: CoachMealRecord[];
   training: CoachTrainingRecord[];
 }
@@ -362,11 +403,13 @@ export interface CoachDayRecord {
 export interface CoachRecordsResponse {
   selectedCoach?: 'zj' | 'lc' | null;
   profile: CoachProfileData;
+  progress?: CoachProgressSummary;
   records: CoachDayRecord[];
   stats: {
     days: number;
     mealCount: number;
     trainingCount: number;
+    checkInCount?: number;
   };
 }
 

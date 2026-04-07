@@ -656,6 +656,7 @@ export async function updateCoachRecordProfile(payload: {
   experience_level?: string;
   notes?: string;
   timezone?: string;
+  seed_initial_check_in?: boolean;
 }): Promise<void> {
   await request('/coach/records/profile/update', {
     method: 'POST',
@@ -677,6 +678,26 @@ export async function updateCoachMealRecord(payload: {
   occurredAtUtc?: string | null;
 }): Promise<void> {
   await request('/coach/records/meal/update', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCoachCheckInRecord(payload: {
+  userId: number;
+  day?: string;
+  timezone?: string;
+  occurredAtUtc?: string | null;
+  weight_kg?: number;
+  body_fat_pct?: number;
+  waist_cm?: number;
+  energy?: number;
+  hunger?: number;
+  recovery?: number;
+  adherence?: 'on_track' | 'partial' | 'off_track';
+  notes?: string;
+}): Promise<void> {
+  await request('/coach/records/check-in/update', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

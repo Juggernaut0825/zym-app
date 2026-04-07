@@ -7,6 +7,8 @@ import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { logger } from '../utils/logger.js';
 import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
+import { coachTypedToolsService } from './coach-typed-tools-service.js';
+import { computeCoachProgressSummary, normalizeCoachCheckIn } from '../utils/coach-progress.js';
 
 const DEFAULT_INTERVAL_MINUTES = 10;
 const DEFAULT_NIGHTLY_HOUR = 20;
@@ -93,6 +95,16 @@ function latestTrainingDay(daily: Record<string, any>): string | null {
     .pop() || null;
 }
 
+function localDayDistance(fromDay: string | null | undefined, toDay: string): number {
+  const safeFrom = String(fromDay || '').trim();
+  const safeTo = String(toDay || '').trim();
+  if (!safeFrom || !safeTo) return Number.POSITIVE_INFINITY;
+  const fromDate = new Date(`${safeFrom}T00:00:00.000Z`);
+  const toDate = new Date(`${safeTo}T00:00:00.000Z`);
+  if (!Number.isFinite(fromDate.getTime()) || !Number.isFinite(toDate.getTime())) return Number.POSITIVE_INFINITY;
+  return Math.round((toDate.getTime() - fromDate.getTime()) / 86_400_000);
+}
+
 export class CoachOutreachScheduler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -175,6 +187,9 @@ export class CoachOutreachScheduler {
     }
 
     if (await this.maybeSendOnboarding(userId, coachId, timezone, topic, user.created_at, now)) {
+      return true;
+    }
+    if (await this.maybeSendProgressCheckIn(userId, coachId, timezone, topic, localNow, now)) {
       return true;
     }
     if (await this.maybeSendInactivity(userId, coachId, timezone, topic, localNow, now)) {
@@ -294,6 +309,54 @@ export class CoachOutreachScheduler {
     });
   }
 
+  private async maybeSendProgressCheckIn(
+    userId: number,
+    coachId: 'zj' | 'lc',
+    timezone: string,
+    topic: string,
+    localNow: { day: string; hour: number; minute: number },
+    now: Date,
+  ): Promise<boolean> {
+    if (localNow.hour < 8 || localNow.hour > 20 || localNow.minute > 20) {
+      return false;
+    }
+
+    const latestUserMessage = getDB()
+      .prepare(`
+        SELECT created_at
+        FROM messages
+        WHERE topic = ? AND from_user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(topic, userId) as { created_at?: string | null } | undefined;
+    if (localDateParts(parseIso(latestUserMessage?.created_at) || new Date(0), timezone).day === localNow.day) {
+      return false;
+    }
+
+    const daily = await readDailyRecord(userId);
+    const profile = await coachTypedToolsService.getProfile(String(userId)).catch(() => ({}));
+    const summary = computeCoachProgressSummary(daily, (profile as any)?.goal);
+    const daysSinceWeight = localDayDistance(summary.latestWeightDay, localNow.day);
+    const daysSinceCheckIn = localDayDistance(summary.latestCheckInDay, localNow.day);
+
+    if (daysSinceWeight < 3 && daysSinceCheckIn < 3) {
+      return false;
+    }
+
+    const dedupeKey = `progress_checkin:${userId}:${localNow.day}`;
+    return this.sendOutreach({
+      userId,
+      coachId,
+      timezone,
+      topic,
+      triggerType: 'progress_checkin',
+      localDay: localNow.day,
+      dedupeKey,
+      instruction: 'The user has not logged a recent progress check-in. Send one concise coach message that nudges a quick weigh-in or short status update, and explain why a 30-second check-in helps you adjust training or food.',
+    });
+  }
+
   private async maybeSendNightlyCheckIn(
     userId: number,
     coachId: 'zj' | 'lc',
@@ -363,12 +426,15 @@ export class CoachOutreachScheduler {
       return false;
     }
 
+    const daily = await readDailyRecord(input.userId);
+    const stateContext = await this.buildStateContext(input.userId, input.timezone, input.localDay, daily);
     const content = await CoachService.composeProactiveMessage(String(input.userId), `
 Trigger: ${input.triggerType}
 User timezone: ${input.timezone}
 Local day: ${input.localDay}
 
 ${input.instruction}
+${stateContext}
     `.trim(), {
       coachOverride: input.coachId,
       platform: 'scheduler',
@@ -416,5 +482,46 @@ ${input.instruction}
 
     logger.info(`[outreach] sent trigger=${input.triggerType} user=${input.userId} coach=${input.coachId}`);
     return true;
+  }
+
+  private async buildStateContext(
+    userId: number,
+    timezone: string,
+    localDay: string,
+    daily: Record<string, any>,
+  ): Promise<string> {
+    try {
+      const profile = await coachTypedToolsService.getProfile(String(userId));
+      const summary = ((profile as any)?.progress_summary || computeCoachProgressSummary(daily, (profile as any)?.goal)) as any;
+      const todayBucket = daily[localDay] && typeof daily[localDay] === 'object' ? daily[localDay] : {};
+      const todayCheckIn = normalizeCoachCheckIn((todayBucket as any)?.check_in);
+      const todayMeals = Array.isArray((todayBucket as any)?.meals) ? (todayBucket as any).meals.length : 0;
+      const todayTraining = Array.isArray((todayBucket as any)?.training) ? (todayBucket as any).training.length : 0;
+      const planResult = await coachTypedToolsService.getTrainingPlan(String(userId), { day: localDay, timezone }).catch(() => ({ plan: null }));
+      const plan = (planResult as any)?.plan || null;
+      const remainingExercises = Array.isArray(plan?.exercises)
+        ? plan.exercises.filter((item: any) => !item?.completed_at).length
+        : 0;
+
+      const lines: string[] = ['[USER_STATE]'];
+      if ((profile as any)?.goal) {
+        lines.push(`Goal: ${(profile as any).goal}`);
+      }
+      if (summary?.trendNarrative) {
+        lines.push(`Progress: ${summary.trendNarrative}`);
+      }
+      if (todayCheckIn) {
+        lines.push('Today already has a progress check-in.');
+      } else {
+        lines.push('Today does not have a progress check-in yet.');
+      }
+      lines.push(`Today logs: ${todayMeals} meals, ${todayTraining} training entries.`);
+      if (plan) {
+        lines.push(`Today's coach plan: ${plan.title || 'Training plan'}${remainingExercises > 0 ? ` with ${remainingExercises} exercises still unchecked` : ', already completed'}.`);
+      }
+      return `\n\n${lines.join('\n')}`;
+    } catch {
+      return '';
+    }
   }
 }

@@ -205,7 +205,7 @@ export default function FriendsPage() {
     <main className="min-h-dvh bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/20 px-4 py-6">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex items-center gap-4">
-          <button className="btn btn-ghost" type="button" onClick={() => router.back()}>
+          <button className="btn btn-ghost" type="button" onClick={() => router.replace('/app?tab=community')}>
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
           <h1 className="text-2xl font-bold text-slate-900">Friends</h1>

@@ -203,6 +203,8 @@ function toolStatusLabel(toolName: string): string {
       return 'Searching demo videos...';
     case 'log_meal':
       return 'Saving meal log...';
+    case 'log_check_in':
+      return 'Saving progress check-in...';
     case 'log_training':
       return 'Saving training log...';
     case 'set_profile':

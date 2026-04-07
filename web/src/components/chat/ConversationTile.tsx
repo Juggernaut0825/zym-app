@@ -52,7 +52,7 @@ function ConversationTileComponent({
     <button
       type="button"
       onClick={() => onSelect(item.topic)}
-      className={`w-full rounded-[22px] border px-4 py-3 text-left transition ${
+      className={`w-full rounded-[18px] border px-3 py-2.5 text-left transition sm:rounded-[22px] sm:px-4 sm:py-3 ${
         active
           ? activeTone
           : 'border-white/70 bg-white/55 hover:bg-white/70'
@@ -65,28 +65,28 @@ function ConversationTileComponent({
             <img
               src={resolveAssetUrl(item.avatarUrl)}
               alt={name}
-              style={{ width: 40, height: 40, borderRadius: 15, objectFit: 'cover', border: '1px solid rgba(221, 216, 207, 0.88)' }}
+              style={{ width: 36, height: 36, borderRadius: 13, objectFit: 'cover', border: '1px solid rgba(221, 216, 207, 0.88)' }}
             />
           ) : (
-            <div className={`flex size-10 items-center justify-center rounded-[14px] border border-white/70 text-sm font-semibold ${avatarTone}`}>
+            <div className={`flex size-9 items-center justify-center rounded-[12px] border border-white/70 text-[13px] font-semibold sm:size-10 sm:rounded-[14px] sm:text-sm ${avatarTone}`}>
               {avatarInitial(name)}
             </div>
           )}
           {hasUnread ? (
-            <span className="absolute -right-1 -top-1 size-3 rounded-full bg-[#ef4444] ring-2 ring-white" aria-hidden="true" />
+            <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-[#ef4444] ring-2 ring-white sm:size-3" aria-hidden="true" />
           ) : null}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-2.5 sm:gap-3">
             <div className="min-w-0">
-              <strong className={`block truncate text-sm ${hasUnread ? 'font-extrabold text-slate-950' : 'text-slate-900'}`}>{name}</strong>
+              <strong className={`block truncate text-[13px] sm:text-sm ${hasUnread ? 'font-extrabold text-slate-950' : 'text-slate-900'}`}>{name}</strong>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${badgeTone}`}>
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <span className={`rounded-full px-1.5 py-[3px] text-[9px] font-bold uppercase tracking-[0.16em] sm:px-2 sm:py-1 sm:text-[10px] sm:tracking-[0.18em] ${badgeTone}`}>
                 {badgeLabel}
               </span>
               {hasUnread ? (
-                <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[10px] font-bold text-white">
+                <span className="inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#ef4444] px-1 text-[9px] font-bold text-white sm:min-h-5 sm:min-w-5 sm:text-[10px]">
                   {unreadTotal > 99 ? '99+' : unreadTotal}
                 </span>
               ) : null}
@@ -94,13 +94,13 @@ function ConversationTileComponent({
           </div>
           {item.preview ? (
             <p
-              className={`mt-1.5 overflow-hidden text-sm leading-6 ${hasUnread ? 'font-medium text-slate-700' : 'text-slate-600'}`}
+              className={`mt-1 overflow-hidden text-[13px] leading-5 sm:mt-1.5 sm:text-sm sm:leading-6 ${hasUnread ? 'font-medium text-slate-700' : 'text-slate-600'}`}
               style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical' }}
             >
               {item.preview}
             </p>
           ) : (
-            <p className="mt-1.5 text-sm leading-6 text-slate-400">No messages yet.</p>
+            <p className="mt-1 text-[13px] leading-5 text-slate-400 sm:mt-1.5 sm:text-sm sm:leading-6">No messages yet.</p>
           )}
         </div>
       </div>

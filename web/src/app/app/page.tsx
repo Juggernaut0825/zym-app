@@ -451,7 +451,8 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
 function coachWorkspaceLabel(mode: CoachWorkspaceMode): string {
   if (mode === 'info') return 'Info';
   if (mode === 'meals') return 'Meals';
-  return 'Trains';
+  if (mode === 'trains') return 'Trains';
+  return 'Progress';
 }
 
 function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
@@ -593,14 +594,14 @@ function detectLocalTimezone(): string {
   }
 }
 
-function TabGlyph({ icon, active }: { icon: TabIcon; active: boolean }) {
+function TabGlyph({ icon, active, size = 24 }: { icon: TabIcon; active: boolean; size?: number }) {
   return (
     <span
       className="material-symbols-outlined"
       aria-hidden="true"
       style={{
-        fontSize: 24,
-        fontVariationSettings: `'FILL' ${active ? 1 : 0}, 'wght' 500, 'GRAD' 0, 'opsz' 24`,
+        fontSize: size,
+        fontVariationSettings: `'FILL' ${active ? 1 : 0}, 'wght' 500, 'GRAD' 0, 'opsz' ${size}`,
       }}
     >
       {icon}
@@ -633,6 +634,7 @@ export default function AppPage() {
   const coachReplyRevealTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>[]>>({});
   const coachReplyRevealQueuesRef = useRef<Record<string, ChatMessage[]>>({});
   const coachReplyRevealActiveMessageRef = useRef<Record<string, string | null>>({});
+  const previousCoachPanelModeRef = useRef<CoachPanelMode>('chat');
   const skipTypingPulseRef = useRef(false);
   const notificationAudioContextRef = useRef<AudioContext | null>(null);
   const lastNotificationKeyRef = useRef<string>('');
@@ -1685,6 +1687,16 @@ export default function AppPage() {
     if (coachPanelMode === 'chat') return;
     setComposerActionsOpen(false);
   }, [coachPanelMode]);
+
+  useEffect(() => {
+    const previousMode = previousCoachPanelModeRef.current;
+    previousCoachPanelModeRef.current = coachPanelMode;
+
+    if (activeConversation?.type !== 'coach') return;
+    if (coachPanelMode !== 'chat' || previousMode === 'chat') return;
+
+    scrollChatToBottom('auto');
+  }, [activeConversation?.type, coachPanelMode]);
 
   useEffect(() => {
     if (!activeTopic) return;
@@ -3043,18 +3055,18 @@ export default function AppPage() {
     searchRef?: { current: HTMLInputElement | null },
     trailing?: JSX.Element,
   ) => (
-    <header className="flex flex-col gap-4 border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:flex-row md:items-center md:justify-between md:px-8">
+    <header className="flex flex-col gap-2.5 border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:gap-4 sm:px-5 sm:py-3 md:flex-row md:items-center md:justify-between md:px-8">
       <div>
-        <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">{title}</h1>
+        <h1 className="text-[1.3rem] font-semibold tracking-tight text-slate-900 sm:text-[1.9rem] md:text-[2.15rem]">{title}</h1>
         {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
       </div>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="flex flex-col gap-2.5 sm:gap-3 md:flex-row md:items-center">
         {onSearchChange ? (
-          <label className="relative block min-w-[240px] md:min-w-[280px]">
-            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
+          <label className="relative block w-full min-w-0 md:min-w-[280px]">
+            <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
             <input
               ref={searchRef}
-              className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition"
+              className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition sm:pl-9 sm:pr-4 sm:text-sm"
               style={{
                 borderColor: selectedCoach === 'lc' ? 'rgba(242,138,58,0.18)' : undefined,
                 boxShadow: 'none',
@@ -3068,11 +3080,11 @@ export default function AppPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white"
+            className="flex size-8 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white sm:size-9"
             onClick={() => router.push('/friends')}
             title="Friends"
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>group</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>group</span>
           </button>
           {trailing}
         </div>
@@ -3089,13 +3101,13 @@ export default function AppPage() {
 
     return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-col gap-3 border-b border-slate-200/50 bg-white/20 px-4 py-3 backdrop-blur-sm sm:px-5 md:flex-row md:items-center md:justify-between md:px-8">
+      <header className="flex flex-col gap-2.5 border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:gap-3 sm:px-5 sm:py-3 md:flex-row md:items-center md:justify-between md:px-8">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-[1.75rem] font-semibold tracking-tight text-slate-900 sm:text-[1.9rem] md:text-[2.15rem]">Message</h1>
+          <h1 className="text-[1.3rem] font-semibold tracking-tight text-slate-900 sm:text-[1.7rem] md:text-[2.15rem]">Message</h1>
           {!isWideMessageLayout ? (
             <button
               type="button"
-              className="btn btn-ghost px-4 py-2 text-sm"
+              className="btn btn-ghost px-3 py-1.5 text-[13px] sm:px-4 sm:py-2 sm:text-sm"
               onClick={() => setMobileConversationListOpen((prev) => !prev)}
             >
               {showConversationList ? 'Chat' : 'Chats'}
@@ -3103,10 +3115,10 @@ export default function AppPage() {
           ) : null}
         </div>
         <label className="relative block w-full md:max-w-[320px]">
-          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 18 }}>search</span>
+          <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
           <input
             ref={conversationSearchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-9 pr-4 text-sm text-slate-700 outline-none transition"
+            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition sm:pl-9 sm:pr-4 sm:text-sm"
             style={{ borderColor: selectedCoachTheme.borderColor }}
             value={conversationQuery}
             onChange={(event) => setConversationQuery(event.target.value)}
@@ -3115,23 +3127,23 @@ export default function AppPage() {
         </label>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6 xl:flex-row xl:gap-6">
-        <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-3 xl:flex xl:w-[320px]`}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:gap-4 sm:p-4 md:p-6 xl:flex-row xl:gap-6">
+        <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-2.5 sm:gap-3 xl:flex xl:w-[320px]`}>
           <button
             type="button"
-            className="flex items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/55 px-4 py-3 text-sm font-semibold transition hover:bg-white/75"
+            className="flex items-center justify-center gap-2 rounded-[18px] border border-white/60 bg-white/55 px-3 py-2.5 text-[13px] font-semibold transition hover:bg-white/75 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm"
             style={{
               color: selectedCoachTheme.ink,
               borderColor: selectedCoachTheme.borderColor,
             }}
             onClick={openCreateGroupDialog}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
             Create Group
           </button>
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1 sm:gap-3">
             {filteredConversations.length === 0 ? (
-              <div className="rounded-[28px] border border-dashed border-slate-300/80 bg-white/25 p-5 text-sm text-slate-500">
+              <div className="rounded-[22px] border border-dashed border-slate-300/80 bg-white/25 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
                 No conversations matched this search.
               </div>
             ) : null}
@@ -3154,33 +3166,33 @@ export default function AppPage() {
           </div>
         </section>
 
-        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[28px] border border-white/60 bg-white/35 backdrop-blur-xl xl:flex`}>
-          <header className="flex items-center justify-between gap-3 rounded-t-[28px] border-b border-slate-200/50 bg-white/25 px-5 py-3 md:px-6">
-            <div className="flex min-w-0 items-center gap-3">
+        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[22px] border border-white/60 bg-white/35 backdrop-blur-xl sm:rounded-[28px] xl:flex`}>
+          <header className="flex items-center justify-between gap-2.5 rounded-t-[22px] border-b border-slate-200/50 bg-white/25 px-3.5 py-2.5 sm:gap-3 sm:rounded-t-[28px] sm:px-5 sm:py-3 md:px-6">
+            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
               {showChatListBackButton ? (
                 <button
                   type="button"
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
                   onClick={() => setMobileConversationListOpen(true)}
                   aria-label="Back to chats"
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
                 </button>
               ) : null}
               {showWorkspaceBackButton ? (
                 <button
                   type="button"
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-white/80 text-slate-500 transition hover:bg-white"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
                   onClick={() => setCoachPanelMode('chat')}
                   aria-label="Back to chat"
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_back</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
                 </button>
               ) : null}
               {!isCoachWorkspaceOpen ? (
                 <button
                   type="button"
-                  className="flex size-10 shrink-0 items-center justify-center rounded-[14px]"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
                   style={{
                     background: activeConversation?.type === 'coach'
                       ? activeConversationCoach === 'lc'
@@ -3192,29 +3204,34 @@ export default function AppPage() {
                   onClick={() => void openConversationProfile()}
                   disabled={!activeConversation || activeConversation.type === 'group'}
                   title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
-                >
+                  >
                   {activeConversation?.avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={resolveApiAssetUrl(activeConversation.avatarUrl)}
                       alt={activeConversation.name}
-                      style={{ width: 40, height: 40, borderRadius: 14, objectFit: 'cover' }}
+                      style={{
+                        width: isWideMessageLayout ? 40 : 34,
+                        height: isWideMessageLayout ? 40 : 34,
+                        borderRadius: isWideMessageLayout ? 14 : 12,
+                        objectFit: 'cover',
+                      }}
                     />
                   ) : (
-                    <span className="text-base font-semibold">{avatarInitial(activeConversation?.name || 'Chat')}</span>
+                    <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
                   )}
                 </button>
               ) : null}
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-2">
-                  <h2 className="truncate text-xl font-bold text-slate-900">
+                  <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
                     {isCoachWorkspaceOpen ? coachWorkspaceHeaderTitle : activeConversation?.name || 'Select a chat'}
                   </h2>
                   {activeConversation?.type === 'coach' && !isCoachWorkspaceOpen ? (
                     <div className="group relative">
                       <button
                         type="button"
-                        className="flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[11px] font-semibold text-slate-500"
+                        className="flex size-[22px] items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[10px] font-semibold text-slate-500 sm:size-6 sm:text-[11px]"
                         aria-label="Coach safety notice"
                       >
                         i
@@ -3235,7 +3252,7 @@ export default function AppPage() {
               <div ref={coachMenuRef} className="relative shrink-0">
                 <button
                   type="button"
-                  className={`flex size-10 items-center justify-center rounded-[12px] text-slate-500 transition ${
+                  className={`flex size-9 items-center justify-center rounded-[12px] text-slate-500 transition sm:size-10 ${
                     coachMenuOpen
                       ? 'bg-slate-200/90 shadow-[0_12px_28px_rgba(15,23,42,0.14)]'
                       : 'bg-transparent hover:bg-slate-100/85'
@@ -3243,19 +3260,20 @@ export default function AppPage() {
                   aria-label="Open coach workspace"
                   onClick={() => setCoachMenuOpen((prev) => !prev)}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>more_horiz</span>
                 </button>
                 {coachMenuOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+12px)] z-30 flex min-w-[180px] flex-col rounded-[18px] border border-white/70 bg-white/95 p-2 shadow-xl">
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[160px] flex-col rounded-[16px] border border-white/70 bg-white/95 p-2 shadow-xl sm:top-[calc(100%+12px)] sm:min-w-[180px] sm:rounded-[18px]">
                     {([
                       ['info', 'Info'],
                       ['meals', 'Meals'],
                       ['trains', 'Trains'],
+                      ['progress', 'Progress'],
                     ] as Array<[CoachWorkspaceMode, string]>).map(([value, label]) => (
                       <button
                         key={value}
                         type="button"
-                        className={`rounded-[14px] px-4 py-3 text-left text-sm font-semibold transition ${
+                        className={`rounded-[12px] px-3 py-2.5 text-left text-[13px] font-semibold transition sm:rounded-[14px] sm:px-4 sm:py-3 sm:text-sm ${
                           coachPanelMode === value ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-100/80'
                         }`}
                         onClick={() => {
@@ -3274,11 +3292,11 @@ export default function AppPage() {
             {activeConversation?.type === 'group' ? (
               <button
                 type="button"
-                className="flex size-10 shrink-0 items-center justify-center rounded-[12px] text-slate-500 transition hover:bg-slate-100/85"
+                className="flex size-9 shrink-0 items-center justify-center rounded-[12px] text-slate-500 transition hover:bg-slate-100/85 sm:size-10"
                 aria-label="Open group settings"
                 onClick={() => setGroupSettingsOpen(true)}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>more_horiz</span>
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>more_horiz</span>
               </button>
             ) : null}
           </header>
@@ -3295,7 +3313,7 @@ export default function AppPage() {
             />
           ) : (
             <>
-              <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-5 py-5 md:px-6">
+              <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-3.5 py-3.5 sm:px-5 sm:py-5 md:px-6">
                 {messages.map((message, index) => {
                   const mine = message.from_user_id === authUserId;
                   const previous = index > 0 ? messages[index - 1] : null;
@@ -3328,19 +3346,19 @@ export default function AppPage() {
                   const showMessageMedia = !isCoachReply || !isInlineCoachReveal || !hasRemainingCoachSegments;
 
                   return (
-                    <div key={`${message.id}-${message.created_at}`} className="mb-5">
+                    <div key={`${message.id}-${message.created_at}`} className="mb-3.5 sm:mb-5">
                       {showDateDivider ? (
-                        <div className="mb-4 flex items-center gap-4 py-2">
+                        <div className="mb-3 flex items-center gap-3 py-1.5 sm:mb-4 sm:gap-4 sm:py-2">
                           <div className="h-px flex-1 bg-slate-200/60" />
-                          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-400">{formatDayLabel(message.created_at)}</span>
+                          <span className="text-[9px] font-bold uppercase tracking-[0.26em] text-slate-400 sm:text-[10px] sm:tracking-[0.3em]">{formatDayLabel(message.created_at)}</span>
                           <div className="h-px flex-1 bg-slate-200/60" />
                         </div>
                       ) : null}
 
-                      <div className={`flex gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-2' : ''}`}>
+                      <div className={`flex gap-2.5 sm:gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-1.5 sm:mt-2' : ''}`}>
                         {!mine ? (
                           <div
-                            className={`mt-1 flex size-8 items-center justify-center rounded-full text-xs font-semibold ${compact ? 'opacity-0' : ''}`}
+                            className={`mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${compact ? 'opacity-0' : ''}`}
                             style={{
                               background: message.is_coach
                                 ? (activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.12)')
@@ -3361,9 +3379,9 @@ export default function AppPage() {
                           </div>
                         ) : null}
 
-                        <article className={`max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                        <article className={`max-w-[88%] sm:max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                           {showMetaLine ? (
-                            <div className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-400 ${mine ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] text-slate-400 sm:gap-2 sm:text-[11px] sm:tracking-[0.2em] ${mine ? 'justify-end' : 'justify-start'}`}>
                               {senderMetaLabel ? (
                                 <strong
                                   className="font-semibold"
@@ -3394,7 +3412,7 @@ export default function AppPage() {
                                   <button
                                     key={mediaUrl}
                                     type="button"
-                                    className="relative h-32 w-32 shrink-0 overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 md:h-36 md:w-36"
+                                    className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[18px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 sm:h-32 sm:w-32 sm:rounded-[22px] md:h-36 md:w-36"
                                     onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
                                   >
                                     {isVideoUrl(mediaUrl) ? (
@@ -3427,7 +3445,7 @@ export default function AppPage() {
                           {renderedSegments.map((segment, segmentIndex) => (
                             <div
                               key={`${message.id}-segment-${segmentIndex}`}
-                              className={`rounded-[22px] px-4 py-3 shadow-sm ${
+                              className={`rounded-[18px] px-3 py-2.5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 ${
                                 mine
                                   ? 'rounded-tr-md border border-white/80 bg-white/80 text-slate-800'
                                   : 'rounded-tl-md text-white'
@@ -3446,13 +3464,13 @@ export default function AppPage() {
                                     }
                               ) : undefined}
                             >
-                              {segment ? <p className="text-sm leading-6">{renderMessageInlineLinks(segment)}</p> : null}
+                              {segment ? <p className="text-[13px] leading-5 sm:text-sm sm:leading-6">{renderMessageInlineLinks(segment)}</p> : null}
                             </div>
                           ))}
 
                           {isCoachReply && hasRemainingCoachSegments ? (
                             <div
-                              className="mt-2 inline-flex items-center gap-3 rounded-full border border-white/60 bg-white/75 px-4 py-2 text-sm shadow-sm"
+                              className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/75 px-3 py-1.5 text-[13px] shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm"
                               style={{
                                 color: activeConversationTheme.ink,
                               }}
@@ -3473,7 +3491,7 @@ export default function AppPage() {
 
                 {typingLabel ? (
                   <div className="mt-4 flex justify-start">
-                    <div className="inline-flex items-center gap-3 rounded-full bg-white/70 px-4 py-2 text-sm text-slate-500">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-500 sm:gap-3 sm:px-4 sm:py-2 sm:text-sm">
                       <span>{typingLabel}</span>
                       <span className="typing-dots" aria-hidden="true">
                         <i />
@@ -3486,28 +3504,28 @@ export default function AppPage() {
 
               </div>
 
-              <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-4 py-4 sm:px-5 md:px-6">
+              <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 md:px-6">
                 <MediaPreviewGrid
                   items={attachmentPreviews}
                   onRemove={(index) => removeAttachmentAt(index, setAttachments)}
                   wrapperClassName="chat-preview-grid"
                   itemClassName="chat-preview-item"
-                  mediaHeight={128}
+                  mediaHeight={isWideMessageLayout ? 128 : 96}
                   showVideoControls={false}
                 />
 
-                <div className="mt-3 flex flex-col gap-3 rounded-[24px] border border-white/60 bg-white/65 p-3 sm:flex-row sm:items-end">
+                <div className="mt-2.5 flex items-end gap-2 rounded-[20px] border border-white/60 bg-white/65 p-2.5 sm:mt-3 sm:gap-3 sm:rounded-[24px] sm:p-3">
                   <div ref={composerMenuRef} className="relative">
                     <button
-                      className="flex size-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                      className="flex size-10 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
                       type="button"
                       onClick={() => setComposerActionsOpen((prev) => !prev)}
                       aria-label="Open attachment actions"
                     >
-                      <span className="material-symbols-outlined">add_circle</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add_circle</span>
                     </button>
                     {composerActionsOpen ? (
-                      <div className="absolute bottom-[calc(100%+12px)] left-0 z-10 flex min-w-[240px] flex-col gap-2 rounded-[22px] border border-white/70 bg-white/95 p-3 shadow-xl">
+                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-10 flex min-w-[220px] flex-col gap-2 rounded-[18px] border border-white/70 bg-white/95 p-3 shadow-xl sm:bottom-[calc(100%+12px)] sm:min-w-[240px] sm:rounded-[22px]">
                         <label className="btn btn-ghost flex-col items-start gap-0.5" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
                           <span>Photo / Video</span>
                           <span className="text-xs font-normal text-slate-400">Up to 50MB each</span>
@@ -3540,9 +3558,10 @@ export default function AppPage() {
                   </div>
 
                   <input
-                    className="min-w-0 flex-1 rounded-[18px] border border-transparent bg-transparent px-2 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                    className="min-w-0 flex-1 rounded-[16px] border border-transparent bg-transparent px-1 py-2.5 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 sm:rounded-[18px] sm:px-2 sm:py-3 sm:text-sm"
                     value={composer}
                     onChange={(event) => setComposer(event.target.value)}
+                    placeholder="Type a message..."
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
@@ -3551,10 +3570,10 @@ export default function AppPage() {
                     }}
                   />
 
-                  <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:self-end sm:justify-end">
+                  <div className="flex shrink-0 items-center gap-2 self-auto sm:self-end">
                     {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
                       <button
-                        className="btn btn-ghost px-4"
+                        className="btn btn-ghost px-3 py-2 text-[12px] sm:px-4 sm:text-sm"
                         onClick={() => {
                           if (!/(^|\s)@coach\b/i.test(composer)) {
                             setComposer((prev) => (prev.trim() ? `@coach ${prev}` : '@coach '));
@@ -3567,11 +3586,11 @@ export default function AppPage() {
                       </button>
                     ) : null}
                     <button
-                      className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                      className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
                       disabled={pendingSend || !isOnline}
                       onClick={() => void handleSendMessage()}
                     >
-                      <span className="material-symbols-outlined">send</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>send</span>
                     </button>
                   </div>
                 </div>
@@ -3602,13 +3621,13 @@ export default function AppPage() {
         undefined,
       )}
 
-      <div className="grid min-h-0 flex-1 gap-6 p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <section className="min-h-0 overflow-y-auto pr-1">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-            <section className="rounded-[30px] border border-white/70 bg-white/55 p-5 shadow-[0_24px_60px_rgba(105,121,247,0.06)] backdrop-blur-xl">
-              <div className="flex gap-4">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
+            <section className="rounded-[22px] border border-white/70 bg-white/55 p-4 shadow-[0_24px_60px_rgba(105,121,247,0.06)] backdrop-blur-xl sm:rounded-[30px] sm:p-5">
+              <div className="flex gap-3 sm:gap-4">
                 <div
-                  className="flex size-12 shrink-0 items-center justify-center rounded-full text-lg font-semibold"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-full text-base font-semibold sm:size-12 sm:text-lg"
                   style={{
                     background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
                     color: selectedCoachTheme.ink,
@@ -3632,35 +3651,35 @@ export default function AppPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <textarea
-                    className="min-h-[110px] w-full resize-none border-0 bg-transparent p-0 text-base text-slate-800 outline-none placeholder:text-slate-400"
+                    className="min-h-[84px] w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 sm:min-h-[110px] sm:text-base"
                     value={postText}
                     placeholder="What's on your mind?"
                     onChange={(event) => setPostText(event.target.value)}
                   />
-                  <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/60 pt-4">
+                  <div className="mt-3 flex flex-col gap-2.5 border-t border-slate-200/60 pt-3 sm:mt-4 sm:gap-3 sm:pt-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <label
-                        className="flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition"
+                        className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-[13px] font-medium transition sm:px-4 sm:py-2 sm:text-sm"
                         style={{
                           background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.1)' : 'rgba(105,121,247,0.1)',
                           color: selectedCoachTheme.ink,
                         }}
                       >
-                        <span className="material-symbols-outlined text-lg">image</span>
+                        <span className="material-symbols-outlined text-base sm:text-lg">image</span>
                         Add media
                         <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
                       </label>
                       <span className="text-xs text-slate-500">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
                       {postFiles.length > 0 ? (
-                        <button className="btn btn-ghost" style={{ padding: '6px 10px' }} type="button" onClick={() => setPostFiles([])}>
+                        <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} type="button" onClick={() => setPostFiles([])}>
                           Clear
                         </button>
                       ) : null}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <label className="relative flex min-w-[170px] items-center">
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="relative flex w-full min-w-0 items-center sm:min-w-[170px] sm:w-auto">
                         <select
-                          className="w-full appearance-none rounded-full border border-white/70 bg-white/80 px-4 py-2.5 pr-10 text-sm font-medium text-slate-700 outline-none transition"
+                          className="w-full appearance-none rounded-full border border-white/70 bg-white/80 px-4 py-2 pr-10 text-[13px] font-medium text-slate-700 outline-none transition sm:py-2.5 sm:text-sm"
                           style={{
                             borderColor: selectedCoachTheme.borderColor,
                             color: selectedCoachTheme.ink,
@@ -3674,12 +3693,12 @@ export default function AppPage() {
                         </select>
                         <span
                           className="material-symbols-outlined pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-                          style={{ fontSize: 18 }}
+                          style={{ fontSize: 16 }}
                         >
                           expand_more
                         </span>
                       </label>
-                      <button className={selectedCoachButtonClass} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
+                      <button className={`${selectedCoachButtonClass} self-start sm:self-auto`} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
                         {postPending ? 'Posting...' : 'Post'}
                       </button>
                     </div>
@@ -3696,18 +3715,18 @@ export default function AppPage() {
             </section>
 
             {feedLoading ? (
-              <section className="rounded-[30px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+              <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[30px] sm:p-5">
                 <div className="feed-skeleton" />
                 <div className="feed-skeleton" />
               </section>
             ) : null}
 
             {filteredFeed.map((post) => (
-              <article key={post.id} className="rounded-[30px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl transition hover:bg-white/55">
+              <article key={post.id} className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl transition hover:bg-white/55 sm:rounded-[30px] sm:p-5">
                 <header className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div
-                      className="flex size-11 items-center justify-center overflow-hidden rounded-full font-semibold"
+                      className="flex size-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold sm:size-11"
                       style={{
                         background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
                         color: selectedCoachTheme.ink,
@@ -3726,10 +3745,10 @@ export default function AppPage() {
                     </div>
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <strong className="text-sm text-slate-900">{post.username}</strong>
+                        <strong className="text-[13px] text-slate-900 sm:text-sm">{post.username}</strong>
                         <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
                       </div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
                     </div>
                   </div>
                   <div className="relative" ref={postMenuOpenId === post.id ? postMenuRef : null}>
@@ -3776,13 +3795,13 @@ export default function AppPage() {
 
                 {post.content ? (
                   <>
-                    <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                    <p className="mt-3 whitespace-pre-wrap text-[13px] leading-6 text-slate-700 sm:mt-4 sm:text-sm sm:leading-7">
                       {expandedPostIds.includes(post.id) || post.content.length <= 180
                         ? post.content
                         : `${post.content.slice(0, 180)}...`}
                     </p>
                     {post.content.length > 180 ? (
-                      <button className="mt-2 text-sm font-semibold" style={{ color: selectedCoachTheme.ink }} onClick={() => togglePostExpanded(post.id)}>
+                      <button className="mt-2 text-[13px] font-semibold sm:text-sm" style={{ color: selectedCoachTheme.ink }} onClick={() => togglePostExpanded(post.id)}>
                         {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
                       </button>
                     ) : null}
@@ -3790,7 +3809,7 @@ export default function AppPage() {
                 ) : null}
 
                 {post.media_urls?.length > 0 ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-3 grid gap-2.5 sm:mt-4 sm:gap-3 md:grid-cols-2">
                     {post.media_urls.map((url) => {
                       const mediaUrl = resolveApiAssetUrl(url);
                       if (!mediaUrl) return null;
@@ -3798,14 +3817,14 @@ export default function AppPage() {
                         <button
                           key={mediaUrl}
                           type="button"
-                          className="overflow-hidden rounded-[22px] border border-white/70 bg-white/40"
+                          className="overflow-hidden rounded-[18px] border border-white/70 bg-white/40 sm:rounded-[22px]"
                           onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
                         >
                           {isVideoUrl(mediaUrl) ? (
                             <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 220 }} />
                           ) : (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 260, objectFit: 'cover' }} />
+                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
                           )}
                         </button>
                       );
@@ -3813,30 +3832,30 @@ export default function AppPage() {
                   </div>
                 ) : null}
 
-                <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
                   <button
-                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
                     style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
                     onClick={() => void handleReact(post.id)}
                   >
                     Like {post.reaction_count || 0}
                   </button>
                   <button
-                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
                     style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
                     onClick={() => void togglePostComments(post.id)}
                   >
                     Comments {post.comment_count || 0}
                   </button>
                   <button
-                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
                     style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
                     onClick={() => togglePostExpanded(post.id)}
                   >
                     {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
                   </button>
                   <button
-                    className="rounded-full bg-white/70 px-4 py-2 text-sm text-slate-600 transition"
+                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
                     style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
                     onClick={() => openAbuseReportDialog('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
                   >
@@ -3845,14 +3864,14 @@ export default function AppPage() {
                 </div>
 
                 {expandedCommentPostIds.includes(post.id) ? (
-                  <section className="mt-4 rounded-[22px] border border-white/70 bg-white/55 p-4">
+                  <section className="mt-3 rounded-[18px] border border-white/70 bg-white/55 p-3 sm:mt-4 sm:rounded-[22px] sm:p-4">
                     <div className="space-y-3">
                       {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
                       {(postCommentsById[post.id] || []).map((comment) => (
-                        <article key={comment.id} className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3">
+                        <article key={comment.id} className="rounded-[18px] border border-slate-200/70 bg-white/80 px-3 py-2.5 sm:rounded-2xl sm:px-4 sm:py-3">
                           <div className="flex items-start gap-3">
                             <div
-                              className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold"
+                              className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold sm:size-9"
                               style={{
                                 background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
                                 color: selectedCoachTheme.ink,
@@ -3871,10 +3890,10 @@ export default function AppPage() {
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                                <strong className="text-slate-700">{comment.username}</strong>
+                                <strong className="text-[13px] text-slate-700 sm:text-sm">{comment.username}</strong>
                                 <span>{formatTime(comment.created_at)}</span>
                               </div>
-                              <p className="mt-2 text-sm text-slate-600">{comment.content}</p>
+                              <p className="mt-1.5 text-[13px] leading-5 text-slate-600 sm:mt-2 sm:text-sm">{comment.content}</p>
                             </div>
                           </div>
                         </article>
@@ -3884,9 +3903,9 @@ export default function AppPage() {
                       ) : null}
                     </div>
 
-                    <div className="mt-4 flex flex-col gap-3 md:flex-row">
+                    <div className="mt-3 flex flex-col gap-2.5 sm:mt-4 md:flex-row">
                       <input
-                        className="input-shell"
+                        className="input-shell text-[14px]"
                         placeholder="Write a comment..."
                         value={commentDraftByPostId[post.id] || ''}
                         onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
@@ -3898,7 +3917,7 @@ export default function AppPage() {
                         }}
                       />
                       <button
-                        className={selectedCoachButtonClass}
+                        className={`${selectedCoachButtonClass} self-start md:self-auto`}
                         type="button"
                         disabled={commentPendingPostId === post.id}
                         onClick={() => void handleCreatePostComment(post.id)}
@@ -3912,7 +3931,7 @@ export default function AppPage() {
             ))}
 
             {!feedLoading && filteredFeed.length === 0 ? (
-              <div className="rounded-[28px] border border-dashed border-slate-300/80 bg-white/25 p-5 text-sm text-slate-500">
+              <div className="rounded-[22px] border border-dashed border-slate-300/80 bg-white/25 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
                 No community posts matched your search.
               </div>
             ) : null}
@@ -4065,51 +4084,51 @@ export default function AppPage() {
 
   const renderProfilePage = () => (
     <div className="flex h-full flex-col overflow-y-auto">
-      <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-5 py-3 backdrop-blur-sm md:px-8">
+      <header className="flex items-center justify-between border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:px-5 sm:py-3 md:px-8">
         <div>
-          <h1 className="text-[1.9rem] font-semibold tracking-tight text-slate-900 md:text-[2.15rem]">Profile</h1>
+          <h1 className="text-[1.3rem] font-semibold tracking-tight text-slate-900 sm:text-[1.9rem] md:text-[2.15rem]">Profile</h1>
         </div>
       </header>
 
-      <div className="flex flex-col gap-6 p-4 md:p-6">
-        <section className="rounded-[32px] border border-white/70 bg-white/50 p-5 backdrop-blur-xl md:p-8">
-          <div className="mb-8 overflow-hidden rounded-[28px] border border-white/70 bg-white/60">
+      <div className="flex flex-col gap-3 p-3 sm:gap-6 sm:p-4 md:p-6">
+        <section className="rounded-[24px] border border-white/70 bg-white/50 p-4 backdrop-blur-xl sm:rounded-[32px] sm:p-5 md:p-8">
+          <div className="mb-5 overflow-hidden rounded-[22px] border border-white/70 bg-white/60 sm:mb-8 sm:rounded-[28px]">
             {profileDraft.background_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={resolveApiAssetUrl(profileDraft.background_url)}
                 alt="Profile cover"
-                className="h-40 w-full object-cover"
+                className="h-32 w-full object-cover sm:h-40"
               />
             ) : (
-              <div className="h-40 w-full bg-[linear-gradient(135deg,rgba(105,121,247,0.16),rgba(242,138,58,0.18))]" />
+              <div className="h-32 w-full bg-[linear-gradient(135deg,rgba(105,121,247,0.16),rgba(242,138,58,0.18))] sm:h-40" />
             )}
           </div>
 
-          <div className="flex flex-col gap-8 md:flex-row md:items-center">
+          <div className="flex flex-col gap-5 sm:gap-8 md:flex-row md:items-center">
             <div className="relative">
               {profileDraft.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={resolveApiAssetUrl(profileDraft.avatar_url)}
                   alt="Profile avatar"
-                  className="size-32 rounded-full object-cover ring-4 ring-white"
+                  className="size-24 rounded-full object-cover ring-4 ring-white sm:size-32"
                 />
               ) : (
-                <div className="flex size-32 items-center justify-center rounded-full text-4xl font-bold text-white ring-4 ring-white" style={{ background: selectedCoachTheme.gradient }}>
+                <div className="flex size-24 items-center justify-center rounded-full text-3xl font-bold text-white ring-4 ring-white sm:size-32 sm:text-4xl" style={{ background: selectedCoachTheme.gradient }}>
                   {avatarInitial(authUsername || profile?.username || 'User')}
                 </div>
               )}
-              <span className="absolute bottom-2 right-2 size-8 rounded-full border-4 border-white bg-emerald-500" />
+              <span className="absolute bottom-1.5 right-1.5 size-6 rounded-full border-4 border-white bg-emerald-500 sm:bottom-2 sm:right-2 sm:size-8" />
             </div>
 
             <div className="min-w-0 flex-1">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <h2 className="text-3xl font-bold tracking-tight text-slate-900">{authUsername || profile?.username || 'User'}</h2>
-                  <p className="mt-2 text-sm text-slate-500">ID: {authUserId} • Coach {selectedCoach.toUpperCase()} • Premium loop</p>
+                  <h2 className="text-[1.7rem] font-bold tracking-tight text-slate-900 sm:text-3xl">{authUsername || profile?.username || 'User'}</h2>
+                  <p className="mt-1.5 text-[13px] text-slate-500 sm:mt-2 sm:text-sm">ID: {authUserId} • Coach {selectedCoach.toUpperCase()} • Premium loop</p>
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2.5 sm:gap-3">
                   <label className={selectedCoachButtonClass} style={{ cursor: 'pointer' }}>
                     {profileAvatarUploading ? 'Uploading avatar...' : 'Upload avatar'}
                     <input
@@ -4143,31 +4162,31 @@ export default function AppPage() {
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+              <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3 sm:grid-cols-3">
+                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Bio</label>
-                  <p className="mt-2 text-sm text-slate-800">{profile?.bio || 'Not set'}</p>
+                  <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.bio || 'Not set'}</p>
                 </article>
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Fitness Goal</label>
-                  <p className="mt-2 text-sm text-slate-800">{profile?.fitness_goal || 'Not set'}</p>
+                  <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.fitness_goal || 'Not set'}</p>
                 </article>
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
+                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Hobbies</label>
-                  <p className="mt-2 text-sm text-slate-800">{profile?.hobbies || 'Not set'}</p>
+                  <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.hobbies || 'Not set'}</p>
                 </article>
               </div>
             </div>
           </div>
         </section>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <h2 className="text-xl font-bold text-slate-900">Edit Profile</h2>
-            <p className="mt-1 text-sm text-slate-500">Changes sync to iOS and web for the same account.</p>
-            <div className="mt-5 grid gap-3">
+        <div className="grid gap-3 sm:gap-6 lg:grid-cols-2">
+          <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+            <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Edit Profile</h2>
+            <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Changes sync to iOS and web for the same account.</p>
+            <div className="mt-4 grid gap-2.5 sm:mt-5 sm:gap-3">
                 <textarea
-                  className="input-shell"
+                  className="input-shell min-h-[96px]"
                   placeholder="Bio"
                   value={profileDraft.bio}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
@@ -4184,39 +4203,39 @@ export default function AppPage() {
                   value={profileDraft.hobbies}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, hobbies: event.target.value }))}
                 />
-                <button className={selectedCoachButtonClass} disabled={profilePending} onClick={() => void handleSaveProfile()}>
+                <button className={`${selectedCoachButtonClass} w-full sm:w-auto`} disabled={profilePending} onClick={() => void handleSaveProfile()}>
                   {profilePending ? 'Saving...' : 'Save profile'}
                 </button>
               </div>
             </section>
 
-          <section className="rounded-[28px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
+          <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">Coach Style</h2>
-                  <p className="mt-1 text-sm text-slate-500">Choose the energy that fits your workflow.</p>
+                <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Coach Style</h2>
+                  <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Choose the energy that fits your workflow.</p>
                 </div>
               </div>
-              <div className="mt-5 grid gap-4">
+              <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4">
                 {(['zj', 'lc'] as const).map((coach) => {
                   const theme = coachTheme(coach);
                   const activeCoach = selectedCoach === coach;
                   return (
                     <article
                       key={coach}
-                      className={`rounded-[24px] border-2 bg-white p-5 shadow-sm transition ${activeCoach ? '' : 'border-slate-100'}`}
+                      className={`rounded-[20px] border-2 bg-white p-4 shadow-sm transition sm:rounded-[24px] sm:p-5 ${activeCoach ? '' : 'border-slate-100'}`}
                       style={activeCoach ? { borderColor: theme.borderColor } : undefined}
                     >
-                      <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
                         <div>
-                          <h3 className="text-lg font-bold text-slate-900">{coachDisplayName(coach)}</h3>
-                          <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em]" style={{ color: theme.ink }}>
+                          <h3 className="text-[1rem] font-bold text-slate-900 sm:text-lg">{coachDisplayName(coach)}</h3>
+                          <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]" style={{ color: theme.ink }}>
                             {coach === 'zj' ? 'The Technician' : 'The Motivator'}
                           </p>
                         </div>
                         {activeCoach ? (
                           <span
-                            className="rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]"
+                            className="rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em] sm:px-3 sm:text-[10px] sm:tracking-[0.18em]"
                             style={{
                               background: coach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
                               color: theme.ink,
@@ -4226,9 +4245,9 @@ export default function AppPage() {
                           </span>
                         ) : null}
                       </div>
-                      <p className="text-sm leading-7 text-slate-600">{theme.description}</p>
+                      <p className="text-[13px] leading-6 text-slate-600 sm:text-sm sm:leading-7">{theme.description}</p>
                       <button
-                        className={`mt-5 w-full rounded-2xl px-4 py-3 font-semibold transition ${activeCoach ? '' : 'bg-slate-100 text-slate-700'}`}
+                        className={`mt-4 w-full rounded-[18px] px-4 py-2.5 text-[13px] font-semibold transition sm:mt-5 sm:rounded-2xl sm:py-3 sm:text-base ${activeCoach ? '' : 'bg-slate-100 text-slate-700'}`}
                         style={activeCoach ? { background: theme.gradient, color: '#fff' } : undefined}
                         type="button"
                         onClick={() => void handleSwitchCoach(coach)}
@@ -4241,11 +4260,11 @@ export default function AppPage() {
               </div>
             </section>
         </div>
-        <section className="rounded-[28px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-5 backdrop-blur-xl">
+        <section className="rounded-[22px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">Account actions</h2>
-              <p className="mt-1 text-sm text-slate-500">
+              <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">Account actions</h2>
+              <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">
                 Delete account permanently removes your username, email, sessions, friends, logs, and your own content, then releases your username and email for reuse.
               </p>
             </div>
@@ -4378,16 +4397,16 @@ export default function AppPage() {
                 type="button"
                 onClick={() => setTab(item.key)}
                 aria-label={item.label}
-                className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${active ? '' : 'text-slate-500'}`}
+                className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[18px] px-1.5 py-1.5 text-[10px] font-semibold transition ${active ? '' : 'text-slate-500'}`}
                 style={active ? {
                   background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.14)',
                   color: selectedCoachTheme.ink,
                 } : undefined}
               >
-                <TabGlyph icon={item.icon} active={active} />
+                <TabGlyph icon={item.icon} active={active} size={20} />
                 <span className="truncate">{item.label}</span>
                 {item.key === 'messages' && totalUnreadCount > 0 ? (
-                  <span className="absolute right-3 top-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[10px] font-bold text-white">
+                  <span className="absolute right-2.5 top-1 inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#ef4444] px-1 text-[9px] font-bold text-white">
                     {Math.min(totalUnreadCount, 99)}
                   </span>
                 ) : null}

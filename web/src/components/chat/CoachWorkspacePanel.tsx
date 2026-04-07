@@ -5,6 +5,7 @@ import {
   getCoachRecords,
   getCoachTrainingPlan,
   toggleCoachTrainingPlanExercise,
+  updateCoachCheckInRecord,
   updateCoachMealRecord,
   updateCoachRecordProfile,
   updateCoachTrainingRecord,
@@ -27,16 +28,18 @@ import {
   type SelectOption,
 } from '@/lib/coach-profile-options';
 import {
+  CoachCheckInRecord,
   CoachDayRecord,
   CoachMealRecord,
   CoachProfileData,
+  CoachProgressSummary,
   CoachRecordsResponse,
   CoachTrainingPlan,
   CoachTrainingPlanResponse,
   CoachTrainingRecord,
 } from '@/lib/types';
 
-export type CoachWorkspaceMode = 'info' | 'meals' | 'trains';
+export type CoachWorkspaceMode = 'info' | 'meals' | 'trains' | 'progress';
 
 interface CoachWorkspacePanelProps {
   userId: number;
@@ -82,6 +85,21 @@ interface TrainingEditDraft {
   notes: string;
   time: string;
 }
+
+interface CheckInDraft {
+  day: string;
+  weight_kg: string;
+  body_fat_pct: string;
+  waist_cm: string;
+  energy: string;
+  hunger: string;
+  recovery: string;
+  adherence: string;
+  notes: string;
+}
+
+type ProgressViewMode = 'trend' | 'calendar';
+type ProgressRange = 7 | 30 | 90;
 
 function toText(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -166,6 +184,20 @@ function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): Traini
   };
 }
 
+function buildCheckInDraft(day: string, checkIn?: CoachCheckInRecord | null): CheckInDraft {
+  return {
+    day,
+    weight_kg: toText(checkIn?.weight_kg),
+    body_fat_pct: toText(checkIn?.body_fat_pct),
+    waist_cm: toText(checkIn?.waist_cm),
+    energy: toText(checkIn?.energy),
+    hunger: toText(checkIn?.hunger),
+    recovery: toText(checkIn?.recovery),
+    adherence: toText(checkIn?.adherence),
+    notes: toText(checkIn?.notes).slice(0, 500),
+  };
+}
+
 function selectClassName(value: string): string {
   return `input-shell ${value ? 'text-slate-700' : 'text-slate-400'}`;
 }
@@ -177,6 +209,66 @@ function coachDisplayName(coachId: 'zj' | 'lc'): string {
 function buildPlanDescription(plan: CoachTrainingPlan | null): string {
   if (!plan?.summary) return '';
   return String(plan.summary || '').trim();
+}
+
+function addDays(day: string, delta: number): string {
+  const parsed = new Date(`${day}T00:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + delta);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildRecentDays(range: number, endDay = localDayString()): string[] {
+  return Array.from({ length: range }, (_, index) => addDays(endDay, index - range + 1));
+}
+
+function average(numbers: Array<number | null | undefined>): number | null {
+  const clean = numbers.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (clean.length === 0) return null;
+  const total = clean.reduce((sum, value) => sum + value, 0);
+  return Math.round((total / clean.length) * 100) / 100;
+}
+
+function formatNullableMetric(value: number | null | undefined, suffix = ''): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+  return `${Math.round(value * 100) / 100}${suffix}`;
+}
+
+function formatSignedMetric(value: number | null | undefined, suffix = ''): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded > 0 ? '+' : ''}${rounded}${suffix}`;
+}
+
+function formatChartDay(day: string): string {
+  const parsed = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return day.slice(5);
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+}
+
+function buildLinePath(values: Array<number | null>, width: number, height: number): { path: string; dots: Array<{ x: number; y: number; value: number }> } {
+  const numericValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (numericValues.length === 0) {
+    return { path: '', dots: [] };
+  }
+
+  const min = Math.min(...numericValues);
+  const max = Math.max(...numericValues);
+  const paddedMin = min - 0.8;
+  const paddedMax = max + 0.8;
+  const range = Math.max(0.8, paddedMax - paddedMin);
+  const stepX = values.length > 1 ? width / (values.length - 1) : 0;
+  const dots: Array<{ x: number; y: number; value: number }> = [];
+  let path = '';
+
+  values.forEach((value, index) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+    const x = stepX * index;
+    const y = height - (((value - paddedMin) / range) * height);
+    dots.push({ x, y, value });
+    path += `${path ? ' L' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  });
+
+  return { path, dots };
 }
 
 export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
@@ -210,6 +302,9 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
   });
   const [mealDraft, setMealDraft] = useState<MealEditDraft | null>(null);
   const [trainingDraft, setTrainingDraft] = useState<TrainingEditDraft | null>(null);
+  const [checkInDraft, setCheckInDraft] = useState<CheckInDraft>(buildCheckInDraft(localDayString(), null));
+  const [progressViewMode, setProgressViewMode] = useState<ProgressViewMode>('trend');
+  const [progressRange, setProgressRange] = useState<ProgressRange>(30);
 
   const effectiveDay = selectedDay || localDayString();
   const coachLabel = coachDisplayName(coachId);
@@ -228,6 +323,32 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     [dayLookup, effectiveDay],
   );
 
+  const progressSummary = useMemo<CoachProgressSummary | null>(
+    () => records?.progress || records?.profile?.progress_summary || null,
+    [records],
+  );
+
+  const progressDays = useMemo(() => buildRecentDays(progressRange), [progressRange]);
+  const progressSeries = useMemo(() => progressDays.map((day, index, allDays) => {
+    const record = dayLookup.get(day);
+    const weight = typeof record?.check_in?.weight_kg === 'number' ? record.check_in.weight_kg : null;
+    const avgWeight = average(
+      allDays
+        .slice(Math.max(0, index - 6), index + 1)
+        .map((innerDay) => {
+          const innerRecord = dayLookup.get(innerDay);
+          return typeof innerRecord?.check_in?.weight_kg === 'number' ? innerRecord.check_in.weight_kg : null;
+        }),
+    );
+    return {
+      day,
+      weight,
+      avgWeight,
+      record,
+    };
+  }), [dayLookup, progressDays]);
+  const calendarDays = useMemo(() => buildRecentDays(28), []);
+
   const activePlanExercises = useMemo(
     () => (trainingPlan?.plan?.exercises || [])
       .filter((exercise) => !exercise.completed_at)
@@ -239,11 +360,15 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     setSelectedDay((current) => current || localDayString());
   }, []);
 
+  useEffect(() => {
+    setCheckInDraft(buildCheckInDraft(effectiveDay, selectedDayRecord?.check_in || null));
+  }, [effectiveDay, selectedDayRecord]);
+
   async function loadRecords() {
     if (!userId || userId <= 0) return;
     try {
       setLoadingRecords(true);
-      const result = await getCoachRecords(userId, 45);
+      const result = await getCoachRecords(userId, 120);
       setRecords(result);
       setProfileDraft(buildProfileDraft(result.profile || {}));
     } catch (error: any) {
@@ -305,6 +430,30 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
       onNotice('Coach profile details saved.');
     } catch (error: any) {
       onError(error?.message || 'Failed to save coach info.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveCheckIn() {
+    try {
+      setSaving(true);
+      await updateCoachCheckInRecord({
+        userId,
+        day: checkInDraft.day,
+        weight_kg: toNumberOrUndefined(checkInDraft.weight_kg),
+        body_fat_pct: toNumberOrUndefined(checkInDraft.body_fat_pct),
+        waist_cm: toNumberOrUndefined(checkInDraft.waist_cm),
+        energy: toIntOrUndefined(checkInDraft.energy),
+        hunger: toIntOrUndefined(checkInDraft.hunger),
+        recovery: toIntOrUndefined(checkInDraft.recovery),
+        adherence: (checkInDraft.adherence || undefined) as 'on_track' | 'partial' | 'off_track' | undefined,
+        notes: checkInDraft.notes.trim() || undefined,
+      });
+      await loadRecords();
+      onNotice('Progress check-in saved.');
+    } catch (error: any) {
+      onError(error?.message || 'Failed to save progress check-in.');
     } finally {
       setSaving(false);
     }
@@ -384,6 +533,22 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
         <p className="text-sm leading-6 text-slate-500">
           Tell the agent your height, weight, age, goal, and training context so {coachLabel} can know you better.
         </p>
+      );
+    }
+
+    if (mode === 'progress') {
+      return (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-500">
+            Weight is the main daily signal. Waist and body fat stay optional so check-ins stay fast enough to actually keep doing.
+          </p>
+          <input
+            className="input-shell w-full sm:w-[180px]"
+            type="date"
+            value={effectiveDay}
+            onChange={(event) => setSelectedDay(event.target.value)}
+          />
+        </div>
       );
     }
 
@@ -692,6 +857,325 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
     );
   }
 
+  function renderProgressView() {
+    const rawChart = buildLinePath(progressSeries.map((point) => point.weight), 640, 220);
+    const avgChart = buildLinePath(progressSeries.map((point) => point.avgWeight), 640, 220);
+    const selectedCheckIn = selectedDayRecord?.check_in || null;
+    const statusTone = progressSummary?.status === 'on_track'
+      ? 'rgba(16,185,129,0.14)'
+      : progressSummary?.status === 'off_track'
+        ? 'rgba(239,68,68,0.12)'
+        : 'rgba(148,163,184,0.12)';
+    const metricCards = [
+      {
+        label: 'Goal',
+        value: toText(records?.profile?.goal || 'maintain').toUpperCase() || 'MAINTAIN',
+        detail: progressSummary?.statusLabel || 'Add a few check-ins to unlock trend feedback.',
+      },
+      {
+        label: 'Latest Weight',
+        value: formatNullableMetric(progressSummary?.latestWeightKg, ' kg'),
+        detail: progressSummary?.latestWeightDay ? `Last weigh-in ${formatDay(progressSummary.latestWeightDay)}` : 'No weigh-in logged yet',
+      },
+      {
+        label: '7d Avg',
+        value: formatNullableMetric(progressSummary?.weight7dAvg, ' kg'),
+        detail: 'Smooths normal day-to-day noise',
+      },
+      {
+        label: '14d Delta',
+        value: formatSignedMetric(progressSummary?.weight14dDelta, ' kg'),
+        detail: 'Change over the last two weeks',
+      },
+      {
+        label: 'Recovery',
+        value: progressSummary?.avgRecovery7d ? `${progressSummary.avgRecovery7d}/5` : '--',
+        detail: progressSummary?.adherence7d && progressSummary.adherence7d !== 'unknown'
+          ? `Recent adherence ${progressSummary.adherence7d}`
+          : 'Recovery shows up when you log it',
+      },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {metricCards.map((card) => (
+            <article key={card.label} className="rounded-[24px] border border-white/70 bg-white/80 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{card.label}</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{card.value}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{card.detail}</p>
+            </article>
+          ))}
+        </div>
+
+        <section className="rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_20px_48px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Progress view</p>
+              <h3 className="mt-1 text-xl font-semibold text-slate-900">See the trend, then log the next signal</h3>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {([
+                ['trend', 'Trend'],
+                ['calendar', 'Calendar'],
+              ] as Array<[ProgressViewMode, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${progressViewMode === value ? '' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`}
+                  style={progressViewMode === value ? { background: statusTone, color: 'rgb(15 23 42)' } : undefined}
+                  onClick={() => setProgressViewMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
+              {([
+                [7, '7d'],
+                [30, '30d'],
+                [90, '90d'],
+              ] as Array<[ProgressRange, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`rounded-full px-3 py-2 text-sm font-semibold transition ${progressRange === value ? '' : 'bg-slate-100 text-slate-500 hover:text-slate-900'}`}
+                  style={progressRange === value ? { background: 'rgba(15,23,42,0.08)', color: 'rgb(15 23 42)' } : undefined}
+                  onClick={() => setProgressRange(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {progressViewMode === 'trend' ? (
+            <div className="mt-6">
+              {rawChart.dots.length < 2 ? (
+                <div className="grid min-h-[260px] place-items-center rounded-[24px] border border-dashed border-slate-300/80 bg-slate-50/80 px-6 text-center text-sm text-slate-500">
+                  Log at least two weigh-ins and your trend line will appear here.
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] p-4">
+                    <svg viewBox="0 0 640 240" className="h-[240px] w-full overflow-visible">
+                      {[0, 1, 2, 3].map((tick) => (
+                        <line
+                          key={tick}
+                          x1="0"
+                          x2="640"
+                          y1={20 + (tick * 60)}
+                          y2={20 + (tick * 60)}
+                          stroke="rgba(148,163,184,0.18)"
+                          strokeDasharray="6 8"
+                        />
+                      ))}
+                      {rawChart.path ? (
+                        <path
+                          d={rawChart.path}
+                          fill="none"
+                          stroke="rgba(148,163,184,0.72)"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      ) : null}
+                      {avgChart.path ? (
+                        <path
+                          d={avgChart.path}
+                          fill="none"
+                          stroke={coachId === 'lc' ? 'rgba(242,138,58,0.98)' : 'rgba(105,121,247,0.98)'}
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      ) : null}
+                      {rawChart.dots.map((dot) => (
+                        <circle key={`${dot.x}-${dot.y}`} cx={dot.x} cy={dot.y} r="3.5" fill="rgba(255,255,255,0.98)" stroke="rgba(148,163,184,0.92)" strokeWidth="2" />
+                      ))}
+                    </svg>
+                  </div>
+                  <div className="mt-3 grid grid-cols-4 gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 sm:grid-cols-6">
+                    {progressSeries.filter((_, index) => index === 0 || index === progressSeries.length - 1 || index % Math.max(1, Math.floor(progressSeries.length / 4)) === 0).map((point) => (
+                      <span key={point.day}>{formatChartDay(point.day)}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="mt-6">
+              <div className="grid grid-cols-4 gap-3 sm:grid-cols-7">
+                {calendarDays.map((day) => {
+                  const record = dayLookup.get(day);
+                  const isSelected = day === effectiveDay;
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      className={`rounded-[18px] border p-3 text-left transition ${isSelected ? 'shadow-[0_18px_36px_rgba(15,23,42,0.08)]' : 'hover:-translate-y-0.5 hover:bg-white'}`}
+                      style={isSelected ? {
+                        borderColor: coachId === 'lc' ? 'rgba(242,138,58,0.3)' : 'rgba(105,121,247,0.3)',
+                        background: coachId === 'lc' ? 'rgba(242,138,58,0.08)' : 'rgba(105,121,247,0.08)',
+                      } : {
+                        borderColor: 'rgba(226,232,240,0.9)',
+                        background: 'rgba(248,250,252,0.8)',
+                      }}
+                      onClick={() => setSelectedDay(day)}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{formatChartDay(day)}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {typeof record?.check_in?.weight_kg === 'number' ? `${record.check_in.weight_kg}kg` : '--'}
+                      </p>
+                      <div className="mt-3 flex items-center gap-1.5">
+                        <span className={`h-2.5 w-2.5 rounded-full ${record?.check_in ? 'bg-sky-500' : 'bg-slate-200'}`} title="Check-in" />
+                        <span className={`h-2.5 w-2.5 rounded-full ${(record?.meals?.length || 0) > 0 ? 'bg-amber-500' : 'bg-slate-200'}`} title="Meals" />
+                        <span className={`h-2.5 w-2.5 rounded-full ${(record?.training?.length || 0) > 0 ? 'bg-emerald-500' : 'bg-slate-200'}`} title="Training" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+          <article className="rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Coach interpretation</p>
+            <p className="mt-3 text-base font-semibold text-slate-900">{progressSummary?.statusLabel || 'Need more signal before calling the trend.'}</p>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              {progressSummary?.trendNarrative || 'Once you log a few quick check-ins, your coach can read the difference between real progress and normal short-term noise.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                Energy {progressSummary?.avgEnergy7d ? `${progressSummary.avgEnergy7d}/5` : '--'}
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                Hunger {progressSummary?.avgHunger7d ? `${progressSummary.avgHunger7d}/5` : '--'}
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+                Recovery {progressSummary?.avgRecovery7d ? `${progressSummary.avgRecovery7d}/5` : '--'}
+              </span>
+            </div>
+          </article>
+
+          <article className="rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Selected day</p>
+            <h4 className="mt-2 text-lg font-semibold text-slate-900">{formatDay(effectiveDay)}</h4>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[18px] bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Weight</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedCheckIn?.weight_kg, ' kg')}</p>
+              </div>
+              <div className="rounded-[18px] bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Waist</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedCheckIn?.waist_cm, ' cm')}</p>
+              </div>
+              <div className="rounded-[18px] bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Meals</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{selectedDayRecord?.meals.length || 0}</p>
+              </div>
+              <div className="rounded-[18px] bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Training</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{selectedDayRecord?.training.length || 0}</p>
+              </div>
+            </div>
+            {selectedCheckIn?.notes ? (
+              <p className="mt-4 text-sm leading-7 text-slate-600">{selectedCheckIn.notes}</p>
+            ) : (
+              <p className="mt-4 text-sm leading-7 text-slate-500">No note saved for this day yet.</p>
+            )}
+          </article>
+        </section>
+
+        <section className="rounded-[28px] border border-white/70 bg-white/80 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Quick check-in</p>
+              <h3 className="mt-1 text-xl font-semibold text-slate-900">Log the next signal in under a minute</h3>
+            </div>
+            <p className="text-sm text-slate-500">Weight daily if you want. Body fat and waist only when you actually measured them.</p>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Day</span>
+              <input
+                className="input-shell"
+                type="date"
+                value={checkInDraft.day}
+                onChange={(event) => {
+                  setCheckInDraft((prev) => ({ ...prev, day: event.target.value }));
+                  setSelectedDay(event.target.value);
+                }}
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Weight (kg)</span>
+              <input className="input-shell" inputMode="decimal" placeholder="82.7" value={checkInDraft.weight_kg} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, weight_kg: event.target.value.slice(0, 8) }))} />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Waist (cm)</span>
+              <input className="input-shell" inputMode="decimal" placeholder="84.5" value={checkInDraft.waist_cm} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, waist_cm: event.target.value.slice(0, 8) }))} />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Body fat %</span>
+              <input className="input-shell" inputMode="decimal" placeholder="17" value={checkInDraft.body_fat_pct} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, body_fat_pct: event.target.value.slice(0, 5) }))} />
+            </label>
+            {([
+              ['energy', 'Energy'],
+              ['hunger', 'Hunger'],
+              ['recovery', 'Recovery'],
+            ] as Array<[keyof Pick<CheckInDraft, 'energy' | 'hunger' | 'recovery'>, string]>).map(([key, label]) => (
+              <label key={key} className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</span>
+                <select className={selectClassName(checkInDraft[key])} value={checkInDraft[key]} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, [key]: event.target.value }))}>
+                  <option value="">{label} / 5</option>
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <option key={value} value={value}>{value} / 5</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Adherence</span>
+              <select className={selectClassName(checkInDraft.adherence)} value={checkInDraft.adherence} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, adherence: event.target.value }))}>
+                <option value="">How on track?</option>
+                <option value="on_track">On track</option>
+                <option value="partial">Partial</option>
+                <option value="off_track">Off track</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="mt-4 flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Short note</span>
+            <textarea
+              className="input-shell min-h-[120px]"
+              maxLength={500}
+              placeholder="How did training feel, what felt off, or what made today easier or harder?"
+              value={checkInDraft.notes}
+              onChange={(event) => setCheckInDraft((prev) => ({ ...prev, notes: event.target.value.slice(0, 500) }))}
+            />
+          </label>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button className={primaryButtonClass} type="button" onClick={() => void handleSaveCheckIn()} disabled={saving || loadingRecords}>
+              {saving ? 'Saving...' : 'Save check-in'}
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setCheckInDraft(buildCheckInDraft(effectiveDay, selectedDayRecord?.check_in || null))}
+              disabled={saving}
+            >
+              Reset
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-200/50 bg-white/25 px-5 py-4 md:px-6">
@@ -715,6 +1199,7 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
             {mode === 'info' ? renderInfoView() : null}
             {mode === 'meals' ? renderMealsView() : null}
             {mode === 'trains' ? renderTrainsView() : null}
+            {mode === 'progress' ? renderProgressView() : null}
           </>
         ) : null}
       </div>

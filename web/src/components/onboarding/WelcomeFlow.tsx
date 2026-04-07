@@ -234,6 +234,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
         experience_level: state.experienceLevel || undefined,
         notes: state.notes.trim() || undefined,
         timezone: detectLocalTimezone(),
+        seed_initial_check_in: true,
       });
       setCoach(state.coach);
       onComplete(state.coach);
@@ -409,7 +410,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
           <div className="mt-5 space-y-3 text-sm leading-7 text-slate-700">
             <p>Tell the agent your height, weight, age, goals, injuries, food preferences, or sport focus so it knows you better from the first reply.</p>
             <p>The coach can now shape meal feedback, recipes, and training plans around the profile you just saved.</p>
-            <p>If you want, you can still edit all of this later inside the coach conversation.</p>
+            <p>If you want, you can still edit all of this later inside the coach conversation, including progress check-ins.</p>
           </div>
         </section>
       </div>

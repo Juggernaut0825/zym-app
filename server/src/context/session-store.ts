@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { CompactMessage, MediaRef, SessionState } from '../types/index.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
+import { buildCoachProgressPinnedFacts } from '../utils/coach-progress.js';
 
 const MAX_RECENT_MESSAGES = 12;
 const SUMMARY_BATCH_SIZE = 6;
@@ -62,7 +63,7 @@ function summarizeMessages(messages: CompactMessage[]): string {
     .join('\n');
 }
 
-function buildPinnedFacts(profile: Record<string, unknown>): string[] {
+function buildPinnedFacts(profile: Record<string, unknown>, daily: Record<string, unknown> = {}): string[] {
   const facts: string[] = [];
 
   const height = profile.height ?? profile.height_cm;
@@ -91,7 +92,7 @@ function buildPinnedFacts(profile: Record<string, unknown>): string[] {
     facts.push(`Daily target ${dailyTarget} kcal`);
   }
 
-  return facts;
+  return [...facts, ...buildCoachProgressPinnedFacts(daily, goal)].slice(0, 8);
 }
 
 export class SessionStore {
@@ -155,11 +156,22 @@ export class SessionStore {
 
   async refreshPinnedFacts(state: SessionState): Promise<SessionState> {
     const profilePath = path.join(this.getUserDataDir(state.userId), 'profile.json');
+    const dailyPath = path.join(this.getUserDataDir(state.userId), 'daily.json');
 
     try {
       const raw = await fs.readFile(profilePath, 'utf8');
       const profile = JSON.parse(raw) as Record<string, unknown>;
-      state.pinnedFacts = buildPinnedFacts(profile);
+      let daily: Record<string, unknown> = {};
+      try {
+        const rawDaily = await fs.readFile(dailyPath, 'utf8');
+        const parsedDaily = JSON.parse(rawDaily) as Record<string, unknown>;
+        daily = parsedDaily && typeof parsedDaily === 'object' && !Array.isArray(parsedDaily) ? parsedDaily : {};
+      } catch (dailyError: any) {
+        if (dailyError.code !== 'ENOENT') {
+          throw dailyError;
+        }
+      }
+      state.pinnedFacts = buildPinnedFacts(profile, daily);
     } catch (error: any) {
       if (error.code !== 'ENOENT') {
         throw error;

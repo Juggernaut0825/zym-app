@@ -5,6 +5,7 @@ import { GetProfileTool } from './get-profile-tool.js';
 import { GetTrainingPlanTool } from './get-training-plan-tool.js';
 import { InspectMediaTool } from './inspect-media-tool.js';
 import { ListRecentMediaTool } from './list-recent-media-tool.js';
+import { LogCheckInTool } from './log-check-in-tool.js';
 import { LogMealTool } from './log-meal-tool.js';
 import { LogTrainingTool } from './log-training-tool.js';
 import { SearchExerciseLibraryTool } from './search-exercise-library-tool.js';
@@ -22,6 +23,7 @@ export function createDefaultTypedTools(): Tool[] {
     new SetProfileTool(),
     new SetTrainingPlanTool(),
     new ListRecentMediaTool(),
+    new LogCheckInTool(),
     new InspectMediaTool(),
     new LogMealTool(),
     new LogTrainingTool(),

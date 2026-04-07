@@ -21,6 +21,8 @@ struct DraftAttachment: Identifiable {
 struct ConversationView: View {
     let conversation: Conversation
 
+    private let latestMessageAnchor = "conversation-latest-message-anchor"
+
     @State private var messages: [Message] = []
     @State private var newMessage = ""
     @State private var showMediaPicker = false
@@ -85,25 +87,37 @@ struct ConversationView: View {
                     .environmentObject(appState)
                     .transition(.opacity)
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
-                                ConversationMessageBubble(message: msg, currentUserId: appState.userId ?? 0)
-                                    .zymAppear(delay: Double(min(index, 5)) * 0.02)
-                            }
-
-                            if !typingLabel.isEmpty {
-                                HStack {
-                                    TypingIndicator(label: typingLabel)
-                                    Spacer()
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 10) {
+                                ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
+                                    ConversationMessageBubble(message: msg, currentUserId: appState.userId ?? 0)
+                                        .zymAppear(delay: Double(min(index, 5)) * 0.02)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.top, 4)
-                                .transition(.opacity)
+
+                                if !typingLabel.isEmpty {
+                                    HStack {
+                                        TypingIndicator(label: typingLabel)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 4)
+                                    .transition(.opacity)
+                                }
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id(latestMessageAnchor)
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.top, 10)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
+                        .onAppear {
+                            scrollToLatestMessage(using: proxy, animated: false)
+                        }
+                        .onChange(of: messages.last?.id) { _, _ in
+                            scrollToLatestMessage(using: proxy)
+                        }
                     }
                 }
 
@@ -245,6 +259,11 @@ struct ConversationView: View {
                                 coachWorkspaceMode = .trains
                             }
                         }
+                        Button("Progress") {
+                            withAnimation(.zymSoft) {
+                                coachWorkspaceMode = .progress
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .foregroundColor(Color.zymPrimary)
@@ -383,6 +402,19 @@ struct ConversationView: View {
                 markConversationRead(messageId: response.messages.last?.id)
             }
         }.resume()
+    }
+
+    private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool = true) {
+        DispatchQueue.main.async {
+            let scroll = {
+                proxy.scrollTo(latestMessageAnchor, anchor: .bottom)
+            }
+            if animated {
+                withAnimation(.zymSoft, scroll)
+            } else {
+                scroll()
+            }
+        }
     }
 
     private func sendMessage() {

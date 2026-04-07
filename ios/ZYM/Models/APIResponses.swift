@@ -318,10 +318,48 @@ struct CoachTrainingPlanResponse: Codable {
     let plan: CoachTrainingPlan?
 }
 
+struct CoachCheckInRecord: Codable {
+    let weight_kg: Double?
+    let body_fat_pct: Double?
+    let waist_cm: Double?
+    let energy: Int?
+    let hunger: Int?
+    let recovery: Int?
+    let adherence: String?
+    let notes: String?
+    let timezone: String?
+    let occurred_at_utc: String?
+    let logged_at: String?
+}
+
+struct CoachProgressSummary: Codable {
+    let latestCheckInDay: String?
+    let latestCheckInAt: String?
+    let latestWeightDay: String?
+    let latestWeightKg: Double?
+    let latestBodyFatPct: Double?
+    let latestWaistCm: Double?
+    let weight7dAvg: Double?
+    let weight14dDelta: Double?
+    let weight30dDelta: Double?
+    let avgEnergy7d: Double?
+    let avgHunger7d: Double?
+    let avgRecovery7d: Double?
+    let adherence7d: String?
+    let lastBodyFatDay: String?
+    let lastWaistDay: String?
+    let checkInDays: Int
+    let trendLine: String
+    let status: String
+    let statusLabel: String
+    let trendNarrative: String
+}
+
 struct CoachDayRecord: Codable, Identifiable {
     let day: String
     let total_intake: Double
     let total_burned: Double
+    let check_in: CoachCheckInRecord?
     let meals: [CoachMealRecord]
     let training: [CoachTrainingRecord]
 
@@ -332,11 +370,13 @@ struct CoachRecordsStats: Codable {
     let days: Int
     let mealCount: Int
     let trainingCount: Int
+    let checkInCount: Int?
 }
 
 struct CoachRecordsResponse: Decodable {
     let selectedCoach: String?
     let profile: CoachProfileData
+    let progress: CoachProgressSummary?
     let records: [CoachDayRecord]
     let stats: CoachRecordsStats
 }

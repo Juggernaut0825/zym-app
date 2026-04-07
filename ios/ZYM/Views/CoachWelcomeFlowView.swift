@@ -289,7 +289,7 @@ struct CoachWelcomeFlowView: View {
                 accent: Color.zymSecondary,
                 lines: [
                     "The coach can now shape meal feedback, recipes, and training plans around the profile you just saved.",
-                    "You can still edit all of this later inside the coach conversation.",
+                    "You can still edit all of this later inside the coach conversation, including progress check-ins.",
                 ]
             )
         }
@@ -512,6 +512,7 @@ struct CoachWelcomeFlowView: View {
             var body: [String: Any] = [
                 "userId": userId,
                 "timezone": TimeZone.current.identifier,
+                "seed_initial_check_in": true,
             ]
             if !state.height.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["height"] = state.height.trimmingCharacters(in: .whitespacesAndNewlines) }
             if !state.weight.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["weight"] = state.weight.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -18,6 +18,7 @@ import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
+import { computeCoachProgressSummary, normalizeCoachCheckIn } from '../utils/coach-progress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -495,11 +496,13 @@ export class CoachTypedToolsService {
     const out: Record<string, unknown> = {};
     const height = normalizeFreeformProfileText(raw.height ?? raw.height_cm ?? raw.heightCm, 40);
     const weight = normalizeFreeformProfileText(raw.weight ?? raw.weight_kg ?? raw.weightKg, 40);
+    const startingWeightKg = toNumber(raw.starting_weight_kg ?? raw.startingWeightKg, 20, 350);
     const gender = normalizeFreeformProfileText(raw.gender ?? raw.sex, 40);
     const activity = normalizeFreeformProfileText(raw.activity_level ?? raw.activity ?? raw.activityLevel, 60);
     const goal = normalizeFreeformProfileText(raw.goal ?? raw.fitness_goal ?? raw.fitnessGoal, 120);
     const experience = normalizeFreeformProfileText(raw.experience_level ?? raw.experience ?? raw.experienceLevel, 40);
     const timezone = safeString(raw.timezone ?? raw.timeZone ?? raw.tz, 120).replace(/\s+/g, '');
+    const latestCheckInAtRaw = safeString(raw.latest_checkin_at ?? raw.latestCheckinAt, 120);
 
     const heightCm = parseHeightCm(height);
     const weightKg = parseWeightKg(weight);
@@ -531,12 +534,19 @@ export class CoachTypedToolsService {
 
     if (age !== null) out.age = age;
     if (bodyFat !== null) out.body_fat_pct = bodyFat;
+    if (startingWeightKg !== null) out.starting_weight_kg = startingWeightKg;
     if (trainingDays !== null) out.training_days = trainingDays;
     if (gender) out.gender = inferGender(gender) || gender;
     if (activity) out.activity_level = inferActivityLevel(activity) || activity;
     if (goal) out.goal = inferGoal(goal) || goal;
     if (experience) out.experience_level = inferExperienceLevel(experience) || experience;
     if (timezone && isValidTimeZone(timezone)) out.timezone = timezone;
+    if (latestCheckInAtRaw) {
+      const parsed = new Date(latestCheckInAtRaw);
+      if (Number.isFinite(parsed.getTime())) {
+        out.latest_checkin_at = parsed.toISOString();
+      }
+    }
 
     const notes = safeString(raw.notes, 2000);
     if (notes) out.notes = notes;
@@ -858,13 +868,23 @@ export class CoachTypedToolsService {
       }
     }
     this.recomputeProfileDerived(normalized);
+    if (!Number.isFinite(Number(normalized.starting_weight_kg)) && Number.isFinite(Number(normalized.weight_kg)) && Number(normalized.weight_kg) > 0) {
+      normalized.starting_weight_kg = Math.round(Number(normalized.weight_kg) * 100) / 100;
+    }
 
     if (JSON.stringify(profile) !== JSON.stringify(normalized)) {
       await ensureDir(path.dirname(profilePath));
       await writeJsonAtomic(profilePath, normalized);
     }
 
-    return normalized;
+    const daily = await readJson<Record<string, unknown>>(this.getDailyPath(userId), {});
+    const progressSummary = computeCoachProgressSummary(daily, normalized.goal);
+
+    return {
+      ...normalized,
+      latest_checkin_at: safeString(normalized.latest_checkin_at, 120) || progressSummary.latestCheckInAt || null,
+      progress_summary: progressSummary,
+    };
   }
 
   async setProfile(userId: string, profilePatch: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -882,6 +902,9 @@ export class CoachTypedToolsService {
       : {};
     const next = { ...current, ...sanitized };
     this.recomputeProfileDerived(next);
+    if (!Number.isFinite(Number(next.starting_weight_kg)) && Number.isFinite(Number(next.weight_kg)) && Number(next.weight_kg) > 0) {
+      next.starting_weight_kg = Math.round(Number(next.weight_kg) * 100) / 100;
+    }
     await writeJsonAtomic(profilePath, next);
 
     return {
@@ -1182,6 +1205,61 @@ export class CoachTypedToolsService {
     if (!Array.isArray(daily[day].training)) daily[day].training = [];
     if (!Number.isFinite(Number(daily[day].total_intake))) daily[day].total_intake = 0;
     if (!Number.isFinite(Number(daily[day].total_burned))) daily[day].total_burned = 0;
+  }
+
+  async logCheckIn(userId: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const stamp = await this.resolveLogStamp(userId, {
+      localDate: payload.localDate ?? payload.day,
+      occurredAt: payload.occurredAt ?? payload.occurred_at_utc,
+      timezone: payload.timezone,
+    });
+    const normalized = normalizeCoachCheckIn({
+      ...payload,
+      timezone: payload.timezone ?? stamp.timezone,
+      occurred_at_utc: payload.occurredAt ?? payload.occurred_at_utc ?? stamp.occurredAtUtc,
+      logged_at: nowIso(),
+    });
+
+    if (!normalized) {
+      throw new Error('At least one check-in field is required');
+    }
+
+    const dailyPath = this.getDailyPath(userId);
+    await ensureDir(path.dirname(dailyPath));
+    const daily = await readJson<Record<string, any>>(dailyPath, {});
+    const day = stamp.day;
+    this.ensureDayBucket(daily, day);
+    daily[day].check_in = normalized;
+    await writeJsonAtomic(dailyPath, daily);
+
+    const profile = await this.getProfile(userId);
+    const profilePatch: Record<string, unknown> = {
+      latest_checkin_at: normalized.logged_at || nowIso(),
+    };
+
+    if (typeof normalized.weight_kg === 'number') {
+      const existingStartingWeight = toNumber((profile as any)?.starting_weight_kg, 20, 350);
+      const fallbackStartingWeight = toNumber((profile as any)?.weight_kg, 20, 350);
+      profilePatch.weight_kg = normalized.weight_kg;
+      if (existingStartingWeight === null) {
+        profilePatch.starting_weight_kg = fallbackStartingWeight ?? normalized.weight_kg;
+      }
+    }
+    if (typeof normalized.body_fat_pct === 'number') {
+      profilePatch.body_fat_pct = normalized.body_fat_pct;
+    }
+
+    await this.setProfile(userId, profilePatch);
+    const nextProfile = await this.getProfile(userId);
+
+    return {
+      day,
+      timezone: stamp.timezone,
+      dateSource: stamp.dateSource,
+      checkIn: normalized,
+      progressSummary: (nextProfile as any)?.progress_summary || computeCoachProgressSummary(daily, (nextProfile as any)?.goal),
+      profile: nextProfile,
+    };
   }
 
   async logMeal(userId: string, description: string, timeInput: LogTimeInput = {}): Promise<Record<string, unknown>> {

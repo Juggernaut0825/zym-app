@@ -43,6 +43,7 @@ import { enqueueCoachReply } from '../jobs/coach-reply-worker.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { ensureAppDataDirs, resolveUploadsDir } from '../config/app-paths.js';
 import { getRuntimeHealthReport } from '../health/runtime-health.js';
+import { computeCoachProgressSummary, normalizeCoachCheckIn, type CoachCheckIn } from '../utils/coach-progress.js';
 
 ensureAppDataDirs();
 const uploadsDir = resolveUploadsDir();
@@ -245,6 +246,7 @@ interface CoachTrainingEntry {
 interface CoachDailyBucket {
   meals: CoachMealEntry[];
   training: CoachTrainingEntry[];
+  check_in?: CoachCheckIn | null;
   total_intake: number;
   total_burned: number;
   [key: string]: unknown;
@@ -444,6 +446,7 @@ function normalizeCoachDailyRecords(raw: unknown): CoachDailyRecords {
       ...bucket,
       meals,
       training,
+      check_in: normalizeCoachCheckIn(bucket.check_in),
       total_intake: roundTo2(bucket.total_intake),
       total_burned: roundTo2(bucket.total_burned),
     };
@@ -3027,6 +3030,7 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
 
     const profile = await coachTypedToolsService.getProfile(String(userId));
     const { daily, changed } = await loadCoachDailyRecords(userId);
+    const progressSummary = computeCoachProgressSummary(daily, (profile as any)?.goal);
 
     if (changed) {
       await writeJsonAtomic(getCoachDailyPath(userId), daily);
@@ -3044,6 +3048,7 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
         day,
         total_intake: bucket.total_intake,
         total_burned: bucket.total_burned,
+        check_in: bucket.check_in || null,
         meals: bucket.meals,
         training: bucket.training,
       };
@@ -3051,16 +3056,19 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
 
     const mealCount = records.reduce((sum, day) => sum + day.meals.length, 0);
     const trainingCount = records.reduce((sum, day) => sum + day.training.length, 0);
+    const checkInCount = records.reduce((sum, day) => sum + (day.check_in ? 1 : 0), 0);
     const selectedCoach = resolveSelectedCoachForUser(userId);
 
     res.json({
       selectedCoach,
       profile,
+      progress: progressSummary,
       records,
       stats: {
         days: records.length,
         mealCount,
         trainingCount,
+        checkInCount,
       },
     });
   } catch (err: any) {
@@ -3086,11 +3094,13 @@ app.post('/coach/records/profile/update',
     experience_level: { type: 'string', maxLength: 40 },
     notes: { type: 'string', maxLength: 2000 },
     timezone: { type: 'string', maxLength: 80 },
+    seed_initial_check_in: { type: 'boolean' },
   }),
   async (req, res) => {
     try {
       const userId = toUserId(req.body.userId);
       const patch: Record<string, unknown> = {};
+      const shouldSeedInitialCheckIn = Boolean(req.body.seed_initial_check_in);
       const allowedKeys = [
         'height',
         'height_cm',
@@ -3121,17 +3131,91 @@ app.post('/coach/records/profile/update',
         return res.status(400).json({ error: 'Invalid timezone format' });
       }
 
-      const next = await coachTypedToolsService.setProfile(String(userId), patch);
+      await coachTypedToolsService.setProfile(String(userId), patch);
+      let profile = await coachTypedToolsService.getProfile(String(userId));
+      let seededCheckIn = false;
+
+      const progressSummary = ((profile as any)?.progress_summary || null) as Record<string, unknown> | null;
+      const hasCheckIns = Number(progressSummary?.checkInDays || 0) > 0;
+      const weightKg = Number((profile as any)?.weight_kg);
+      const bodyFatPct = Number((profile as any)?.body_fat_pct);
+
+      if (
+        shouldSeedInitialCheckIn
+        && !hasCheckIns
+        && (Number.isFinite(weightKg) || Number.isFinite(bodyFatPct))
+      ) {
+        const seeded = await coachTypedToolsService.logCheckIn(String(userId), {
+          timezone: patch.timezone,
+          weight_kg: Number.isFinite(weightKg) ? weightKg : undefined,
+          body_fat_pct: Number.isFinite(bodyFatPct) ? bodyFatPct : undefined,
+        });
+        profile = ((seeded as any)?.profile || profile) as Record<string, unknown>;
+        seededCheckIn = true;
+      }
+
       trackSecurityEvent(req, 'coach_record_profile_updated', {
         userId,
         metadata: {
           keys: Object.keys(patch),
+          seededCheckIn,
         },
       });
 
-      res.json({ success: true, profile: next });
+      res.json({ success: true, profile, seededCheckIn });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to update coach profile' });
+    }
+  });
+
+app.post('/coach/records/check-in/update',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(90, 10 * 60_000, 'coach-record-check-in-update'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    day: { type: 'string', pattern: COACH_DAY_PATTERN },
+    timezone: { type: 'string', maxLength: 80 },
+    occurredAtUtc: { type: 'string', maxLength: 80 },
+    weight_kg: { type: 'number', min: 20, max: 350 },
+    body_fat_pct: { type: 'number', min: 2, max: 70 },
+    waist_cm: { type: 'number', min: 30, max: 250 },
+    energy: { type: 'number', integer: true, min: 1, max: 5 },
+    hunger: { type: 'number', integer: true, min: 1, max: 5 },
+    recovery: { type: 'number', integer: true, min: 1, max: 5 },
+    adherence: { type: 'string', enum: ['on_track', 'partial', 'off_track'] },
+    notes: { type: 'string', maxLength: COACH_RECORD_TEXT_MAX },
+  }),
+  async (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      if (req.body.notes !== undefined) {
+        assertNoIngestionPayload(req, userId, 'notes', req.body.notes);
+      }
+      const result = await coachTypedToolsService.logCheckIn(String(userId), {
+        day: req.body.day,
+        timezone: req.body.timezone,
+        occurredAt: req.body.occurredAtUtc,
+        weight_kg: req.body.weight_kg,
+        body_fat_pct: req.body.body_fat_pct,
+        waist_cm: req.body.waist_cm,
+        energy: req.body.energy,
+        hunger: req.body.hunger,
+        recovery: req.body.recovery,
+        adherence: req.body.adherence,
+        notes: req.body.notes,
+      });
+
+      trackSecurityEvent(req, 'coach_record_check_in_updated', {
+        userId,
+        metadata: {
+          day: result.day,
+          keys: Object.keys(req.body).filter((key) => key !== 'userId'),
+        },
+      });
+
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update coach check-in' });
     }
   });
 

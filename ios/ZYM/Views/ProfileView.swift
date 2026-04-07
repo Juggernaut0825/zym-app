@@ -189,7 +189,7 @@ struct ProfileView: View {
                         .buttonStyle(ZYMGhostButton())
                         .zymAppear(delay: 0.17)
 
-                        Text("Coach info, meals, and training logs now live inside your coach conversation.")
+                        Text("Coach info, progress check-ins, meals, and training logs now live inside your coach conversation.")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(Color.zymSubtext)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -526,7 +526,7 @@ private struct CoachRecordsDetailsSheet: View {
                                     Text("Coach Records Details")
                                         .font(.custom("Syne", size: 22))
                                         .foregroundColor(Color.zymText)
-                                    Text("Visualized log corrections for profile, meals, and training.")
+                                    Text("Visualized log corrections for profile, progress, meals, and training.")
                                         .font(.system(size: 13))
                                         .foregroundColor(Color.zymSubtext)
                                 }

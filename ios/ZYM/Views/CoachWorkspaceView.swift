@@ -5,6 +5,7 @@ enum CoachWorkspaceMode: String, CaseIterable {
     case info = "Info"
     case meals = "Meals"
     case trains = "Trains"
+    case progress = "Progress"
 }
 
 private struct CoachWorkspaceProfileDraft {
@@ -76,6 +77,35 @@ private struct CoachWorkspaceMediaPreview: Identifiable {
     let title: String
 }
 
+private struct CoachWorkspaceCheckInDraft {
+    var day: String
+    var weightKg: String
+    var bodyFatPct: String
+    var waistCm: String
+    var energy: String
+    var hunger: String
+    var recovery: String
+    var adherence: String
+    var notes: String
+
+    init(day: String, checkIn: CoachCheckInRecord? = nil) {
+        self.day = day
+        self.weightKg = coachDraftNumber(checkIn?.weight_kg)
+        self.bodyFatPct = coachDraftNumber(checkIn?.body_fat_pct)
+        self.waistCm = coachDraftNumber(checkIn?.waist_cm)
+        self.energy = checkIn?.energy.map(String.init) ?? ""
+        self.hunger = checkIn?.hunger.map(String.init) ?? ""
+        self.recovery = checkIn?.recovery.map(String.init) ?? ""
+        self.adherence = coachDraftString(checkIn?.adherence, limit: 40)
+        self.notes = coachDraftString(checkIn?.notes, limit: 500)
+    }
+}
+
+private enum CoachProgressViewMode: String, CaseIterable {
+    case trend = "Trend"
+    case calendar = "Calendar"
+}
+
 struct CoachWorkspaceView: View {
     let mode: CoachWorkspaceMode
     let coachId: String
@@ -94,6 +124,8 @@ struct CoachWorkspaceView: View {
     @State private var profileDraft = CoachWorkspaceProfileDraft()
     @State private var mealDraft: CoachWorkspaceMealDraft?
     @State private var trainingDraft: CoachWorkspaceTrainingDraft?
+    @State private var checkInDraft = CoachWorkspaceCheckInDraft(day: "")
+    @State private var progressViewMode: CoachProgressViewMode = .trend
     @State private var mediaPreview: CoachWorkspaceMediaPreview?
 
     private var effectiveDay: String {
@@ -114,6 +146,23 @@ struct CoachWorkspaceView: View {
             .sorted { $0.order < $1.order }
     }
 
+    private var progressSummary: CoachProgressSummary? {
+        records?.progress
+    }
+
+    private var headerDescription: String {
+        switch mode {
+        case .info:
+            return "Tell the agent your height, weight, age, goal, and training context so it can know you better."
+        case .meals:
+            return "Filter by date. If nothing was logged that day, you will see the empty state right away."
+        case .progress:
+            return "Weight is the main daily signal. Waist and body fat stay optional so check-ins stay fast enough to keep doing."
+        case .trains:
+            return "Coach plans appear on top. Checked exercises move into your training log below."
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -124,6 +173,8 @@ struct CoachWorkspaceView: View {
                         infoView
                     } else if mode == .meals {
                         mealsView
+                    } else if mode == .progress {
+                        progressView
                     } else {
                         trainsView
                     }
@@ -133,17 +184,20 @@ struct CoachWorkspaceView: View {
         }
         .onAppear {
             loadRecords()
+            resetCheckInDraft()
             if mode == .trains {
                 loadTrainingPlan()
             }
         }
         .onChange(of: mode) { _, nextMode in
             loadRecords()
+            resetCheckInDraft()
             if nextMode == .trains {
                 loadTrainingPlan()
             }
         }
         .onChange(of: effectiveDay) { _, _ in
+            resetCheckInDraft()
             if mode == .trains {
                 loadTrainingPlan()
             }
@@ -180,7 +234,7 @@ struct CoachWorkspaceView: View {
                     Text("\(mode.rawValue) Workspace")
                         .font(.custom("Syne", size: 24))
                         .foregroundColor(Color.zymText)
-                    Text("Coach plans appear on top. Checked exercises move into your training log below.")
+                    Text(headerDescription)
                         .font(.system(size: 13))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -190,6 +244,7 @@ struct CoachWorkspaceView: View {
                 HStack(spacing: 8) {
                     Button(loadingRecords || loadingPlan ? "Refreshing..." : "Refresh") {
                         loadRecords()
+                        resetCheckInDraft()
                         if mode == .trains {
                             loadTrainingPlan()
                         }
@@ -450,6 +505,114 @@ struct CoachWorkspaceView: View {
         }
     }
 
+    private var progressView: some View {
+        VStack(spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                progressStatCard(title: "Goal", value: (records?.profile.goal ?? "maintain").uppercased(), detail: progressSummary?.statusLabel ?? "Need more check-ins")
+                progressStatCard(title: "Latest Weight", value: coachDisplayMetric(progressSummary?.latestWeightKg, suffix: " kg"), detail: progressSummary?.latestWeightDay.map { "Last weigh-in \(formattedCoachDay($0))" } ?? "No weigh-in yet")
+                progressStatCard(title: "7d Avg", value: coachDisplayMetric(progressSummary?.weight7dAvg, suffix: " kg"), detail: "Smooths normal daily noise")
+                progressStatCard(title: "14d Delta", value: coachDisplaySignedMetric(progressSummary?.weight14dDelta, suffix: " kg"), detail: "Two-week change")
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PROGRESS VIEW")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundColor(Color.zymSubtext)
+                        Text("See the trend, then log the next signal")
+                            .font(.custom("Syne", size: 20))
+                            .foregroundColor(Color.zymText)
+                    }
+                    Spacer()
+                    Picker("Progress View", selection: $progressViewMode) {
+                        ForEach(CoachProgressViewMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                }
+
+                if progressViewMode == .trend {
+                    CoachWeightTrendCard(records: records?.records ?? [])
+                } else {
+                    CoachProgressCalendarCard(
+                        records: records?.records ?? [],
+                        selectedDay: effectiveDay,
+                        onSelectDay: { day in
+                            if let date = coachDateFromDay(day) {
+                                selectedDate = date
+                            }
+                        }
+                    )
+                }
+            }
+            .zymCard()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("COACH INTERPRETATION")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundColor(Color.zymSubtext)
+                Text(progressSummary?.statusLabel ?? "Need more signal before calling the trend.")
+                    .font(.custom("Syne", size: 20))
+                    .foregroundColor(Color.zymText)
+                Text(progressSummary?.trendNarrative ?? "Once you log a few quick check-ins, your coach can separate real progress from normal short-term fluctuation.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+            }
+            .zymCard()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("QUICK CHECK-IN")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundColor(Color.zymSubtext)
+
+                HStack(spacing: 10) {
+                    workspaceInput("Weight kg", text: $checkInDraft.weightKg, keyboard: .decimalPad)
+                    workspaceInput("Waist cm", text: $checkInDraft.waistCm, keyboard: .decimalPad)
+                    workspaceInput("Body fat %", text: $checkInDraft.bodyFatPct, keyboard: .decimalPad)
+                }
+
+                HStack(spacing: 10) {
+                    workspaceMenu("Energy", selection: $checkInDraft.energy, options: coachCheckInScaleOptions)
+                    workspaceMenu("Hunger", selection: $checkInDraft.hunger, options: coachCheckInScaleOptions)
+                    workspaceMenu("Recovery", selection: $checkInDraft.recovery, options: coachCheckInScaleOptions)
+                }
+
+                workspaceMenu("Adherence", selection: $checkInDraft.adherence, options: coachCheckInAdherenceOptions)
+
+                TextEditor(text: $checkInDraft.notes)
+                    .frame(minHeight: 110)
+                    .padding(10)
+                    .background(Color.white.opacity(0.82))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.zymLine, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                HStack {
+                    Button(saving ? "Saving..." : "Save check-in") {
+                        saveCheckInDraft()
+                    }
+                    .buttonStyle(ZYMPrimaryButton())
+                    .disabled(saving || loadingRecords)
+
+                    Button("Reset") {
+                        resetCheckInDraft()
+                    }
+                    .buttonStyle(ZYMGhostButton())
+                    .disabled(saving)
+                }
+            }
+            .zymCard()
+        }
+    }
+
     private func summaryCard(total: Double, label: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(formattedCoachDay(effectiveDay))
@@ -457,6 +620,23 @@ struct CoachWorkspaceView: View {
                 .foregroundColor(Color.zymText)
             Text("\(label) \(Int(total.rounded())) kcal")
                 .font(.system(size: 13))
+                .foregroundColor(Color.zymSubtext)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .zymCard()
+    }
+
+    private func progressStatCard(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.2)
+                .foregroundColor(Color.zymSubtext)
+            Text(value)
+                .font(.custom("Syne", size: 20))
+                .foregroundColor(Color.zymText)
+            Text(detail)
+                .font(.system(size: 12))
                 .foregroundColor(Color.zymSubtext)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -517,9 +697,13 @@ struct CoachWorkspaceView: View {
         }
     }
 
+    private func resetCheckInDraft() {
+        checkInDraft = CoachWorkspaceCheckInDraft(day: effectiveDay, checkIn: selectedDayRecord?.check_in)
+    }
+
     private func loadRecords() {
         guard let userId = appState.userId,
-              let url = apiURL("/coach/records/\(userId)?days=45") else { return }
+              let url = apiURL("/coach/records/\(userId)?days=120") else { return }
 
         loadingRecords = true
         var request = URLRequest(url: url)
@@ -541,6 +725,10 @@ struct CoachWorkspaceView: View {
                         goal: decoded.profile.goal ?? "",
                         experienceLevel: decoded.profile.experience_level ?? "",
                         notes: decoded.profile.notes ?? ""
+                    )
+                    checkInDraft = CoachWorkspaceCheckInDraft(
+                        day: effectiveDay,
+                        checkIn: decoded.records.first(where: { $0.day == effectiveDay })?.check_in
                     )
                 } else {
                     onError("Failed to load coach records.")
@@ -590,6 +778,31 @@ struct CoachWorkspaceView: View {
         if !profileDraft.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["notes"] = profileDraft.notes.trimmingCharacters(in: .whitespacesAndNewlines) }
 
         submit(pathURL: url, body: body, successMessage: "Coach profile saved.") {
+            loadRecords()
+        }
+    }
+
+    private func saveCheckInDraft() {
+        guard let userId = appState.userId,
+              let url = apiURL("/coach/records/check-in/update") else { return }
+
+        var body: [String: Any] = [
+            "userId": userId,
+            "day": checkInDraft.day,
+            "timezone": TimeZone.current.identifier,
+        ]
+        if let weight = Double(checkInDraft.weightKg) { body["weight_kg"] = weight }
+        if let waist = Double(checkInDraft.waistCm) { body["waist_cm"] = waist }
+        if let bodyFat = Double(checkInDraft.bodyFatPct) { body["body_fat_pct"] = bodyFat }
+        if let energy = Int(checkInDraft.energy) { body["energy"] = energy }
+        if let hunger = Int(checkInDraft.hunger) { body["hunger"] = hunger }
+        if let recovery = Int(checkInDraft.recovery) { body["recovery"] = recovery }
+        if !checkInDraft.adherence.isEmpty { body["adherence"] = checkInDraft.adherence }
+        if !checkInDraft.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["notes"] = checkInDraft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        submit(pathURL: url, body: body, successMessage: "Progress check-in saved.") {
             loadRecords()
         }
     }
@@ -849,4 +1062,198 @@ private func formattedCoachDay(_ day: String) -> String {
     output.dateStyle = .medium
     output.timeStyle = .none
     return output.string(from: date)
+}
+
+private func coachDateFromDay(_ day: String) -> Date? {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.date(from: day)
+}
+
+private func coachDayString(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.string(from: date)
+}
+
+private func coachRecentDays(_ count: Int, endingAt endDay: String? = nil) -> [String] {
+    let anchor = coachDateFromDay(endDay ?? coachDayString(Date())) ?? Date()
+    return (0..<count).compactMap { offset in
+        Calendar(identifier: .gregorian).date(byAdding: .day, value: offset - count + 1, to: anchor)
+    }.map(coachDayString(_:))
+}
+
+private func coachDisplayMetric(_ value: Double?, suffix: String = "") -> String {
+    guard let value, value.isFinite else { return "--" }
+    let rounded = abs(value.rounded() - value) < 0.00001 ? String(Int(value.rounded())) : String(format: "%.2f", value)
+    return "\(rounded)\(suffix)"
+}
+
+private func coachDisplaySignedMetric(_ value: Double?, suffix: String = "") -> String {
+    guard let value, value.isFinite else { return "--" }
+    let rounded = abs(value.rounded() - value) < 0.00001 ? String(Int(value.rounded())) : String(format: "%.2f", value)
+    return "\(value > 0 ? "+" : "")\(rounded)\(suffix)"
+}
+
+private let coachCheckInScaleOptions: [CoachOption] = [1, 2, 3, 4, 5].map {
+    CoachOption(value: String($0), label: "\($0) / 5", description: nil)
+}
+
+private let coachCheckInAdherenceOptions: [CoachOption] = [
+    CoachOption(value: "on_track", label: "On track", description: nil),
+    CoachOption(value: "partial", label: "Partial", description: nil),
+    CoachOption(value: "off_track", label: "Off track", description: nil),
+]
+
+private struct CoachWeightTrendCard: View {
+    let records: [CoachDayRecord]
+
+    private var days: [String] {
+        coachRecentDays(30)
+    }
+
+    private var weights: [Double?] {
+        days.map { day in
+            records.first(where: { $0.day == day })?.check_in?.weight_kg
+        }
+    }
+
+    private var rollingWeights: [Double?] {
+        weights.enumerated().map { index, _ in
+            let window = weights[max(0, index - 6)...index]
+            let valid = window.compactMap { $0 }
+            guard !valid.isEmpty else { return nil }
+            return valid.reduce(0, +) / Double(valid.count)
+        }
+    }
+
+    var body: some View {
+        let validWeights = weights.compactMap { $0 }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            if validWeights.count < 2 {
+                Text("Log at least two weigh-ins and your trend line will appear here.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+                    .frame(maxWidth: .infinity, minHeight: 180)
+                    .background(Color.white.opacity(0.52))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.zymLine.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [6, 5]))
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                GeometryReader { proxy in
+                    let size = proxy.size
+                    let minWeight = (validWeights.min() ?? 0) - 0.8
+                    let maxWeight = (validWeights.max() ?? 0) + 0.8
+                    let range = max(0.8, maxWeight - minWeight)
+
+                    ZStack {
+                        VStack(spacing: 0) {
+                            ForEach(0..<4, id: \.self) { _ in
+                                Divider().background(Color.zymLine.opacity(0.2))
+                                Spacer()
+                            }
+                        }
+
+                        Path { path in
+                            var started = false
+                            for (index, weight) in weights.enumerated() {
+                                guard let weight else { continue }
+                                let x = size.width * CGFloat(index) / CGFloat(max(days.count - 1, 1))
+                                let y = size.height - ((CGFloat(weight - minWeight) / CGFloat(range)) * size.height)
+                                if !started {
+                                    path.move(to: CGPoint(x: x, y: y))
+                                    started = true
+                                } else {
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                }
+                            }
+                        }
+                        .stroke(Color.zymSubtext.opacity(0.7), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                        Path { path in
+                            var started = false
+                            for (index, weight) in rollingWeights.enumerated() {
+                                guard let weight else { continue }
+                                let x = size.width * CGFloat(index) / CGFloat(max(days.count - 1, 1))
+                                let y = size.height - ((CGFloat(weight - minWeight) / CGFloat(range)) * size.height)
+                                if !started {
+                                    path.move(to: CGPoint(x: x, y: y))
+                                    started = true
+                                } else {
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                }
+                            }
+                        }
+                        .stroke(Color.zymPrimary, style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+                    }
+                }
+                .frame(height: 200)
+
+                HStack {
+                    Text(formattedCoachDay(days.first ?? ""))
+                    Spacer()
+                    Text(formattedCoachDay(days.last ?? ""))
+                }
+                .font(.system(size: 11))
+                .foregroundColor(Color.zymSubtext)
+            }
+        }
+    }
+}
+
+private struct CoachProgressCalendarCard: View {
+    let records: [CoachDayRecord]
+    let selectedDay: String
+    let onSelectDay: (String) -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+
+    private var days: [String] {
+        coachRecentDays(28)
+    }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(days, id: \.self) { day in
+                let record = records.first(where: { $0.day == day })
+                let selected = day == selectedDay
+
+                Button {
+                    onSelectDay(day)
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(formattedCoachDay(day))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color.zymSubtext)
+                            .lineLimit(1)
+                        Text(record?.check_in?.weight_kg.map { "\(coachDisplayMetric($0))kg" } ?? "--")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.zymText)
+                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Circle().fill((record?.check_in) == nil ? Color.gray.opacity(0.22) : Color.blue.opacity(0.82)).frame(width: 7, height: 7)
+                            Circle().fill((record?.meals.isEmpty == false) ? Color.orange.opacity(0.85) : Color.gray.opacity(0.22)).frame(width: 7, height: 7)
+                            Circle().fill((record?.training.isEmpty == false) ? Color.green.opacity(0.82) : Color.gray.opacity(0.22)).frame(width: 7, height: 7)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+                    .padding(10)
+                    .background(selected ? Color.zymPrimary.opacity(0.1) : Color.white.opacity(0.68))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(selected ? Color.zymPrimary.opacity(0.35) : Color.zymLine, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 }
