@@ -71,7 +71,7 @@ struct ConversationView: View {
                 if let coachWorkspaceMode, conversation.isCoach {
                     CoachWorkspaceView(
                         mode: coachWorkspaceMode,
-                        coachId: appState.selectedCoach ?? "zj",
+                        coachId: conversation.coachId ?? appState.selectedCoach ?? "zj",
                         onBackToChat: {
                             withAnimation(.zymSoft) {
                                 self.coachWorkspaceMode = nil
@@ -91,7 +91,10 @@ struct ConversationView: View {
                         ScrollView {
                             LazyVStack(spacing: 10) {
                                 ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
-                                    ConversationMessageBubble(message: msg, currentUserId: appState.userId ?? 0)
+                                    ConversationMessageBubble(
+                                        message: msg,
+                                        currentUserId: appState.userId ?? 0
+                                    )
                                         .zymAppear(delay: Double(min(index, 5)) * 0.02)
                                 }
 
@@ -206,6 +209,7 @@ struct ConversationView: View {
         }
         .navigationTitle(conversation.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: openProfileSheet) {
@@ -219,18 +223,18 @@ struct ConversationView: View {
                                         .scaledToFill()
                                 default:
                                     Circle()
-                                        .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
+                                        .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
                                 }
                             }
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
                         } else {
                             Circle()
-                                .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
+                                .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
                                 .frame(width: 32, height: 32)
                                 .overlay(
                                     Text(conversation.isCoach
-                                         ? ((appState.selectedCoach ?? "zj").uppercased())
+                                         ? ((conversation.coachId ?? "zj").uppercased())
                                          : String(conversation.name.prefix(2)).uppercased())
                                         .font(.system(size: 10, weight: .bold))
                                         .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
@@ -284,7 +288,7 @@ struct ConversationView: View {
         .sheet(isPresented: $showProfileSheet) {
             ConversationProfileSheet(
                 conversation: conversation,
-                appCoach: appState.selectedCoach ?? "zj",
+                appCoach: conversation.coachId ?? appState.selectedCoach ?? "zj",
                 profile: viewedProfile,
                 loading: profileLoading,
                 canReportUser: !conversation.isCoach && !conversation.isGroup && (conversation.otherUserId != nil),
@@ -376,6 +380,8 @@ struct ConversationView: View {
                 if String(appState.userId ?? 0) == userId { return }
                 typingUsers[userId] = isTyping
             case .inboxUpdated:
+                break
+            case .friendsUpdated:
                 break
             case .subscribed:
                 break
@@ -909,6 +915,8 @@ struct ConversationMessageBubble: View {
 
     var body: some View {
         let isMine = message.from_user_id == currentUserId
+        let bubbleBackground = isMine ? Color.white.opacity(0.94) : Color.zymBubbleDark
+        let bubbleMetaColor = isMine ? Color.zymSubtext : Color.white.opacity(0.82)
 
         return HStack {
             if isMine { Spacer() }
@@ -917,10 +925,10 @@ struct ConversationMessageBubble: View {
                 HStack(spacing: 8) {
                     Text(isMine ? "You" : message.username)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(isMine ? .white.opacity(0.9) : Color.zymSubtext)
+                        .foregroundColor(bubbleMetaColor)
                     Text(String(message.created_at.prefix(16)))
                         .font(.system(size: 11))
-                        .foregroundColor(isMine ? .white.opacity(0.7) : Color.zymSubtext)
+                        .foregroundColor(isMine ? Color.zymSubtext : Color.white.opacity(0.68))
                 }
 
                 if let content = message.content {
@@ -932,12 +940,13 @@ struct ConversationMessageBubble: View {
                 }
             }
             .padding(12)
-            .background(isMine ? Color.zymPrimary : Color.zymSurface)
+            .background(bubbleBackground)
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(isMine ? Color.clear : Color.zymLine, lineWidth: 1)
+                    .stroke(isMine ? Color.zymLine : Color.clear, lineWidth: 1)
             )
             .cornerRadius(14)
+            .shadow(color: isMine ? Color.black.opacity(0.04) : Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
 
             if !isMine { Spacer() }
         }
@@ -959,13 +968,13 @@ private struct ConversationMarkdownText: View {
         if let attributed {
             Text(attributed)
                 .font(.system(size: 15))
-                .foregroundColor(isMine ? .white : Color.zymText)
-                .tint(isMine ? Color.white.opacity(0.92) : Color.zymPrimaryDark)
+                .foregroundColor(isMine ? Color.zymText : .white)
+                .tint(isMine ? Color.zymPrimaryDark : Color.white.opacity(0.92))
         } else {
             Text(content)
                 .font(.system(size: 15))
-                .foregroundColor(isMine ? .white : Color.zymText)
-                .tint(isMine ? Color.white.opacity(0.92) : Color.zymPrimaryDark)
+                .foregroundColor(isMine ? Color.zymText : .white)
+                .tint(isMine ? Color.zymPrimaryDark : Color.white.opacity(0.92))
         }
     }
 }
@@ -1261,23 +1270,23 @@ private struct ConversationProfileSheet: View {
                                      ? "Strict, direct, execution-first coaching style."
                                      : "Encouraging, supportive, habit-first coaching style.")
                                     .font(.system(size: 14))
-                                    .foregroundColor(Color.zymCoachInk(appCoach))
+                                    .foregroundColor(Color.zymSubtext)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(16)
                             .background(
                                 LinearGradient(
-                                    colors: [Color.white.opacity(0.96), Color.zymCoachSoft(appCoach).opacity(0.82)],
+                                    colors: [Color.white.opacity(0.96), Color.zymBackgroundSoft.opacity(0.92)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(Color.zymCoachAccent(appCoach).opacity(0.18), lineWidth: 1)
+                                    .stroke(Color.zymLine, lineWidth: 1)
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: Color.zymCoachAccent(appCoach).opacity(0.12), radius: 14, x: 0, y: 8)
+                            .shadow(color: Color.black.opacity(0.08), radius: 14, x: 0, y: 8)
                         } else if loading {
                             ProgressView("Loading profile...")
                                 .padding(.top, 18)

@@ -40,7 +40,7 @@ import {
   removeGroupMember,
   resolveFriendConnectCode,
   searchUsers,
-  selectCoach,
+  enableCoach,
   sendMessage,
   syncHealth,
   updatePostVisibility,
@@ -48,7 +48,7 @@ import {
   uploadFile,
 } from '@/lib/api';
 import { resolveApiAssetUrl } from '@/lib/config';
-import { clearAuth, getAuth, setCoach } from '@/lib/auth-storage';
+import { clearAuth, getAuth } from '@/lib/auth-storage';
 import { RealtimeClient } from '@/lib/realtime';
 import { ConversationTile } from '@/components/chat/ConversationTile';
 import { CoachWorkspacePanel, type CoachWorkspaceMode } from '@/components/chat/CoachWorkspacePanel';
@@ -104,6 +104,7 @@ interface Conversation {
   avatarUrl?: string | null;
   userId?: number;
   groupId?: number;
+  coachId?: CoachId;
   coachEnabled?: string;
 }
 
@@ -259,6 +260,50 @@ function coachButtonClass(coachId?: CoachId | null): string {
   return 'btn btn-ghost';
 }
 
+const neutralTheme = {
+  gradient: 'linear-gradient(135deg, rgba(75,85,99,0.98), rgba(17,24,39,0.98))',
+  softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(71,85,105,0.08))',
+  borderColor: 'rgba(71,85,105,0.18)',
+  ink: '#334155',
+  accentBackground: 'rgba(71,85,105,0.12)',
+  accentBackgroundStrong: 'rgba(71,85,105,0.14)',
+};
+
+const coachCatalog = [
+  {
+    id: 'zj' as const,
+    label: 'ZJ Coach',
+    badge: 'Encouraging',
+    description: 'Supportive, steady, and momentum-focused.',
+  },
+  {
+    id: 'lc' as const,
+    label: 'LC Coach',
+    badge: 'Strict',
+    description: 'Direct, structured, and accountability-first.',
+  },
+];
+
+function coachAvatarTheme(coach: CoachId) {
+  if (coach === 'lc') {
+    return {
+      background: 'rgba(242,138,58,0.14)',
+      text: 'var(--coach-lc)',
+      solid: 'rgba(242,138,58,0.98)',
+      border: 'rgba(242,138,58,0.3)',
+      soft: 'rgba(242,138,58,0.08)',
+    };
+  }
+
+  return {
+    background: 'rgba(105,121,247,0.14)',
+    text: 'var(--coach-zj)',
+    solid: 'rgba(105,121,247,0.98)',
+    border: 'rgba(105,121,247,0.3)',
+    soft: 'rgba(105,121,247,0.08)',
+  };
+}
+
 function groupCoachSubtitle(coachEnabled?: string): string {
   if (coachEnabled === 'lc') return 'Group · LC coach';
   if (coachEnabled === 'zj') return 'Group · ZJ coach';
@@ -274,7 +319,7 @@ function resolveConversationCoachId(
     return normalizeCoachId(conversation.coachEnabled) || selectedCoach;
   }
   if (conversation.type === 'coach') {
-    return conversation.topic.startsWith('coach_lc_') ? 'lc' : 'zj';
+    return conversation.coachId || (conversation.topic.startsWith('coach_lc_') ? 'lc' : 'zj');
   }
   return selectedCoach;
 }
@@ -473,24 +518,15 @@ function createClientMessageId(): string {
 }
 
 function coachTheme(coach: 'zj' | 'lc') {
-  if (coach === 'lc') {
-    return {
-      toneClass: 'coach-lc',
-      gradient: 'linear-gradient(135deg, var(--coach-lc), var(--coach-lc-strong))',
-      softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(242,138,58,0.10))',
-      borderColor: 'rgba(242,138,58,0.18)',
-      ink: 'var(--coach-lc-ink)',
-      description: 'Strict coaching style with direct accountability. Best for users who want hard feedback and action-first guidance.',
-    };
-  }
-
   return {
-    toneClass: 'coach-zj',
-    gradient: 'linear-gradient(135deg, var(--coach-zj), var(--coach-zj-strong))',
-    softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(108,124,246,0.10))',
-    borderColor: 'rgba(108,124,246,0.16)',
-    ink: 'var(--coach-zj-ink)',
-    description: 'Encouraging coaching style focused on consistency, progressive habits, and sustainable fitness routines.',
+    toneClass: coach === 'lc' ? 'coach-lc' : 'coach-zj',
+    gradient: neutralTheme.gradient,
+    softBackground: neutralTheme.softBackground,
+    borderColor: neutralTheme.borderColor,
+    ink: neutralTheme.ink,
+    description: coach === 'lc'
+      ? 'Strict coaching style with direct accountability. Best for users who want hard feedback and action-first guidance.'
+      : 'Encouraging coaching style focused on consistency, progressive habits, and sustainable fitness routines.',
   };
 }
 
@@ -645,10 +681,13 @@ export default function AppPage() {
   const [authUserId, setAuthUserId] = useState<number>(0);
   const [authUsername, setAuthUsername] = useState('');
   const [authSelectedCoach, setAuthSelectedCoach] = useState<'zj' | 'lc' | null>(null);
+  const [enabledCoaches, setEnabledCoaches] = useState<CoachId[]>([]);
   const [selectedCoach, setSelectedCoach] = useState<'zj' | 'lc'>('zj');
   const [welcomeFlowOpen, setWelcomeFlowOpen] = useState(false);
   const [isWideMessageLayout, setIsWideMessageLayout] = useState(false);
   const [mobileConversationListOpen, setMobileConversationListOpen] = useState(false);
+  const [communityActionsOpen, setCommunityActionsOpen] = useState(false);
+  const [coachPickerOpen, setCoachPickerOpen] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('messages');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -910,7 +949,7 @@ export default function AppPage() {
             if (activeConversation?.type === 'coach') {
               return activeConversation.name.toLowerCase().includes('lc') ? 'LC' : 'ZJ';
             }
-            return selectedCoach.toUpperCase();
+            return 'Coach';
           }
           const numericId = Number(userId);
           if (!Number.isFinite(numericId)) return 'Someone';
@@ -1026,9 +1065,9 @@ export default function AppPage() {
     return {
       kicker: 'Identity + Security',
       title: 'Own your profile footprint',
-      subtitle: 'Tune coach style, profile presence, and active sessions in one place.',
+      subtitle: 'Manage your profile presence, coach chats, and active sessions in one place.',
       stats: [
-        { label: 'Coach', value: selectedCoach.toUpperCase() },
+        { label: 'Coach chats', value: String(enabledCoaches.length) },
         { label: 'Sessions', value: String(authSessions.length) },
         { label: 'Security', value: String(securityEvents.length) },
       ],
@@ -1039,6 +1078,7 @@ export default function AppPage() {
     totalUnreadCount,
     unreadMentionCount,
     feed,
+    enabledCoaches.length,
     friends.length,
     requests.length,
     conversationCounts.group,
@@ -1409,7 +1449,7 @@ export default function AppPage() {
         }
       }
 
-      void loadInbox(authUserIdRef.current, selectedCoachRef.current, friendsRef.current);
+      void loadInbox(authUserIdRef.current, friendsRef.current);
       void loadMentions(authUserIdRef.current);
       return;
     }
@@ -1439,13 +1479,13 @@ export default function AppPage() {
     }
 
     if (event.type === 'inbox_updated') {
-      void loadInbox(authUserIdRef.current, selectedCoachRef.current, friendsRef.current);
+      void loadInbox(authUserIdRef.current, friendsRef.current);
       return;
     }
 
     if (event.type === 'friends_updated') {
       void loadFriendsData(authUserIdRef.current)
-        .then((rows) => loadInbox(authUserIdRef.current, selectedCoachRef.current, rows))
+        .then((rows) => loadInbox(authUserIdRef.current, rows))
         .catch(() => undefined);
     }
   };
@@ -1471,21 +1511,11 @@ export default function AppPage() {
     setAuthSelectedCoach(auth.selectedCoach);
     setSelectedCoach(bootstrapCoach);
     selectedCoachRef.current = bootstrapCoach;
-    const bootstrapCoachName = coachDisplayName(bootstrapCoach);
-    const defaultCoachTopic = buildCoachTopic(auth.userId, bootstrapCoach);
     messageDraftsRef.current = loadMessageDrafts(auth.userId);
-    setConversations([
-      {
-        topic: defaultCoachTopic,
-        name: bootstrapCoachName,
-        type: 'coach',
-        subtitle: 'AI Coach',
-        avatarUrl: null,
-        userId: 0,
-      },
-    ]);
-    setActiveTopic(defaultCoachTopic);
-    setComposer(messageDraftsRef.current[defaultCoachTopic] || '');
+    setEnabledCoaches(Array.isArray(auth.enabledCoaches) ? auth.enabledCoaches.filter((item): item is CoachId => item === 'zj' || item === 'lc') : []);
+    setConversations([]);
+    setActiveTopic('');
+    setComposer('');
     setPostText(loadPostDraft(auth.userId));
 
     setTab(normalizeTabKey(params.get('tab')));
@@ -1500,7 +1530,7 @@ export default function AppPage() {
 
     const initialFriends = await loadFriendsData(auth.userId);
     await Promise.all([
-      loadInbox(auth.userId, bootstrapCoach, initialFriends),
+      loadInbox(auth.userId, initialFriends),
       loadFeed(auth.userId),
       loadLeaderboard(auth.userId),
       loadProfile(auth.userId),
@@ -2027,14 +2057,17 @@ export default function AppPage() {
     return () => clearTimeout(timer);
   }, [friendIdInput, authUserId]);
 
-  async function loadInbox(userId = authUserIdRef.current, coachOverride?: 'zj' | 'lc', friendSource?: Friend[]) {
+  async function loadInbox(userId = authUserIdRef.current, friendSource?: Friend[]) {
     if (!userId) return;
 
     try {
       const inbox = await getInbox(userId);
       const sourceFriends = friendSource || friendsRef.current;
-      const activeCoach = coachOverride || selectedCoachRef.current;
-      const coachName = coachDisplayName(activeCoach);
+      const coachRows = Array.isArray(inbox.coaches) ? inbox.coaches : (inbox.coach ? [inbox.coach] : []);
+      const enabledCoachIds = coachRows
+        .map((item) => normalizeCoachId(item.coach_id))
+        .filter((item): item is CoachId => Boolean(item));
+      setEnabledCoaches(enabledCoachIds);
 
       const dmTopics = new Set(inbox.dms.map((item) => item.topic));
       const friendPlaceholders: Conversation[] = sourceFriends
@@ -2052,17 +2085,18 @@ export default function AppPage() {
         .filter((item) => !dmTopics.has(item.topic));
 
       const list: Conversation[] = [
-        {
-          topic: inbox.coach.topic,
-          name: coachName,
-          type: 'coach',
+        ...coachRows.map((item) => ({
+          topic: item.topic,
+          name: item.coach_name || coachDisplayName((normalizeCoachId(item.coach_id) || 'zj')),
+          type: 'coach' as const,
           subtitle: 'AI Coach',
-          preview: inbox.coach.last_message_preview,
-          unreadCount: Number(inbox.coach.unread_count || 0),
-          mentionCount: Number(inbox.coach.mention_count || 0),
+          preview: item.last_message_preview,
+          unreadCount: Number(item.unread_count || 0),
+          mentionCount: Number(item.mention_count || 0),
           avatarUrl: null,
           userId: 0,
-        },
+          coachId: normalizeCoachId(item.coach_id) || 'zj',
+        })),
         ...inbox.dms.map((item) => ({
           topic: item.topic,
           name: item.username,
@@ -2367,7 +2401,7 @@ export default function AppPage() {
       setFriendQuery('');
       setFriendSearchResult([]);
       const rows = await loadFriendsData();
-      await loadInbox(authUserId, undefined, rows);
+      await loadInbox(authUserId, rows);
     } catch (err: any) {
       setError(err.message || 'Failed to add friend.');
     }
@@ -2404,7 +2438,7 @@ export default function AppPage() {
       setFriendByIdPreview(null);
       setFriendByIdError('');
       const rows = await loadFriendsData();
-      await loadInbox(authUserId, undefined, rows);
+      await loadInbox(authUserId, rows);
     } catch (err: any) {
       setFriendByIdError(err.message || 'Failed to send request.');
     } finally {
@@ -2416,7 +2450,7 @@ export default function AppPage() {
     try {
       await acceptFriend(authUserId, friendId);
       const rows = await loadFriendsData();
-      await loadInbox(authUserId, undefined, rows);
+      await loadInbox(authUserId, rows);
       showNotice('Friend request accepted.');
     } catch (err: any) {
       setError(err.message || 'Action failed.');
@@ -2823,7 +2857,7 @@ export default function AppPage() {
           loadFeed(),
           loadLeaderboard(),
         ]);
-        await loadInbox(authUserId, undefined, nextFriends);
+        await loadInbox(authUserId, nextFriends);
         showNotice('Avatar updated.');
       } else {
         setProfileDraft((prev) => ({ ...prev, background_url: uploaded.url }));
@@ -2843,15 +2877,23 @@ export default function AppPage() {
     }
   }
 
-  async function handleSwitchCoach(coach: 'zj' | 'lc') {
+  async function handleEnableCoach(coach: CoachId) {
+    const alreadyEnabled = enabledCoaches.includes(coach);
     try {
-      await selectCoach(authUserId, coach);
-      setSelectedCoach(coach);
-      setCoach(coach);
-      showNotice(`Switched to ${coach.toUpperCase()} coach.`);
-      await loadInbox(authUserId, coach);
+      const response = await enableCoach(authUserId, coach);
+      setEnabledCoaches(response.enabledCoaches);
+      if (response.selectedCoach) {
+        setSelectedCoach(response.selectedCoach);
+        selectedCoachRef.current = response.selectedCoach;
+      }
+      await loadInbox(authUserId);
+      setCoachPickerOpen(false);
+      setCommunityActionsOpen(false);
+      setTab('messages');
+      setActiveTopic(buildCoachTopic(authUserId, coach));
+      showNotice(alreadyEnabled ? `${coachDisplayName(coach)} opened.` : `${coachDisplayName(coach)} added to chats.`);
     } catch (err: any) {
-      setError(err.message || 'Failed to switch coach.');
+      setError(err.message || 'Failed to enable coach.');
     }
   }
 
@@ -2863,7 +2905,7 @@ export default function AppPage() {
         open: true,
         loading: false,
         type: 'coach',
-        coachId: selectedCoach,
+        coachId: activeConversation.coachId || activeConversationCoach,
         data: null,
       });
       return;
@@ -3021,6 +3063,7 @@ export default function AppPage() {
 
   const activeTab = tab === 'friends' ? 'community' : tab;
   const activeConversationCoach = resolveConversationCoachId(activeConversation, selectedCoach);
+  const activeCoachAvatarTone = coachAvatarTheme(activeConversationCoach);
   const activeConversationTheme = coachTheme(activeConversationCoach);
   const selectedCoachTheme = coachTheme(selectedCoach);
   const selectedCoachButtonClass = coachButtonClass(selectedCoach);
@@ -3068,7 +3111,7 @@ export default function AppPage() {
               ref={searchRef}
               className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition sm:pl-9 sm:pr-4 sm:text-sm"
               style={{
-                borderColor: selectedCoach === 'lc' ? 'rgba(242,138,58,0.18)' : undefined,
+                borderColor: neutralTheme.borderColor,
                 boxShadow: 'none',
               }}
               value={searchValue || ''}
@@ -3077,17 +3120,7 @@ export default function AppPage() {
             />
           </label>
         ) : null}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex size-8 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white sm:size-9"
-            onClick={() => router.push('/friends')}
-            title="Friends"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>group</span>
-          </button>
-          {trailing}
-        </div>
+        {trailing ? <div className="flex items-center gap-2">{trailing}</div> : null}
       </div>
     </header>
   );
@@ -3195,11 +3228,9 @@ export default function AppPage() {
                   className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
                   style={{
                     background: activeConversation?.type === 'coach'
-                      ? activeConversationCoach === 'lc'
-                        ? 'rgba(242,138,58,0.14)'
-                        : 'rgba(105,121,247,0.14)'
+                      ? activeCoachAvatarTone.background
                       : 'rgba(255,255,255,0.75)',
-                    color: activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)',
+                    color: activeConversation?.type === 'coach' ? activeCoachAvatarTone.text : neutralTheme.ink,
                   }}
                   onClick={() => void openConversationProfile()}
                   disabled={!activeConversation || activeConversation.type === 'group'}
@@ -3361,10 +3392,10 @@ export default function AppPage() {
                             className={`mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${compact ? 'opacity-0' : ''}`}
                             style={{
                               background: message.is_coach
-                                ? (activeConversationCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.12)')
+                                ? activeCoachAvatarTone.background
                                 : 'rgba(148,163,184,0.16)',
                               color: message.is_coach
-                                ? (activeConversationCoach === 'lc' ? 'var(--coach-lc)' : 'var(--coach-zj)')
+                                ? activeCoachAvatarTone.text
                                 : 'rgb(71 85 105)',
                             }}
                           >
@@ -3454,9 +3485,7 @@ export default function AppPage() {
                                 message.is_coach
                                   ? {
                                       background: activeConversationTheme.gradient,
-                                      boxShadow: activeConversationCoach === 'lc'
-                                        ? '0 18px 36px rgba(242,138,58,0.22)'
-                                        : '0 18px 36px rgba(105,121,247,0.22)',
+                                      boxShadow: '0 18px 36px rgba(15,23,42,0.18)',
                                     }
                                   : {
                                       background: 'rgba(100,116,139,0.95)',
@@ -3619,6 +3648,48 @@ export default function AppPage() {
         setCommunityQuery,
         'Search community posts...',
         undefined,
+        <div className="relative">
+          <button
+            type="button"
+            className="flex size-8 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white sm:size-9"
+            onClick={() => setCommunityActionsOpen((prev) => !prev)}
+            title={communityActionsOpen ? 'Close actions' : 'Open actions'}
+          >
+            <span
+              className="material-symbols-outlined transition"
+              style={{
+                fontSize: 18,
+                transform: communityActionsOpen ? 'rotate(45deg)' : 'rotate(0deg)',
+              }}
+            >
+              add
+            </span>
+          </button>
+          {communityActionsOpen ? (
+            <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[180px] flex-col gap-1.5 rounded-[18px] border border-white/70 bg-[rgba(17,24,39,0.92)] p-2.5 text-white shadow-xl backdrop-blur-xl">
+              <button
+                type="button"
+                className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
+                onClick={() => {
+                  setCommunityActionsOpen(false);
+                  router.push('/friends');
+                }}
+              >
+                Add Friends
+              </button>
+              <button
+                type="button"
+                className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
+                onClick={() => {
+                  setCommunityActionsOpen(false);
+                  setCoachPickerOpen(true);
+                }}
+              >
+                Add Coaches
+              </button>
+            </div>
+          ) : null}
+        </div>,
       )}
 
       <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -3629,8 +3700,8 @@ export default function AppPage() {
                 <div
                   className="flex size-10 shrink-0 items-center justify-center rounded-full text-base font-semibold sm:size-12 sm:text-lg"
                   style={{
-                    background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                    color: selectedCoachTheme.ink,
+                    background: neutralTheme.accentBackground,
+                    color: neutralTheme.ink,
                   }}
                 >
                   {profileDraft.avatar_url || profile?.avatar_url || feed.find((post) => post.user_id === authUserId)?.avatar_url ? (
@@ -3661,8 +3732,8 @@ export default function AppPage() {
                       <label
                         className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-[13px] font-medium transition sm:px-4 sm:py-2 sm:text-sm"
                         style={{
-                          background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.1)' : 'rgba(105,121,247,0.1)',
-                          color: selectedCoachTheme.ink,
+                          background: neutralTheme.accentBackground,
+                          color: neutralTheme.ink,
                         }}
                       >
                         <span className="material-symbols-outlined text-base sm:text-lg">image</span>
@@ -3728,8 +3799,8 @@ export default function AppPage() {
                     <div
                       className="flex size-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold sm:size-11"
                       style={{
-                        background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                        color: selectedCoachTheme.ink,
+                        background: neutralTheme.accentBackground,
+                        color: neutralTheme.ink,
                       }}
                     >
                       {post.avatar_url ? (
@@ -3873,8 +3944,8 @@ export default function AppPage() {
                             <div
                               className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold sm:size-9"
                               style={{
-                                background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                                color: selectedCoachTheme.ink,
+                                background: neutralTheme.accentBackground,
+                                color: neutralTheme.ink,
                               }}
                             >
                               {comment.avatar_url ? (
@@ -4016,8 +4087,8 @@ export default function AppPage() {
                           <div
                             className="flex size-10 items-center justify-center overflow-hidden rounded-full font-semibold"
                             style={{
-                              background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                              color: selectedCoachTheme.ink,
+                              background: neutralTheme.accentBackground,
+                              color: neutralTheme.ink,
                             }}
                           >
                             {entry.avatar_url ? (
@@ -4101,7 +4172,7 @@ export default function AppPage() {
                 className="h-32 w-full object-cover sm:h-40"
               />
             ) : (
-              <div className="h-32 w-full bg-[linear-gradient(135deg,rgba(105,121,247,0.16),rgba(242,138,58,0.18))] sm:h-40" />
+              <div className="h-32 w-full bg-[linear-gradient(135deg,rgba(71,85,105,0.16),rgba(17,24,39,0.12))] sm:h-40" />
             )}
           </div>
 
@@ -4126,7 +4197,9 @@ export default function AppPage() {
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h2 className="text-[1.7rem] font-bold tracking-tight text-slate-900 sm:text-3xl">{authUsername || profile?.username || 'User'}</h2>
-                  <p className="mt-1.5 text-[13px] text-slate-500 sm:mt-2 sm:text-sm">ID: {authUserId} • Coach {selectedCoach.toUpperCase()} • Premium loop</p>
+                  <p className="mt-1.5 text-[13px] text-slate-500 sm:mt-2 sm:text-sm">
+                    ID: {authUserId} • {enabledCoaches.length > 0 ? `${enabledCoaches.length} coach chat${enabledCoaches.length > 1 ? 's' : ''} enabled` : 'No coach chats enabled yet'}
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-2.5 sm:gap-3">
                   <label className={selectedCoachButtonClass} style={{ cursor: 'pointer' }}>
@@ -4210,55 +4283,30 @@ export default function AppPage() {
             </section>
 
           <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Coach Style</h2>
-                  <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Choose the energy that fits your workflow.</p>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4">
-                {(['zj', 'lc'] as const).map((coach) => {
-                  const theme = coachTheme(coach);
-                  const activeCoach = selectedCoach === coach;
-                  return (
-                    <article
-                      key={coach}
-                      className={`rounded-[20px] border-2 bg-white p-4 shadow-sm transition sm:rounded-[24px] sm:p-5 ${activeCoach ? '' : 'border-slate-100'}`}
-                      style={activeCoach ? { borderColor: theme.borderColor } : undefined}
+            <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Coach Chats</h2>
+            <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Enable or open coaches from the Community `+` menu. Each coach keeps a separate conversation history.</p>
+            <div className="mt-4 flex flex-wrap gap-2.5 sm:mt-5">
+              {enabledCoaches.length > 0 ? enabledCoaches.map((coach) => {
+                const avatarTheme = coachAvatarTheme(coach);
+                return (
+                  <span
+                    key={coach}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  >
+                    <span
+                      className="inline-flex size-6 items-center justify-center rounded-full text-[11px] font-bold"
+                      style={{ background: avatarTheme.background, color: avatarTheme.text }}
                     >
-                      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
-                        <div>
-                          <h3 className="text-[1rem] font-bold text-slate-900 sm:text-lg">{coachDisplayName(coach)}</h3>
-                          <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]" style={{ color: theme.ink }}>
-                            {coach === 'zj' ? 'The Technician' : 'The Motivator'}
-                          </p>
-                        </div>
-                        {activeCoach ? (
-                          <span
-                            className="rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em] sm:px-3 sm:text-[10px] sm:tracking-[0.18em]"
-                            style={{
-                              background: coach === 'lc' ? 'rgba(242,138,58,0.12)' : 'rgba(105,121,247,0.12)',
-                              color: theme.ink,
-                            }}
-                          >
-                            Active
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="text-[13px] leading-6 text-slate-600 sm:text-sm sm:leading-7">{theme.description}</p>
-                      <button
-                        className={`mt-4 w-full rounded-[18px] px-4 py-2.5 text-[13px] font-semibold transition sm:mt-5 sm:rounded-2xl sm:py-3 sm:text-base ${activeCoach ? '' : 'bg-slate-100 text-slate-700'}`}
-                        style={activeCoach ? { background: theme.gradient, color: '#fff' } : undefined}
-                        type="button"
-                        onClick={() => void handleSwitchCoach(coach)}
-                      >
-                        {activeCoach ? `Selected ${coach.toUpperCase()}` : `Select ${coach.toUpperCase()}`}
-                      </button>
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
+                      {coach.toUpperCase()}
+                    </span>
+                    {coachDisplayName(coach)}
+                  </span>
+                );
+              }) : (
+                <p className="text-sm text-slate-500">No coach chats enabled yet.</p>
+              )}
+            </div>
+          </section>
         </div>
         <section className="rounded-[22px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -4345,8 +4393,8 @@ export default function AppPage() {
                     title={item.label}
                     className={`relative flex size-12 items-center justify-center rounded-2xl text-slate-500 transition ${active ? '' : 'hover:bg-white/55 hover:text-slate-800'}`}
                     style={active ? {
-                      background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.14)',
-                      color: selectedCoachTheme.ink,
+                      background: neutralTheme.accentBackgroundStrong,
+                      color: neutralTheme.ink,
                     } : undefined}
                   >
                     <TabGlyph icon={item.icon} active={active} />
@@ -4366,8 +4414,8 @@ export default function AppPage() {
                 onClick={() => setTab('profile')}
                 className="flex size-11 items-center justify-center overflow-hidden rounded-full border-2 bg-white/70 text-sm font-bold"
                 style={{
-                  borderColor: selectedCoach === 'lc' ? 'rgba(242,138,58,0.18)' : 'rgba(105,121,247,0.18)',
-                  color: selectedCoachTheme.ink,
+                  borderColor: neutralTheme.borderColor,
+                  color: neutralTheme.ink,
                 }}
                 title={authUsername || 'Profile'}
               >
@@ -4399,8 +4447,8 @@ export default function AppPage() {
                 aria-label={item.label}
                 className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[18px] px-1.5 py-1.5 text-[10px] font-semibold transition ${active ? '' : 'text-slate-500'}`}
                 style={active ? {
-                  background: selectedCoach === 'lc' ? 'rgba(242,138,58,0.14)' : 'rgba(105,121,247,0.14)',
-                  color: selectedCoachTheme.ink,
+                  background: neutralTheme.accentBackgroundStrong,
+                  color: neutralTheme.ink,
                 } : undefined}
               >
                 <TabGlyph icon={item.icon} active={active} size={20} />
@@ -4416,6 +4464,68 @@ export default function AppPage() {
         </nav>
       </main>
 
+      {coachPickerOpen ? (
+        <div
+          className="fixed inset-0 z-[110] bg-[rgba(15,23,42,0.26)] px-4 py-8 backdrop-blur-sm"
+          onClick={() => setCoachPickerOpen(false)}
+        >
+          <div
+            className="mx-auto flex w-full max-w-[520px] flex-col gap-4 rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-[0_28px_70px_rgba(15,23,42,0.18)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Add Coach</p>
+                <h3 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Enable a coach chat</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">Each coach keeps a separate conversation history, while your shared profile and training data stay synced.</p>
+              </div>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setCoachPickerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-3">
+              {coachCatalog.map((coach) => {
+                const enabled = enabledCoaches.includes(coach.id);
+                const avatarTheme = coachAvatarTheme(coach.id);
+                return (
+                  <article key={coach.id} className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className="flex size-12 shrink-0 items-center justify-center rounded-[16px] text-sm font-bold"
+                        style={{ background: avatarTheme.background, color: avatarTheme.text }}
+                      >
+                        {coach.id.toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong className="text-base text-slate-900">{coach.label}</strong>
+                          <span className="rounded-full bg-[rgba(71,85,105,0.12)] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
+                            {coach.badge}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{coach.description}</p>
+                      </div>
+                      <button
+                        className={enabled ? 'btn btn-ghost' : 'btn btn-zj'}
+                        type="button"
+                        onClick={() => void handleEnableCoach(coach.id)}
+                      >
+                        {enabled ? 'Open Chat' : 'Interact'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {profileViewer.open ? (
         <div
           className="zym-fade profile-viewer-overlay"
@@ -4424,7 +4534,7 @@ export default function AppPage() {
           <div className="surface-card profile-viewer-modal" onClick={(event) => event.stopPropagation()}>
             <header className="profile-viewer-header">
               <h3 style={{ fontSize: 24 }}>
-                {profileViewer.type === 'coach' ? coachDisplayName(profileViewer.coachId || selectedCoach) : 'Profile'}
+                {profileViewer.type === 'coach' ? coachDisplayName(profileViewer.coachId || 'zj') : 'Profile'}
               </h3>
               <button
                 className="btn btn-ghost"
@@ -4444,13 +4554,13 @@ export default function AppPage() {
                 <div
                   className="flow-card flow-card-soft form-grid"
                   style={{
-                    background: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').softBackground,
-                    borderColor: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').borderColor,
+                    background: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').softBackground,
+                    borderColor: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').borderColor,
                   }}
                 >
-                  <strong style={{ fontSize: 18 }}>{coachDisplayName(profileViewer.coachId || selectedCoach)}</strong>
-                  <p style={{ color: coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').ink, lineHeight: 1.5 }}>
-                    {coachTheme((profileViewer.coachId || selectedCoach) as 'zj' | 'lc').description}
+                  <strong style={{ fontSize: 18 }}>{coachDisplayName(profileViewer.coachId || 'zj')}</strong>
+                  <p style={{ color: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').ink, lineHeight: 1.5 }}>
+                    {coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').description}
                   </p>
                   <p style={{ color: 'var(--ink-500)', fontSize: 13 }}>
                     Supports: nutrition photo analysis, training feedback, profile planning, and progress guidance.
@@ -4484,7 +4594,7 @@ export default function AppPage() {
                         width: 66,
                         height: 66,
                         borderRadius: 18,
-                        background: coachTheme((profileViewer.data.profile.selected_coach || 'zj') as 'zj' | 'lc').gradient,
+                        background: neutralTheme.gradient,
                         color: '#fff',
                         display: 'grid',
                         placeItems: 'center',
@@ -4499,7 +4609,7 @@ export default function AppPage() {
                     <h4 style={{ fontSize: 24 }}>{profileViewer.data.profile.username}</h4>
                     <p className="entity-sub">User ID: {profileViewer.data.profile.id}</p>
                     <p className="entity-sub">
-                      Coach: {coachDisplayName(profileViewer.data.profile.selected_coach || 'zj')}
+                      Coach chats: {profileViewer.data.profile.enabled_coaches?.length || 0}
                     </p>
                   </div>
                 </div>

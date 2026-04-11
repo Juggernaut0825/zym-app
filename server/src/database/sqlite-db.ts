@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { Worker } from 'worker_threads';
@@ -233,6 +234,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       password_hash TEXT,
       email_verified_at DATETIME,
       selected_coach TEXT,
+      enabled_coaches TEXT,
       avatar_url TEXT,
       background_url TEXT,
       bio TEXT,
@@ -240,6 +242,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       hobbies TEXT,
       timezone TEXT,
       apple_health_enabled INTEGER DEFAULT 0,
+      public_uuid TEXT UNIQUE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -512,6 +515,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   if (!userColumns.some((column) => column.name === 'google_sub')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN google_sub TEXT');
   }
+  if (!userColumns.some((column) => column.name === 'public_uuid')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN public_uuid TEXT');
+  }
   if (!sessionColumns.some((column) => column.name === 'ip_address')) {
     sqlite.exec('ALTER TABLE user_sessions ADD COLUMN ip_address TEXT');
   }
@@ -520,6 +526,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   }
   if (!postColumns.some((column) => column.name === 'visibility')) {
     sqlite.exec("ALTER TABLE posts ADD COLUMN visibility TEXT DEFAULT 'friends'");
+  }
+  if (!userColumns.some((column) => column.name === 'enabled_coaches')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN enabled_coaches TEXT');
   }
 
   sqlite.exec(`
@@ -532,6 +541,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
 
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_connect_code ON users(connect_code)');
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL');
+  sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_uuid ON users(public_uuid) WHERE public_uuid IS NOT NULL');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
@@ -584,6 +594,29 @@ function ensureConnectCodes(runtimeDb: RuntimeDatabase): void {
   }
 }
 
+function createPublicUuid(): string {
+  return `uuid_${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+function ensureUserPublicUuids(runtimeDb: RuntimeDatabase): void {
+  const missingUuids = runtimeDb
+    .prepare("SELECT id FROM users WHERE public_uuid IS NULL OR public_uuid = ''")
+    .all() as Array<{ id: number }>;
+  const findByUuid = runtimeDb.prepare('SELECT id FROM users WHERE public_uuid = ?');
+  const updateUuid = runtimeDb.prepare('UPDATE users SET public_uuid = ? WHERE id = ?');
+
+  for (const row of missingUuids) {
+    for (let attempts = 0; attempts < 40; attempts += 1) {
+      const candidate = createPublicUuid();
+      const exists = findByUuid.get(candidate) as { id?: number } | undefined;
+      if (!exists?.id) {
+        updateUuid.run(candidate, row.id);
+        break;
+      }
+    }
+  }
+}
+
 export async function initDB(): Promise<void> {
   if (db) {
     return;
@@ -602,6 +635,7 @@ export async function initDB(): Promise<void> {
     postgresBridge.initialize(schemaSql);
     db = new PostgresDatabaseAdapter(postgresBridge);
     ensureConnectCodes(db);
+    ensureUserPublicUuids(db);
     return;
   }
 
@@ -609,6 +643,7 @@ export async function initDB(): Promise<void> {
   initializeSqliteSchema(sqlite);
   db = new SqliteDatabaseAdapter(sqlite);
   ensureConnectCodes(db);
+  ensureUserPublicUuids(db);
 }
 
 export function getDB(): RuntimeDatabase {

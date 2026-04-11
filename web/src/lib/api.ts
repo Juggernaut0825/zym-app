@@ -155,6 +155,7 @@ export interface LoginResponse {
   refreshToken: string;
   username: string;
   selectedCoach: 'zj' | 'lc' | null;
+  enabledCoaches?: Array<'zj' | 'lc'>;
   timezone?: string | null;
 }
 
@@ -239,6 +240,18 @@ export async function resetPassword(token: string, password: string): Promise<{ 
 
 export async function selectCoach(userId: number, coach: 'zj' | 'lc'): Promise<void> {
   await request('/coach/select', {
+    method: 'POST',
+    body: JSON.stringify({ userId, coach }),
+  });
+}
+
+export async function enableCoach(userId: number, coach: 'zj' | 'lc'): Promise<{
+  success: true;
+  coach: 'zj' | 'lc';
+  selectedCoach: 'zj' | 'lc' | null;
+  enabledCoaches: Array<'zj' | 'lc'>;
+}> {
+  return request('/coach/enable', {
     method: 'POST',
     body: JSON.stringify({ userId, coach }),
   });

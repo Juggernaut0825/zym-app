@@ -6,7 +6,11 @@ import UIKit
 struct FriendsView: View {
     @State private var friends: [Friend] = []
     @State private var requests: [Friend] = []
-    @State private var showAddFriend = false
+    @State private var searchQuery = ""
+    @State private var searchResults: [Friend] = []
+    @State private var searchPending = false
+    @State private var searchStatusText = ""
+    @State private var searchSequence = 0
     @State private var selectedConversation: Conversation?
     @State private var showConversation = false
     @EnvironmentObject var appState: AppState
@@ -18,6 +22,41 @@ struct FriendsView: View {
 
                 ScrollView {
                     VStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Search People")
+                                .foregroundColor(Color.zymText)
+                                .font(.custom("Syne", size: 20))
+
+                            TextField("Search people by username", text: $searchQuery)
+                                .padding(12)
+                                .background(Color.zymSurface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.zymLine, lineWidth: 1)
+                                )
+                                .cornerRadius(12)
+                                .textInputAutocapitalization(.never)
+                                .disableAutocorrection(true)
+
+                            if searchPending {
+                                Text("Searching usernames...")
+                                    .foregroundColor(Color.zymSubtext)
+                                    .font(.system(size: 12, weight: .medium))
+                            } else if !searchStatusText.isEmpty {
+                                Text(searchStatusText)
+                                    .foregroundColor(Color.zymSubtext)
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+
+                            ForEach(Array(searchResults.enumerated()), id: \.element.id) { index, friend in
+                                FriendSearchResultRow(friend: friend) {
+                                    sendFriendRequest(to: friend.id)
+                                }
+                                .zymAppear(delay: Double(index) * 0.02)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+
                         if !requests.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Friend Requests")
@@ -57,17 +96,6 @@ struct FriendsView: View {
                 }
             }
             .navigationTitle("Friends")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showAddFriend = true }) {
-                        Image(systemName: "person.badge.plus")
-                            .foregroundColor(Color.zymPrimary)
-                    }
-                }
-            }
-            .sheet(isPresented: $showAddFriend) {
-                AddFriendView(onAdd: loadFriends)
-            }
             .background(
                 NavigationLink(
                     isActive: $showConversation,
@@ -84,6 +112,9 @@ struct FriendsView: View {
                 .hidden()
             )
             .onAppear(perform: loadFriends)
+            .onChange(of: searchQuery) { _, value in
+                scheduleSearch(for: value)
+            }
         }
     }
 
@@ -131,6 +162,40 @@ struct FriendsView: View {
         }.resume()
     }
 
+    func sendFriendRequest(to friendId: Int) {
+        guard let userId = appState.userId,
+              let url = apiURL("/friends/add") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": friendId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if statusCode < 200 || statusCode >= 300 {
+                    if let data = data,
+                       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let message = payload["error"] as? String {
+                        searchStatusText = message
+                    } else {
+                        searchStatusText = "Failed to send request."
+                    }
+                    return
+                }
+                searchStatusText = "Friend request sent."
+                searchQuery = ""
+                searchResults = []
+                loadFriends()
+            }
+        }.resume()
+    }
+
     func openDM(with friend: Friend) {
         guard let userId = appState.userId,
               let url = apiURL("/messages/open-dm") else { return }
@@ -153,15 +218,97 @@ struct FriendsView: View {
                     name: friend.username,
                     isGroup: false,
                     isCoach: false,
+                    coachId: nil,
                     coachEnabled: nil,
                     avatarUrl: friend.avatar_url,
                     otherUserId: friend.id,
+                    previewText: "Start chatting",
                     unreadCount: 0,
                     mentionCount: 0
                 )
                 showConversation = true
             }
         }.resume()
+    }
+
+    func scheduleSearch(for rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchSequence += 1
+        let currentSequence = searchSequence
+
+        guard trimmed.count >= 2 else {
+            searchPending = false
+            searchResults = []
+            searchStatusText = trimmed.isEmpty ? "" : "Type at least 2 characters."
+            return
+        }
+
+        searchPending = true
+        searchStatusText = ""
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            guard currentSequence == searchSequence else { return }
+            searchUsers(query: trimmed, sequence: currentSequence)
+        }
+    }
+
+    func searchUsers(query: String, sequence: Int) {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = apiURL("/users/search?q=\(encoded)") else {
+            DispatchQueue.main.async {
+                searchPending = false
+                searchResults = []
+                searchStatusText = "Search is unavailable right now."
+            }
+            return
+        }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard sequence == searchSequence else { return }
+            DispatchQueue.main.async {
+                searchPending = false
+                guard let data = data,
+                      let response = try? JSONDecoder().decode(UserSearchResponse.self, from: data) else {
+                    searchResults = []
+                    searchStatusText = "Failed to search users."
+                    return
+                }
+
+                let ownUserId = appState.userId ?? -1
+                searchResults = response.users.filter { $0.id != ownUserId }
+                searchStatusText = searchResults.isEmpty ? "No matching users." : ""
+            }
+        }.resume()
+    }
+}
+
+struct FriendSearchResultRow: View {
+    let friend: Friend
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Color.zymSurfaceSoft)
+                .frame(width: 38, height: 38)
+                .overlay(
+                    Text(String(friend.username.prefix(2)).uppercased())
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.zymPrimary)
+                )
+
+            Text(friend.username)
+                .foregroundColor(Color.zymText)
+                .font(.system(size: 15, weight: .semibold))
+
+            Spacer()
+
+            Button("Add") { onAdd() }
+                .buttonStyle(ZYMPrimaryButton())
+        }
+        .zymCard()
     }
 }
 
@@ -229,6 +376,9 @@ struct AddFriendView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var appState: AppState
     @State private var username = ""
+    @State private var usernameSearchResults: [Friend] = []
+    @State private var usernameSearchPending = false
+    @State private var usernameSearchSequence = 0
     @State private var identifier = ""
     @State private var connectCode = ""
     @State private var connectId = ""
@@ -331,7 +481,7 @@ struct AddFriendView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
 
-                    TextField("Username", text: $username)
+                    TextField("Search username", text: $username)
                         .padding(12)
                         .background(Color.zymSurface)
                         .overlay(
@@ -339,6 +489,20 @@ struct AddFriendView: View {
                                 .stroke(Color.zymLine, lineWidth: 1)
                         )
                         .cornerRadius(12)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+
+                    if usernameSearchPending {
+                        Text("Searching usernames...")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+
+                    ForEach(usernameSearchResults, id: \.id) { friend in
+                        FriendSearchResultRow(friend: friend) {
+                            sendFriendRequest(to: friend.id)
+                        }
+                    }
 
                     if !statusText.isEmpty {
                         Text(statusText)
@@ -370,6 +534,9 @@ struct AddFriendView: View {
         .onReceive(refreshTimer) { _ in
             loadConnectCode(silent: true)
         }
+        .onChange(of: username) { _, value in
+            scheduleUsernameSearch(for: value)
+        }
         .sheet(isPresented: $showQRScanner) {
             NavigationView {
                 QRCodeScannerView { scannedCode in
@@ -398,6 +565,42 @@ struct AddFriendView: View {
                 onRefresh: { loadConnectCode() }
             )
         }
+    }
+
+    func sendFriendRequest(to friendId: Int) {
+        guard let userId = appState.userId,
+              let url = apiURL("/friends/add") else { return }
+
+        pending = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": friendId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                pending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if statusCode < 200 || statusCode >= 300 {
+                    if let data = data,
+                       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let message = payload["error"] as? String {
+                        statusText = message
+                    } else {
+                        statusText = "Failed to send request."
+                    }
+                    return
+                }
+                onAdd()
+                dismiss()
+            }
+        }.resume()
     }
 
     func addFriend() {
@@ -444,6 +647,51 @@ struct AddFriendView: View {
                 }
                 onAdd()
                 dismiss()
+            }
+        }.resume()
+    }
+
+    func scheduleUsernameSearch(for rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        usernameSearchSequence += 1
+        let currentSequence = usernameSearchSequence
+
+        guard trimmed.count >= 2 else {
+            usernameSearchPending = false
+            usernameSearchResults = []
+            return
+        }
+
+        usernameSearchPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            guard currentSequence == usernameSearchSequence else { return }
+            searchUsers(query: trimmed, sequence: currentSequence)
+        }
+    }
+
+    func searchUsers(query: String, sequence: Int) {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = apiURL("/users/search?q=\(encoded)") else {
+            DispatchQueue.main.async {
+                usernameSearchPending = false
+                usernameSearchResults = []
+            }
+            return
+        }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard sequence == usernameSearchSequence else { return }
+            DispatchQueue.main.async {
+                usernameSearchPending = false
+                guard let data = data,
+                      let response = try? JSONDecoder().decode(UserSearchResponse.self, from: data) else {
+                    usernameSearchResults = []
+                    return
+                }
+                let ownUserId = appState.userId ?? -1
+                usernameSearchResults = response.users.filter { $0.id != ownUserId }
             }
         }.resume()
     }
@@ -535,6 +783,10 @@ struct FriendsResponse: Codable {
 
 struct RequestsResponse: Codable {
     let requests: [Friend]
+}
+
+struct UserSearchResponse: Codable {
+    let users: [Friend]
 }
 
 struct DMOpenResponse: Codable {

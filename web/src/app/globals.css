@@ -279,8 +279,8 @@ select {
 
 .btn-primary {
   color: #fff;
-  background: linear-gradient(135deg, var(--coach-lc), var(--coach-lc-strong));
-  box-shadow: 0 12px 28px rgba(178, 103, 37, 0.24);
+  background: linear-gradient(135deg, rgba(75, 85, 99, 0.98), rgba(17, 24, 39, 0.98));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 .btn-ghost {
@@ -296,14 +296,14 @@ select {
 
 .btn-zj {
   color: #fff;
-  background: linear-gradient(135deg, var(--coach-zj), var(--coach-zj-strong));
-  box-shadow: 0 12px 28px rgba(74, 87, 201, 0.22);
+  background: linear-gradient(135deg, rgba(75, 85, 99, 0.98), rgba(17, 24, 39, 0.98));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 .btn-lc {
   color: #fff;
-  background: linear-gradient(135deg, var(--coach-lc), var(--coach-lc-strong));
-  box-shadow: 0 12px 28px rgba(178, 103, 37, 0.22);
+  background: linear-gradient(135deg, rgba(75, 85, 99, 0.98), rgba(17, 24, 39, 0.98));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 .bg-white\/45 {

@@ -13,6 +13,7 @@ export interface ConversationTileItem {
   unreadCount?: number;
   mentionCount?: number;
   avatarUrl?: string | null;
+  coachId?: 'zj' | 'lc';
 }
 
 interface ConversationTileProps {
@@ -35,18 +36,12 @@ function ConversationTileComponent({
   const name = item.name || displayNameFromTopic(item.topic);
   const unreadTotal = Number(item.unreadCount || 0) + Number(item.mentionCount || 0);
   const hasUnread = unreadTotal > 0;
-  const isLcCoach = item.type === 'coach' && name.toLowerCase().includes('lc');
-  const badgeTone = item.type === 'coach'
-    ? (isLcCoach ? 'bg-[rgba(242,138,58,0.12)] text-[color:var(--coach-lc)]' : 'bg-[rgba(105,121,247,0.12)] text-[color:var(--coach-zj)]')
-    : 'bg-slate-100 text-slate-500';
+  const coachId = item.coachId || (item.topic.startsWith('coach_lc_') ? 'lc' : 'zj');
+  const badgeTone = 'bg-slate-100 text-slate-500';
   const avatarTone = item.type === 'coach'
-    ? (isLcCoach ? 'bg-[rgba(242,138,58,0.14)] text-[color:var(--coach-lc)]' : 'bg-[rgba(105,121,247,0.14)] text-[color:var(--coach-zj)]')
+    ? (coachId === 'lc' ? 'bg-[rgba(242,138,58,0.14)] text-[color:var(--coach-lc)]' : 'bg-[rgba(105,121,247,0.14)] text-[color:var(--coach-zj)]')
     : 'bg-white text-slate-700';
-  const activeTone = item.type === 'coach'
-    ? (isLcCoach
-      ? 'border-[rgba(242,138,58,0.26)] bg-[rgba(242,138,58,0.08)] shadow-[0_14px_30px_rgba(242,138,58,0.12)]'
-      : 'border-[rgba(105,121,247,0.24)] bg-[rgba(105,121,247,0.08)] shadow-[0_14px_30px_rgba(105,121,247,0.12)]')
-    : 'border-slate-200/80 bg-white/75 shadow-[0_12px_28px_rgba(71,60,49,0.06)]';
+  const activeTone = 'border-[rgba(71,85,105,0.18)] bg-[rgba(71,85,105,0.08)] shadow-[0_14px_30px_rgba(15,23,42,0.10)]';
   const badgeLabel = item.type === 'coach' ? 'COACH' : item.type.toUpperCase();
   return (
     <button

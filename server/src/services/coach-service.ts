@@ -14,6 +14,7 @@ import { logger } from '../utils/logger.js';
 import { MediaAssetService } from './media-asset-service.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
 import { buildCoachTopic } from './message-service.js';
+import { resolveSelectedCoachForUser } from '../utils/coach-prefs.js';
 
 function buildGuardrailPrompt() {
   return `[SAFETY GUARDRAILS]
@@ -223,8 +224,7 @@ function toolStatusLabel(toolName: string): string {
 export class CoachService {
   static async getCoachPrompt(userId: string, coachOverride?: CoachId): Promise<string> {
     const forcedCoach = normalizeCoachId(coachOverride);
-    const user = getDB().prepare('SELECT selected_coach FROM users WHERE id = ?').get(userId) as any;
-    const coach = forcedCoach || normalizeCoachId(user?.selected_coach) || 'zj';
+    const coach = forcedCoach || resolveSelectedCoachForUser(Number(userId)) || 'zj';
     const soulPath = path.join(process.cwd(), `src/coach/${coach}.soul.md`);
     return fs.readFileSync(soulPath, 'utf-8');
   }
@@ -431,7 +431,7 @@ export class CoachService {
     const basePrompt = await this.getCoachPrompt(userId, options.coachOverride);
     const activeSkill = await loadSkill('coach');
     const coachId = normalizeCoachId(options.coachOverride)
-      || normalizeCoachId((getDB().prepare('SELECT selected_coach FROM users WHERE id = ?').get(userId) as any)?.selected_coach)
+      || resolveSelectedCoachForUser(Number(userId))
       || 'zj';
     const conversationKey = options.conversationKey || buildCoachTopic(Number(userId), coachId);
     const { session, sessionFile } = await this.prepareSession(userId, [], conversationKey);

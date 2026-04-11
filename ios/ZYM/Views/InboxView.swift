@@ -2,16 +2,13 @@ import SwiftUI
 
 struct InboxView: View {
     @State private var conversations: [Conversation] = []
-    @State private var mentions: [MentionNotificationItem] = []
     @State private var showAddMenu = false
     @State private var showAddFriend = false
     @State private var showCreateGroup = false
-    @State private var showMentionsSheet = false
+    @State private var showAddCoach = false
+    @State private var showConnectionsSheet = false
+    @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
-
-    private var unreadMentionsCount: Int {
-        mentions.filter { !$0.is_read }.count
-    }
 
     var body: some View {
         NavigationView {
@@ -19,75 +16,134 @@ struct InboxView: View {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conv in
-                            NavigationLink(destination: ConversationView(conversation: conv)) {
-                                ConversationRow(conversation: conv)
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .top) {
+                            InboxHeaderIconButton(symbol: "magnifyingglass") {
+                                showAddMenu = false
+                                showConnectionsSheet = true
                             }
-                            .buttonStyle(.plain)
-                            .zymAppear(delay: Double(index) * 0.03)
+
+                            Spacer(minLength: 16)
+
+                            VStack(alignment: .trailing, spacing: 8) {
+                                InboxHeaderIconButton(
+                                    symbol: "plus",
+                                    rotation: showAddMenu ? 45 : 0
+                                ) {
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        showAddMenu.toggle()
+                                    }
+                                }
+
+                                if showAddMenu {
+                                    QuickActionMenu {
+                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                            showAddMenu = false
+                                        }
+                                        showAddFriend = true
+                                    } onCreateGroup: {
+                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                            showAddMenu = false
+                                        }
+                                        showCreateGroup = true
+                                    } onAddCoach: {
+                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                            showAddMenu = false
+                                        }
+                                        showAddCoach = true
+                                    }
+                                    .transition(
+                                        .opacity
+                                            .combined(with: .move(edge: .top))
+                                            .combined(with: .scale(scale: 0.96, anchor: .topTrailing))
+                                    )
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        Text("Chats")
+                            .font(.system(size: 34, weight: .bold))
+                            .foregroundColor(Color.zymText)
+                            .padding(.top, showAddMenu ? 2 : 0)
+
+                        VStack(spacing: 10) {
+                            ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conv in
+                                NavigationLink(destination: ConversationView(conversation: conv)) {
+                                    ConversationRow(conversation: conv)
+                                }
+                                .buttonStyle(.plain)
+                                .zymAppear(delay: Double(index) * 0.03)
+                            }
                         }
                     }
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
+                    .padding(.bottom, 20)
                 }
             }
-            .navigationTitle("Chats")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: { showMentionsSheet = true }) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell")
-                                .foregroundColor(Color.zymPrimary)
-                            if unreadMentionsCount > 0 {
-                                Text("\(min(unreadMentionsCount, 99))")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.zymPrimary)
-                                    .clipShape(Capsule())
-                                    .offset(x: 9, y: -7)
-                            }
-                        }
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showAddMenu = true }) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(Color.zymPrimary)
-                    }
-                }
-            }
-            .confirmationDialog("Quick Actions", isPresented: $showAddMenu) {
-                Button("Add Friend") { showAddFriend = true }
-                Button("Create Group") { showCreateGroup = true }
-                Button("Cancel", role: .cancel) {}
+            .navigationBarHidden(true)
+            .sheet(isPresented: $showConnectionsSheet) {
+                FriendsView()
+                    .environmentObject(appState)
             }
             .sheet(isPresented: $showAddFriend) {
                 AddFriendView(onAdd: loadInbox)
+                    .environmentObject(appState)
             }
             .sheet(isPresented: $showCreateGroup) {
                 CreateGroupView(onCreate: loadInbox)
+                    .environmentObject(appState)
             }
-            .sheet(isPresented: $showMentionsSheet) {
-                MentionsInboxSheet(
-                    mentions: mentions,
-                    onRefresh: loadMentions,
-                    onMarkAllRead: markMentionsRead
+            .sheet(isPresented: $showAddCoach) {
+                AddCoachView(
+                    enabledCoachIds: conversations.compactMap { $0.isCoach ? $0.coachId : nil },
+                    onChanged: loadInbox
                 )
+                .environmentObject(appState)
             }
-            .onAppear(perform: loadInbox)
+            .onAppear {
+                loadInbox()
+                connectRealtime()
+            }
+            .onDisappear {
+                wsManager.disconnect()
+            }
             .onChange(of: appState.selectedCoach) { _, _ in
                 loadInbox()
             }
+            .onChange(of: appState.token) { _, token in
+                guard let token, !token.isEmpty else {
+                    wsManager.disconnect()
+                    return
+                }
+                wsManager.connect(token: token)
+            }
         }
+    }
+
+    private func connectRealtime() {
+        guard let token = appState.token, !token.isEmpty else { return }
+
+        wsManager.onEvent = { event in
+            switch event {
+            case .authSuccess:
+                loadInbox()
+            case .authFailed:
+                appState.logout()
+            case .inboxUpdated, .friendsUpdated:
+                loadInbox()
+            default:
+                break
+            }
+        }
+
+        wsManager.connect(token: token)
     }
 
     func loadInbox() {
         guard let userId = appState.userId else { return }
 
-        let coachName = appState.selectedCoach == "lc" ? "LC Coach" : "ZJ Coach"
         guard let inboxURL = apiURL("/messages/inbox/\(userId)") else { return }
         let friendsURL = apiURL("/friends/\(userId)")
 
@@ -118,34 +174,43 @@ struct InboxView: View {
         }
 
         group.notify(queue: .main) {
-            var convs: [Conversation] = [
+            var convs: [Conversation] = (inboxResponse?.coaches ?? []).map { coach in
                 Conversation(
-                    id: "coach_\(userId)",
-                    name: coachName,
+                    id: coach.topic,
+                    name: coach.coach_name ?? (coach.coach_id == "lc" ? "LC Coach" : "ZJ Coach"),
                     isGroup: false,
                     isCoach: true,
+                    coachId: coach.coach_id,
                     coachEnabled: nil,
                     avatarUrl: nil,
                     otherUserId: nil,
-                    unreadCount: inboxResponse?.coach?.unread_count ?? 0,
-                    mentionCount: inboxResponse?.coach?.mention_count ?? 0
+                    previewText: coach.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                        ? (coach.last_message_preview ?? "")
+                        : "Your coach conversation lives here.",
+                    unreadCount: coach.unread_count ?? 0,
+                    mentionCount: coach.mention_count ?? 0
                 )
-            ]
+            }
 
             let dms = inboxResponse?.dms ?? []
             let groups = inboxResponse?.groups ?? []
             let dmTopics = Set(dms.map(\.topic))
 
             for dm in dms {
+                let preview = dm.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? (dm.last_message_preview ?? "")
+                    : "Start chatting"
                 convs.append(
                     Conversation(
                         id: dm.topic,
                         name: dm.username ?? "User \(dm.other_user_id)",
                         isGroup: false,
                         isCoach: false,
+                        coachId: nil,
                         coachEnabled: nil,
                         avatarUrl: dm.avatar_url,
                         otherUserId: Int(dm.other_user_id),
+                        previewText: preview,
                         unreadCount: dm.unread_count ?? 0,
                         mentionCount: dm.mention_count ?? 0
                     )
@@ -163,9 +228,11 @@ struct InboxView: View {
                         name: friend.username,
                         isGroup: false,
                         isCoach: false,
+                        coachId: nil,
                         coachEnabled: nil,
                         avatarUrl: friend.avatar_url,
                         otherUserId: friend.id,
+                        previewText: "Start chatting",
                         unreadCount: 0,
                         mentionCount: 0
                     )
@@ -173,15 +240,20 @@ struct InboxView: View {
             }
 
             for group in groups {
+                let preview = group.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? (group.last_message_preview ?? "")
+                    : ((group.coach_enabled == "none") ? "Coach disabled" : "Mention @coach to bring AI into the chat")
                 convs.append(
                     Conversation(
                         id: group.topic,
                         name: group.name,
                         isGroup: true,
                         isCoach: false,
+                        coachId: nil,
                         coachEnabled: group.coach_enabled,
                         avatarUrl: nil,
                         otherUserId: nil,
+                        previewText: preview,
                         unreadCount: group.unread_count ?? 0,
                         mentionCount: group.mention_count ?? 0
                     )
@@ -189,116 +261,177 @@ struct InboxView: View {
             }
 
             conversations = convs
-            loadMentions()
         }
     }
+}
 
-    func loadMentions() {
-        guard let userId = appState.userId,
-              let url = apiURL("/notifications/mentions/\(userId)") else { return }
-        var request = URLRequest(url: url)
-        applyAuthorizationHeader(&request, token: appState.token)
-        authorizedDataTask(appState: appState, request: request) { data, _, _ in
-            guard let data = data,
-                  let response = try? JSONDecoder().decode(MentionsInboxResponse.self, from: data) else { return }
-            DispatchQueue.main.async {
-                mentions = response.mentions
+private struct InboxHeaderIconButton: View {
+    let symbol: String
+    var rotation: Double = 0
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.94))
+                    .frame(width: 56, height: 56)
+                    .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
+
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(Color.zymPrimary)
+                    .rotationEffect(.degrees(rotation))
             }
-        }.resume()
+        }
+        .buttonStyle(.plain)
     }
+}
 
-    func markMentionsRead() {
-        guard let userId = appState.userId,
-              let url = apiURL("/notifications/mentions/read") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuthorizationHeader(&request, token: appState.token)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId])
+private struct QuickActionMenu: View {
+    let onAddFriend: () -> Void
+    let onCreateGroup: () -> Void
+    let onAddCoach: () -> Void
 
-        authorizedDataTask(appState: appState, request: request) { _, _, _ in
-            DispatchQueue.main.async {
-                mentions = mentions.map { item in
-                    var copy = item
-                    copy.is_read = true
-                    return copy
-                }
+    var body: some View {
+        VStack(spacing: 0) {
+            QuickActionMenuRow(
+                title: "Add Friend",
+                systemImage: "person.badge.plus",
+                action: onAddFriend
+            )
+
+            Divider()
+                .overlay(Color.white.opacity(0.14))
+                .padding(.leading, 48)
+
+            QuickActionMenuRow(
+                title: "Create Group",
+                systemImage: "message.badge",
+                action: onCreateGroup
+            )
+
+            Divider()
+                .overlay(Color.white.opacity(0.14))
+                .padding(.leading, 48)
+
+            QuickActionMenuRow(
+                title: "Add Coach",
+                systemImage: "sparkles",
+                action: onAddCoach
+            )
+        }
+        .frame(width: 212)
+        .background(Color.black.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct QuickActionMenuRow: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 20)
+
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+
+                Spacer(minLength: 0)
             }
-        }.resume()
+            .foregroundColor(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
     }
 }
 
 struct ConversationRow: View {
     let conversation: Conversation
-    @EnvironmentObject var appState: AppState
+
+    private var totalUnreadCount: Int {
+        max(0, conversation.unreadCount + conversation.mentionCount)
+    }
+
+    private var avatarLabel: String {
+        if conversation.isCoach {
+            return (conversation.coachId ?? "zj").uppercased()
+        }
+        let trimmed = conversation.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = trimmed.split(separator: " ").prefix(2)
+        let initials = tokens.map { String($0.prefix(1)).uppercased() }.joined()
+        if !initials.isEmpty {
+            return initials
+        }
+        return String(trimmed.prefix(1)).uppercased()
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        Circle()
-                            .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
+            ZStack(alignment: .topTrailing) {
+                if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
+                        }
                     }
-                }
-                .frame(width: 46, height: 46)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.zymLine, lineWidth: 1)
-                )
-            } else {
-                Circle()
-                    .fill(conversation.isCoach ? Color.zymCoachAccent(appState.selectedCoach) : Color.zymSurfaceSoft)
-                    .frame(width: 46, height: 46)
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
-                        Text(conversation.isCoach ? (appState.selectedCoach == "lc" ? "LC" : "ZJ") : (conversation.isGroup ? "GR" : "DM"))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.zymLine, lineWidth: 1)
                     )
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
+                        .frame(width: 50, height: 50)
+                        .overlay(
+                            Text(avatarLabel)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
+                        )
+                }
+
+                if totalUnreadCount > 0 {
+                    Text(totalUnreadCount > 99 ? "99+" : "\(totalUnreadCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, totalUnreadCount > 9 ? 6 : 5)
+                        .padding(.vertical, 3)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                        .offset(x: 8, y: -7)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(conversation.name)
                     .foregroundColor(Color.zymText)
                     .font(.custom("Syne", size: 16))
                     .fontWeight(.semibold)
+                    .lineLimit(1)
 
-                Text(conversation.isCoach ? "AI Coach" : (conversation.isGroup ? "Group chat" : "Direct message"))
+                Text(conversation.previewText)
                     .foregroundColor(Color.zymSubtext)
-                    .font(.system(size: 12))
-                if conversation.isGroup {
-                    Text((conversation.coachEnabled == "none") ? "Coach disabled" : "Coach available via @coach")
-                        .foregroundColor(Color.zymSubtext.opacity(0.9))
-                        .font(.system(size: 11))
-                }
+                    .font(.system(size: 13))
+                    .lineLimit(1)
             }
+
             Spacer()
-
-            if conversation.mentionCount > 0 {
-                Text("@\(conversation.mentionCount)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(Color.zymSecondaryDark)
-                    .clipShape(Capsule())
-            }
-
-            if conversation.unreadCount > 0 {
-                Text("\(min(conversation.unreadCount, 99))")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(Color.zymPrimary)
-                    .clipShape(Capsule())
-            }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
@@ -313,20 +446,25 @@ struct Conversation: Identifiable {
     let name: String
     let isGroup: Bool
     let isCoach: Bool
+    let coachId: String?
     let coachEnabled: String?
     let avatarUrl: String?
     let otherUserId: Int?
+    let previewText: String
     let unreadCount: Int
     let mentionCount: Int
 }
 
 struct InboxResponse: Codable {
     let coach: InboxCoach?
+    let coaches: [InboxCoach]?
     let dms: [DMConv]
     let groups: [GroupConv]
 }
 
 struct InboxCoach: Codable {
+    let coach_id: String
+    let coach_name: String?
     let topic: String
     let last_message_at: String?
     let last_message_preview: String?
@@ -340,6 +478,7 @@ struct DMConv: Codable {
     let username: String?
     let avatar_url: String?
     let last_message_at: String?
+    let last_message_preview: String?
     let unread_count: Int?
     let mention_count: Int?
 }
@@ -349,6 +488,7 @@ struct GroupConv: Codable {
     let topic: String
     let name: String
     let last_message_at: String?
+    let last_message_preview: String?
     let coach_enabled: String?
     let unread_count: Int?
     let mention_count: Int?
@@ -360,28 +500,44 @@ private func buildP2PTopic(_ userA: Int, _ userB: Int) -> String {
     return "p2p_\(left)_\(right)"
 }
 
-struct MentionNotificationItem: Codable, Identifiable {
-    let id: Int
-    let topic: String?
-    let message_id: Int?
-    let source_type: String
-    let source_id: Int
-    let snippet: String
-    var is_read: Bool
-    let created_at: String
-    let actor_user_id: Int?
-    let actor_username: String?
+private struct CoachCatalogCard: Identifiable {
+    let id: String
+    let title: String
+    let badge: String
+    let description: String
 }
 
-struct MentionsInboxResponse: Codable {
-    let mentions: [MentionNotificationItem]
+private struct EnableCoachResponse: Codable {
+    let success: Bool
+    let coach: String?
+    let selectedCoach: String?
+    let enabledCoaches: [String]?
 }
 
-struct MentionsInboxSheet: View {
-    let mentions: [MentionNotificationItem]
-    let onRefresh: () -> Void
-    let onMarkAllRead: () -> Void
+struct AddCoachView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
+
+    let enabledCoachIds: [String]
+    let onChanged: () -> Void
+
+    @State private var pendingCoachId: String?
+    @State private var statusText = ""
+
+    private let coaches: [CoachCatalogCard] = [
+        CoachCatalogCard(
+            id: "zj",
+            title: "ZJ Coach",
+            badge: "Encouraging",
+            description: "Supportive, steady, and momentum-focused."
+        ),
+        CoachCatalogCard(
+            id: "lc",
+            title: "LC Coach",
+            badge: "Strict",
+            description: "Direct, structured, and accountability-first."
+        ),
+    ]
 
     var body: some View {
         NavigationView {
@@ -389,49 +545,132 @@ struct MentionsInboxSheet: View {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 8) {
-                        if mentions.isEmpty {
-                            Text("No mentions yet.")
-                                .foregroundColor(Color.zymSubtext)
-                                .font(.system(size: 13))
-                                .padding(.top, 20)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Enable a coach chat. Each coach keeps a separate conversation history while your profile, meals, and training records stay shared.")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color.zymSubtext)
+
+                        ForEach(coaches) { coach in
+                            let isEnabled = enabledCoachIds.contains(coach.id)
+
+                            HStack(alignment: .top, spacing: 12) {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.zymCoachAccent(coach.id))
+                                    .frame(width: 52, height: 52)
+                                    .overlay(
+                                        Text(coach.id.uppercased())
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(.white)
+                                    )
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Text(coach.title)
+                                            .font(.custom("Syne", size: 20))
+                                            .foregroundColor(Color.zymText)
+
+                                        Text(coach.badge.uppercased())
+                                            .font(.system(size: 10, weight: .bold))
+                                            .tracking(1.2)
+                                            .foregroundColor(Color.zymSubtext)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(Color.white.opacity(0.78))
+                                            .clipShape(Capsule())
+                                    }
+
+                                    Text(coach.description)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Color.zymSubtext)
+
+                                    Button {
+                                        if isEnabled {
+                                            onChanged()
+                                            dismiss()
+                                        } else {
+                                            enableCoach(coach.id)
+                                        }
+                                    } label: {
+                                        Text(buttonTitle(for: coach.id, isEnabled: isEnabled))
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(ZYMPrimaryButton())
+                                    .disabled(pendingCoachId != nil)
+                                }
+                            }
+                            .padding(16)
+                            .background(Color.white.opacity(0.88))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(Color.zymLine, lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         }
 
-                        ForEach(mentions) { mention in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(mention.actor_username ?? "Someone")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(Color.zymText)
-                                    Spacer()
-                                    Text(String(mention.created_at.prefix(16)))
-                                        .font(.system(size: 11))
-                                        .foregroundColor(Color.zymSubtext)
-                                }
-                                Text(mention.snippet)
-                                    .font(.system(size: 13))
-                                    .foregroundColor(Color.zymText)
-                                    .lineLimit(3)
-                            }
-                            .zymCard()
+                        if !statusText.isEmpty {
+                            Text(statusText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymSubtext)
                         }
                     }
-                    .padding(14)
+                    .padding(18)
                 }
             }
-            .navigationTitle("Mentions")
+            .navigationTitle("Add Coach")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Refresh") { onRefresh() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Mark Read") { onMarkAllRead() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Close") { dismiss() }
+                        .foregroundColor(Color.zymSubtext)
                 }
             }
         }
+    }
+
+    private func buttonTitle(for coachId: String, isEnabled: Bool) -> String {
+        if pendingCoachId == coachId {
+            return "Adding..."
+        }
+        return isEnabled ? "Open In Chats" : "Interact"
+    }
+
+    private func enableCoach(_ coachId: String) {
+        guard pendingCoachId == nil,
+              let userId = appState.userId,
+              let url = apiURL("/coach/enable") else { return }
+
+        pendingCoachId = coachId
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "coach": coachId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                defer { pendingCoachId = nil }
+
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    statusText = parseAPIErrorMessage(from: data) ?? "Failed to add coach."
+                    return
+                }
+
+                if let data,
+                   let decoded = try? JSONDecoder().decode(EnableCoachResponse.self, from: data),
+                   let selectedCoach = decoded.selectedCoach,
+                   !selectedCoach.isEmpty {
+                    appState.selectedCoach = selectedCoach
+                }
+
+                onChanged()
+                dismiss()
+            }
+        }.resume()
     }
 }

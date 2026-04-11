@@ -17,6 +17,7 @@ import {
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
+import { resolveSelectedCoachForUser } from '../utils/coach-prefs.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
 import { computeCoachProgressSummary, normalizeCoachCheckIn } from '../utils/coach-progress.js';
 
@@ -753,8 +754,7 @@ export class CoachTypedToolsService {
   }
 
   private resolveCoachId(userId: string): 'zj' | 'lc' {
-    const row = getDB().prepare('SELECT selected_coach FROM users WHERE id = ?').get(userId) as { selected_coach?: string | null } | undefined;
-    return safeString(row?.selected_coach, 10) === 'lc' ? 'lc' : 'zj';
+    return resolveSelectedCoachForUser(Number(userId)) || 'zj';
   }
 
   private async hydrateTrainingPlanEntry(

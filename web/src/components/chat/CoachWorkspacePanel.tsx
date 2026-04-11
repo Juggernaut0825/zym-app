@@ -982,7 +982,7 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
                         <path
                           d={avgChart.path}
                           fill="none"
-                          stroke={coachId === 'lc' ? 'rgba(242,138,58,0.98)' : 'rgba(105,121,247,0.98)'}
+                          stroke="rgba(55,65,81,0.98)"
                           strokeWidth="4"
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -1013,8 +1013,8 @@ export function CoachWorkspacePanel(props: CoachWorkspacePanelProps) {
                       type="button"
                       className={`rounded-[18px] border p-3 text-left transition ${isSelected ? 'shadow-[0_18px_36px_rgba(15,23,42,0.08)]' : 'hover:-translate-y-0.5 hover:bg-white'}`}
                       style={isSelected ? {
-                        borderColor: coachId === 'lc' ? 'rgba(242,138,58,0.3)' : 'rgba(105,121,247,0.3)',
-                        background: coachId === 'lc' ? 'rgba(242,138,58,0.08)' : 'rgba(105,121,247,0.08)',
+                        borderColor: 'rgba(71,85,105,0.3)',
+                        background: 'rgba(71,85,105,0.08)',
                       } : {
                         borderColor: 'rgba(226,232,240,0.9)',
                         background: 'rgba(248,250,252,0.8)',

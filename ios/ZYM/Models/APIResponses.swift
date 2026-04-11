@@ -68,6 +68,7 @@ struct AuthLoginResponse: Codable {
     let userId: Int
     let username: String?
     let selectedCoach: String?
+    let enabledCoaches: [String]?
     let timezone: String?
 }
 

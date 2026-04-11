@@ -74,6 +74,21 @@ function sanitizeUsernameSeed(value: string): string {
   return `${sliced || 'zym'}user`.slice(0, 32);
 }
 
+function createPublicUuid(): string {
+  return `uuid_${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+function issueUniquePublicUuid(): string {
+  const existing = getDB().prepare('SELECT id FROM users WHERE public_uuid = ? LIMIT 1');
+  for (let attempts = 0; attempts < 40; attempts += 1) {
+    const candidate = createPublicUuid();
+    if (!existing.get(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('Failed to allocate a unique public user id.');
+}
+
 function createAccessToken(userId: number, sessionId: string): string {
   return jwt.sign(
     { userId, sid: sessionId },
@@ -150,9 +165,10 @@ export class AuthService {
     const hash = await bcrypt.hash(password, 10);
     const normalizedEmail = normalizeEmail(email);
     const db = getDB();
+    const publicUuid = issueUniquePublicUuid();
     const result = db
-      .prepare('INSERT INTO users (username, email, password_hash, selected_coach) VALUES (?, ?, ?, NULL)')
-      .run(username, normalizedEmail, hash);
+      .prepare('INSERT INTO users (username, email, password_hash, selected_coach, public_uuid) VALUES (?, ?, ?, NULL, ?)')
+      .run(username, normalizedEmail, hash, publicUuid);
 
     const userId = Number(result.lastInsertRowid || 0);
     if (userId > 0 && options?.healthDisclaimerAccepted) {
@@ -512,10 +528,11 @@ export class AuthService {
         throw new Error('Please confirm the health disclaimer before continuing with Google.');
       }
       const username = this.generateUniqueUsername(identity.name || identity.email.split('@')[0] || 'zymuser');
+      const publicUuid = issueUniquePublicUuid();
       const result = db.prepare(`
-        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, google_sub)
-        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?)
-      `).run(username, identity.email, identity.sub);
+        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, google_sub, public_uuid)
+        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
+      `).run(username, identity.email, identity.sub, publicUuid);
       const userId = Number(result.lastInsertRowid || 0);
       if (userId > 0) {
         db.prepare(`

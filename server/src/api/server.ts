@@ -44,6 +44,13 @@ import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { ensureAppDataDirs, resolveUploadsDir } from '../config/app-paths.js';
 import { getRuntimeHealthReport } from '../health/runtime-health.js';
 import { computeCoachProgressSummary, normalizeCoachCheckIn, type CoachCheckIn } from '../utils/coach-progress.js';
+import {
+  enableCoachForUser,
+  normalizeCoachId,
+  resolveEnabledCoachesForUser,
+  resolveSelectedCoachForUser,
+  type CoachId,
+} from '../utils/coach-prefs.js';
 
 ensureAppDataDirs();
 const uploadsDir = resolveUploadsDir();
@@ -62,6 +69,8 @@ const ALLOWED_MEDIA_URL_PROTOCOLS = new Set(['http:', 'https:']);
 const PROFILE_UPLOAD_SOURCES = new Set([
   'web_profile_avatar',
   'web_profile_background',
+  'ios_profile_avatar',
+  'ios_profile_background',
 ]);
 
 const storage = multer.diskStorage({
@@ -353,53 +362,7 @@ function getCoachDailyPath(userId: number): string {
 }
 
 function normalizeSelectedCoach(value: unknown): 'zj' | 'lc' | null {
-  return value === 'lc' || value === 'zj' ? value : null;
-}
-
-function inferSelectedCoachFromHistory(userId: number): 'zj' | 'lc' | null {
-  const db = getDB();
-  const legacyTopic = `coach_${userId}`;
-  const zjTopic = `coach_zj_${userId}`;
-  const lcTopic = `coach_lc_${userId}`;
-
-  const latestMessage = db.prepare(`
-    SELECT topic
-    FROM messages
-    WHERE topic IN (?, ?, ?)
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(legacyTopic, zjTopic, lcTopic) as { topic?: string | null } | undefined;
-
-  const latestTopic = String(latestMessage?.topic || '').trim();
-  if (latestTopic === lcTopic) return 'lc';
-  if (latestTopic === zjTopic || latestTopic === legacyTopic) return 'zj';
-
-  const latestOutreach = db.prepare(`
-    SELECT coach_id
-    FROM coach_outreach_events
-    WHERE user_id = ?
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(userId) as { coach_id?: string | null } | undefined;
-
-  return normalizeSelectedCoach(latestOutreach?.coach_id);
-}
-
-function resolveSelectedCoachForUser(userId: number): 'zj' | 'lc' | null {
-  const db = getDB();
-  const user = db
-    .prepare('SELECT selected_coach FROM users WHERE id = ?')
-    .get(userId) as { selected_coach?: string | null } | undefined;
-  const persisted = normalizeSelectedCoach(user?.selected_coach);
-  if (persisted) {
-    return persisted;
-  }
-
-  const inferred = inferSelectedCoachFromHistory(userId);
-  if (inferred) {
-    db.prepare('UPDATE users SET selected_coach = ? WHERE id = ?').run(inferred, userId);
-  }
-  return inferred;
+  return normalizeCoachId(value);
 }
 
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
@@ -1406,6 +1369,7 @@ app.post('/auth/login',
     const db = getDB();
     const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(result.userId) as any;
     const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
+    const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
     if (Array.isArray(result.revokedSessionIds) && result.revokedSessionIds.length > 0) {
       const ws = WSServer.getInstance();
       for (const revokedSessionId of result.revokedSessionIds) {
@@ -1424,6 +1388,7 @@ app.post('/auth/login',
       ...result,
       username: user?.username,
       selectedCoach,
+      enabledCoaches,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -1477,6 +1442,7 @@ app.post('/auth/google',
       const db = getDB();
       const user = db.prepare('SELECT id, username, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
       const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
+      const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
 
       trackSecurityEvent(req, 'auth_google_login_success', {
         userId: Number(result.userId),
@@ -1490,6 +1456,7 @@ app.post('/auth/google',
         ...result,
         username: user?.username,
         selectedCoach,
+        enabledCoaches,
         timezone: user?.timezone || null,
       });
     } catch (err: any) {
@@ -1547,11 +1514,13 @@ app.post('/auth/refresh',
     const db = getDB();
     const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(refreshed.userId) as any;
     const selectedCoach = resolveSelectedCoachForUser(Number(refreshed.userId));
+    const enabledCoaches = resolveEnabledCoachesForUser(Number(refreshed.userId));
 
     res.json({
       ...refreshed,
       username: user?.username,
       selectedCoach,
+      enabledCoaches,
       timezone: user?.timezone || null,
     });
   } catch (err: any) {
@@ -1901,9 +1870,10 @@ app.get('/users/search', (req, res) => {
   }
 
   const users = getDB().prepare(
-    'SELECT id, username, avatar_url FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT 12',
+    'SELECT id, public_uuid, username, avatar_url FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT 12',
   ).all(`%${q}%`).map((row: any) => ({
     id: Number(row.id),
+    public_uuid: String(row.public_uuid || '').trim() || null,
     username: String(row.username || ''),
     avatar_url: mediaUrlForClient(req, row.avatar_url),
   }));
@@ -1916,7 +1886,7 @@ app.get('/users/public/:id', (req, res) => {
   const db = getDB();
 
   const user = db
-    .prepare('SELECT id, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?')
+    .prepare('SELECT id, public_uuid, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?')
     .get(targetUserId) as any;
   if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -1931,6 +1901,7 @@ app.get('/users/public/:id', (req, res) => {
   const friendshipStatus = authUserId === targetUserId ? 'self' : (relation?.status || 'none');
   res.json({
     id: user.id,
+    public_uuid: String(user.public_uuid || '').trim() || null,
     username: user.username,
     avatar_url: mediaUrlForClient(req, user.avatar_url),
     bio: user.bio,
@@ -1947,10 +1918,11 @@ app.get('/users/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const user = getDB().prepare('SELECT id, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?').get(targetUserId) as any;
+  const user = getDB().prepare('SELECT id, public_uuid, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?').get(targetUserId) as any;
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({
     id: Number(user.id),
+    public_uuid: String(user.public_uuid || '').trim() || null,
     username: String(user.username || ''),
     avatar_url: mediaUrlForClient(req, user.avatar_url),
     bio: user.bio || null,
@@ -1961,9 +1933,21 @@ app.get('/users/:id', (req, res) => {
 app.post('/coach/select', requireSameUserIdFromBody('userId'), async (req, res) => {
   try {
     const userId = toUserId(req.body.userId);
-    const coach = req.body.coach === 'lc' ? 'lc' : 'zj';
-    getDB().prepare('UPDATE users SET selected_coach = ? WHERE id = ?').run(coach, userId);
-    res.json({ success: true, selectedCoach: coach });
+    const coach = normalizeCoachId(req.body.coach) || 'zj';
+    const enabledCoaches = enableCoachForUser(userId, coach, true);
+    res.json({ success: true, selectedCoach: coach, enabledCoaches });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/coach/enable', requireSameUserIdFromBody('userId'), async (req, res) => {
+  try {
+    const userId = toUserId(req.body.userId);
+    const coach = normalizeCoachId(req.body.coach) || 'zj';
+    const enabledCoaches = enableCoachForUser(userId, coach, false);
+    const selectedCoach = resolveSelectedCoachForUser(userId);
+    res.json({ success: true, coach, selectedCoach, enabledCoaches });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -2826,12 +2810,13 @@ app.get('/groups/user/:userId', requireSameUserIdFromParam('userId'), async (req
 app.get('/profile/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   const db = getDB();
   const user = db
-    .prepare('SELECT id, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, timezone FROM users WHERE id = ?')
+    .prepare('SELECT id, public_uuid, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?')
     .get(req.params.userId) as any;
 
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({
     ...user,
+    enabled_coaches: resolveEnabledCoachesForUser(Number(user.id)),
     avatar_url: mediaUrlForClient(req, user.avatar_url),
     background_url: mediaUrlForClient(req, user.background_url),
   });
@@ -2843,7 +2828,7 @@ app.get('/profile/public/:userId', async (req, res) => {
   const db = getDB();
 
   const user = db
-    .prepare('SELECT id, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, timezone FROM users WHERE id = ?')
+    .prepare('SELECT id, public_uuid, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?')
     .get(targetUserId) as any;
 
   if (!user) {
@@ -2883,7 +2868,8 @@ app.get('/profile/public/:userId', async (req, res) => {
         bio: null,
         fitness_goal: null,
         hobbies: null,
-        selected_coach: user.selected_coach === 'lc' || user.selected_coach === 'zj' ? user.selected_coach : null,
+        selected_coach: normalizeSelectedCoach(user.selected_coach),
+        enabled_coaches: resolveEnabledCoachesForUser(targetUserId),
         timezone: null,
       },
       today_health: null,
@@ -2919,6 +2905,7 @@ app.get('/profile/public/:userId', async (req, res) => {
     isFriend: authUserId === targetUserId ? true : isFriend(authUserId, targetUserId),
     profile: {
       ...user,
+      enabled_coaches: resolveEnabledCoachesForUser(targetUserId),
       avatar_url: mediaUrlForClient(req, user.avatar_url),
       background_url: mediaUrlForClient(req, user.background_url),
     },
@@ -3058,9 +3045,11 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
     const trainingCount = records.reduce((sum, day) => sum + day.training.length, 0);
     const checkInCount = records.reduce((sum, day) => sum + (day.check_in ? 1 : 0), 0);
     const selectedCoach = resolveSelectedCoachForUser(userId);
+    const enabledCoaches = resolveEnabledCoachesForUser(userId);
 
     res.json({
       selectedCoach,
+      enabledCoaches,
       profile,
       progress: progressSummary,
       records,

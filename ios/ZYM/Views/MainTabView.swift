@@ -18,18 +18,9 @@ struct MainTabView: View {
                         Text("Chats")
                     }
 
-                FriendsView()
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .tag(1)
-                    .tabItem {
-                        Image(systemName: "person.2.crop.square.stack.fill")
-                            .symbolEffect(.bounce, value: selectedTab)
-                        Text("Friends")
-                    }
-
                 FeedView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .tag(2)
+                    .tag(1)
                     .tabItem {
                         Image(systemName: "sparkles.rectangle.stack.fill")
                             .symbolEffect(.bounce, value: selectedTab)
@@ -38,7 +29,7 @@ struct MainTabView: View {
 
                 LeaderboardView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .tag(3)
+                    .tag(2)
                     .tabItem {
                         Image(systemName: "trophy.fill")
                             .symbolEffect(.bounce, value: selectedTab)
@@ -47,7 +38,7 @@ struct MainTabView: View {
 
                 ProfileView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .tag(4)
+                    .tag(3)
                     .tabItem {
                         Image(systemName: "person.crop.circle.fill")
                             .symbolEffect(.bounce, value: selectedTab)

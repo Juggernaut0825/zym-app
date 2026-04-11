@@ -1,7 +1,6 @@
 import { getDB } from '../database/runtime-db.js';
 import { stripCoachMentions } from '../utils/coach-mention.js';
-
-type CoachId = 'zj' | 'lc';
+import { coachDisplayName, normalizeCoachId, resolveEnabledCoachesForUser, type CoachId } from '../utils/coach-prefs.js';
 
 export interface ParsedMessage {
   id: number;
@@ -55,10 +54,6 @@ function parseP2PTopic(topic: string): { userA: number; userB: number } | null {
   return { userA, userB };
 }
 
-function normalizeCoachId(value: unknown): CoachId {
-  return value === 'lc' ? 'lc' : 'zj';
-}
-
 export function buildCoachTopic(userId: number, coachId: CoachId = 'zj'): string {
   return coachId === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
@@ -68,10 +63,12 @@ export function parseCoachTopic(topic: string): { userId: number; coachId: Coach
   const explicitMatch = normalized.match(/^coach_(zj|lc)_(\d+)$/);
   if (explicitMatch) {
     const userId = Number(explicitMatch[2]);
+    const coachId = normalizeCoachId(explicitMatch[1]);
     if (!Number.isInteger(userId)) return null;
+    if (!coachId) return null;
     return {
       userId,
-      coachId: normalizeCoachId(explicitMatch[1]),
+      coachId,
     };
   }
 
@@ -158,10 +155,7 @@ export class MessageService {
   static async getInbox(userId: string) {
     const db = getDB();
     const currentUserId = Number(userId);
-    const selectedCoachRow = db
-      .prepare('SELECT selected_coach FROM users WHERE id = ?')
-      .get(currentUserId) as { selected_coach?: string | null } | undefined;
-    const activeCoach = normalizeCoachId(selectedCoachRow?.selected_coach);
+    const enabledCoaches = resolveEnabledCoachesForUser(currentUserId);
     const unreadCountStmt = db.prepare(`
       SELECT COUNT(1) AS count
       FROM messages
@@ -233,20 +227,27 @@ export class MessageService {
       };
     });
 
-    const coachTopic = buildCoachTopic(currentUserId, activeCoach);
-    const coachLast = db.prepare('SELECT MAX(created_at) as last_message_at FROM messages WHERE topic = ?').get(coachTopic) as any;
-    const coachPreview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
-    const coachUnread = unreadCountStmt.get(coachTopic, currentUserId, coachTopic, currentUserId) as { count?: number } | undefined;
-    const coachMentions = unreadMentionStmt.get(currentUserId, coachTopic) as { count?: number } | undefined;
+    const coaches = enabledCoaches.map((coachId) => {
+      const coachTopic = buildCoachTopic(currentUserId, coachId);
+      const coachLast = db.prepare('SELECT MAX(created_at) as last_message_at FROM messages WHERE topic = ?').get(coachTopic) as any;
+      const coachPreview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
+      const coachUnread = unreadCountStmt.get(coachTopic, currentUserId, coachTopic, currentUserId) as { count?: number } | undefined;
+      const coachMentions = unreadMentionStmt.get(currentUserId, coachTopic) as { count?: number } | undefined;
 
-    return {
-      coach: {
+      return {
+        coach_id: coachId,
+        coach_name: coachDisplayName(coachId),
         topic: coachTopic,
         last_message_at: normalizeTimestamp(coachLast?.last_message_at) || null,
         last_message_preview: coachPreview?.content || '',
         unread_count: Number(coachUnread?.count || 0),
         mention_count: Number(coachMentions?.count || 0),
-      },
+      };
+    });
+
+    return {
+      coach: coaches[0] || null,
+      coaches,
       dms,
       groups,
     };

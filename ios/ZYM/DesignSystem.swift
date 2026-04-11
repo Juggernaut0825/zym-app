@@ -6,19 +6,22 @@ extension Color {
     static let zymSurface = Color.white
     static let zymSurfaceSoft = Color(red: 0.965, green: 0.949, blue: 0.918)
     static let zymLine = Color(red: 0.867, green: 0.847, blue: 0.812)
-    static let zymPrimary = Color(red: 0.424, green: 0.486, blue: 0.965)
-    static let zymPrimaryDark = Color(red: 0.290, green: 0.341, blue: 0.788)
+    static let zymPrimary = Color(red: 0.353, green: 0.396, blue: 0.475)
+    static let zymPrimaryDark = Color(red: 0.157, green: 0.184, blue: 0.231)
     static let zymSecondary = Color(red: 0.949, green: 0.541, blue: 0.227)
     static let zymSecondaryDark = Color(red: 0.694, green: 0.388, blue: 0.133)
     static let zymText = Color(red: 0.122, green: 0.122, blue: 0.122)
     static let zymSubtext = Color(red: 0.439, green: 0.415, blue: 0.388)
+    static let zymBubbleDark = Color(red: 0.427, green: 0.475, blue: 0.557)
+    static let zymCoachBlue = Color(red: 0.424, green: 0.486, blue: 0.965)
+    static let zymCoachBlueDark = Color(red: 0.290, green: 0.341, blue: 0.788)
 
     static func zymCoachAccent(_ coach: String?) -> Color {
-        coach == "lc" ? .zymSecondary : .zymPrimary
+        coach == "lc" ? .zymSecondary : .zymCoachBlue
     }
 
     static func zymCoachAccentDark(_ coach: String?) -> Color {
-        coach == "lc" ? .zymSecondaryDark : .zymPrimaryDark
+        coach == "lc" ? .zymSecondaryDark : .zymCoachBlueDark
     }
 
     static func zymCoachSoft(_ coach: String?) -> Color {
@@ -95,14 +98,14 @@ struct ZYMPrimaryButton: ButtonStyle {
             .padding(.vertical, 10)
             .background(
                 LinearGradient(
-                    colors: [Color.zymSecondary, Color.zymSecondaryDark],
+                    colors: [Color.zymPrimary, Color.zymPrimaryDark],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .opacity(configuration.isPressed ? 0.82 : 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: Color.zymSecondary.opacity(configuration.isPressed ? 0.16 : 0.24), radius: 14, x: 0, y: 8)
+            .shadow(color: Color.zymPrimaryDark.opacity(configuration.isPressed ? 0.16 : 0.22), radius: 14, x: 0, y: 8)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }

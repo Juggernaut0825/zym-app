@@ -1,12 +1,13 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
     @State private var profile: APIProfile?
     @State private var showEditor = false
     @State private var showSessionsSheet = false
-    @State private var coachPending = false
-    @State private var coachError = ""
     @State private var sessions: [AuthSessionRow] = []
     @State private var sessionsLoading = false
     @State private var sessionsError = ""
@@ -80,10 +81,10 @@ struct ProfileView: View {
                                     Text(profile?.username ?? appState.username ?? "User")
                                         .font(.custom("Syne", size: 28))
                                         .foregroundColor(Color.zymText)
-                                    Text("User ID: \(appState.userId ?? 0)")
+                                    Text("ID: \(profile?.public_uuid ?? String(appState.userId ?? 0))")
                                         .font(.system(size: 12))
                                         .foregroundColor(Color.zymSubtext)
-                                    Text("Coach: \((appState.selectedCoach ?? "zj").uppercased())")
+                                    Text("Coach chats: \(profile?.enabled_coaches?.count ?? 0)")
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundColor(Color.zymSubtext)
                                 }
@@ -92,55 +93,6 @@ struct ProfileView: View {
                         }
                         .zymCard()
                         .zymAppear(delay: 0.04)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Coach Style")
-                                .font(.custom("Syne", size: 18))
-                                .foregroundColor(Color.zymText)
-
-                            HStack(spacing: 8) {
-                                if (appState.selectedCoach ?? "zj") == "zj" {
-                                    Button(action: { switchCoach(to: "zj") }) {
-                                        Text(coachPending ? "Switching..." : "ZJ")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(ZYMCoachButtonStyle(coach: "zj", selected: true))
-                                    .disabled(coachPending)
-                                } else {
-                                    Button(action: { switchCoach(to: "zj") }) {
-                                        Text("ZJ")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(ZYMCoachButtonStyle(coach: "zj", selected: false))
-                                    .disabled(coachPending)
-                                }
-
-                                if (appState.selectedCoach ?? "zj") == "lc" {
-                                    Button(action: { switchCoach(to: "lc") }) {
-                                        Text(coachPending ? "Switching..." : "LC")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(ZYMCoachButtonStyle(coach: "lc", selected: true))
-                                    .disabled(coachPending)
-                                } else {
-                                    Button(action: { switchCoach(to: "lc") }) {
-                                        Text("LC")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(ZYMCoachButtonStyle(coach: "lc", selected: false))
-                                    .disabled(coachPending)
-                                }
-                            }
-
-                            if !coachError.isEmpty {
-                                Text(coachError)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.red)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .zymCard()
-                        .zymAppear(delay: 0.08)
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Bio")
@@ -238,44 +190,6 @@ struct ProfileView: View {
                   let response = try? JSONDecoder().decode(APIProfile.self, from: data) else { return }
             DispatchQueue.main.async {
                 profile = response
-            }
-        }.resume()
-    }
-
-    private func switchCoach(to coach: String) {
-        guard !coachPending,
-              let userId = appState.userId,
-              let url = apiURL("/coach/select") else { return }
-        if appState.selectedCoach == coach { return }
-
-        coachPending = true
-        coachError = ""
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuthorizationHeader(&request, token: appState.token)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "userId": userId,
-            "coach": coach,
-        ])
-
-        authorizedDataTask(appState: appState, request: request) { data, response, _ in
-            DispatchQueue.main.async {
-                coachPending = false
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard statusCode >= 200 && statusCode < 300 else {
-                    if let data = data,
-                       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let message = payload["error"] as? String {
-                        coachError = message
-                    } else {
-                        coachError = "Failed to switch coach."
-                    }
-                    return
-                }
-                appState.selectedCoach = coach
-                loadProfile()
             }
         }.resume()
     }
@@ -391,7 +305,18 @@ struct ProfileView: View {
     }
 }
 
+private struct ProfileImageDraft {
+    let data: Data
+    let filename: String
+    let contentType: String
+}
+
 private struct ProfileEditSheet: View {
+    private enum ProfileImageKind {
+        case avatar
+        case background
+    }
+
     let profile: APIProfile?
     let onSaved: () -> Void
 
@@ -403,6 +328,10 @@ private struct ProfileEditSheet: View {
     @State private var hobbies = ""
     @State private var avatarURL = ""
     @State private var backgroundURL = ""
+    @State private var selectedAvatarItem: PhotosPickerItem?
+    @State private var selectedBackgroundItem: PhotosPickerItem?
+    @State private var avatarDraft: ProfileImageDraft?
+    @State private var backgroundDraft: ProfileImageDraft?
     @State private var pending = false
     @State private var errorText = ""
 
@@ -416,11 +345,44 @@ private struct ProfileEditSheet: View {
                     TextField("Hobbies", text: $hobbies)
                 }
 
-                Section("Images (URL)") {
-                    TextField("Avatar URL", text: $avatarURL)
-                        .textInputAutocapitalization(.never)
-                    TextField("Background URL", text: $backgroundURL)
-                        .textInputAutocapitalization(.never)
+                Section("Images") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Avatar")
+                            .font(.system(size: 14, weight: .semibold))
+                        profileImagePreview(remoteURL: avatarURL, draft: avatarDraft, frameHeight: 96, circular: true)
+
+                        PhotosPicker(selection: $selectedAvatarItem, matching: .images) {
+                            Label("Choose Avatar", systemImage: "photo")
+                        }
+
+                        if avatarDraft != nil || !avatarURL.isEmpty {
+                            Button("Remove Avatar") {
+                                avatarDraft = nil
+                                avatarURL = ""
+                            }
+                            .foregroundColor(.red)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Background")
+                            .font(.system(size: 14, weight: .semibold))
+                        profileImagePreview(remoteURL: backgroundURL, draft: backgroundDraft, frameHeight: 140, circular: false)
+
+                        PhotosPicker(selection: $selectedBackgroundItem, matching: .images) {
+                            Label("Choose Background", systemImage: "photo.on.rectangle")
+                        }
+
+                        if backgroundDraft != nil || !backgroundURL.isEmpty {
+                            Button("Remove Background") {
+                                backgroundDraft = nil
+                                backgroundURL = ""
+                            }
+                            .foregroundColor(.red)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 if !errorText.isEmpty {
@@ -450,14 +412,131 @@ private struct ProfileEditSheet: View {
             avatarURL = profile?.avatar_url ?? ""
             backgroundURL = profile?.background_url ?? ""
         }
+        .onChange(of: selectedAvatarItem) { _, item in
+            loadSelectedImage(item, kind: .avatar)
+        }
+        .onChange(of: selectedBackgroundItem) { _, item in
+            loadSelectedImage(item, kind: .background)
+        }
+    }
+
+    @ViewBuilder
+    private func profileImagePreview(remoteURL: String, draft: ProfileImageDraft?, frameHeight: CGFloat, circular: Bool) -> some View {
+        if circular {
+            profileImageContent(remoteURL: remoteURL, draft: draft, circular: true)
+                .frame(width: frameHeight, height: frameHeight)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.zymLine, lineWidth: 1))
+        } else {
+            profileImageContent(remoteURL: remoteURL, draft: draft, circular: false)
+                .frame(maxWidth: .infinity)
+                .frame(height: frameHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.zymLine, lineWidth: 1)
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func profileImageContent(remoteURL: String, draft: ProfileImageDraft?, circular: Bool) -> some View {
+        if let draft,
+           let image = UIImage(data: draft.data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else if let resolvedURL = resolveRemoteURL(remoteURL), !remoteURL.isEmpty {
+            AsyncImage(url: resolvedURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    RoundedRectangle(cornerRadius: circular ? 48 : 18, style: .continuous)
+                        .fill(Color.zymSurfaceSoft)
+                }
+            }
+        } else {
+            RoundedRectangle(cornerRadius: circular ? 48 : 18, style: .continuous)
+                .fill(Color.zymSurfaceSoft)
+                .overlay(
+                    Image(systemName: circular ? "person.crop.circle.fill" : "photo")
+                        .font(.system(size: 28))
+                        .foregroundColor(Color.zymSubtext)
+                )
+        }
+    }
+
+    private func loadSelectedImage(_ item: PhotosPickerItem?, kind: ProfileImageKind) {
+        guard let item else { return }
+
+        let contentType = item.supportedContentTypes.first(where: { $0.conforms(to: .image) }) ?? .jpeg
+        let fileExtension = contentType.preferredFilenameExtension ?? "jpg"
+        let mimeType = contentType.preferredMIMEType ?? "image/jpeg"
+        let filename = kind == .avatar ? "avatar.\(fileExtension)" : "background.\(fileExtension)"
+
+        item.loadTransferable(type: Data.self) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    guard let data else {
+                        errorText = "Failed to read the selected image."
+                        return
+                    }
+                    let draft = ProfileImageDraft(data: data, filename: filename, contentType: mimeType)
+                    if kind == .avatar {
+                        avatarDraft = draft
+                    } else {
+                        backgroundDraft = draft
+                    }
+                case .failure:
+                    errorText = "Failed to read the selected image."
+                }
+            }
+        }
     }
 
     private func saveProfile() {
-        guard let userId = appState.userId,
-              let url = apiURL("/profile/update") else { return }
-
         pending = true
         errorText = ""
+
+        uploadDraftIfNeeded(avatarDraft, source: "ios_profile_avatar", visibility: "public") { uploadedAvatar, avatarError in
+            if let avatarError {
+                DispatchQueue.main.async {
+                    pending = false
+                    errorText = avatarError
+                }
+                return
+            }
+
+            uploadDraftIfNeeded(backgroundDraft, source: "ios_profile_background", visibility: "friends") { uploadedBackground, backgroundError in
+                if let backgroundError {
+                    DispatchQueue.main.async {
+                        pending = false
+                        errorText = backgroundError
+                    }
+                    return
+                }
+
+                submitProfileUpdate(
+                    avatarValue: uploadedAvatar ?? avatarURL,
+                    backgroundValue: uploadedBackground ?? backgroundURL
+                )
+            }
+        }
+    }
+
+    private func submitProfileUpdate(avatarValue: String, backgroundValue: String) {
+        guard let userId = appState.userId,
+              let url = apiURL("/profile/update") else {
+            DispatchQueue.main.async {
+                pending = false
+                errorText = "Profile endpoint is unavailable."
+            }
+            return
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -468,9 +547,9 @@ private struct ProfileEditSheet: View {
             "bio": bio,
             "fitness_goal": fitnessGoal,
             "hobbies": hobbies,
-            "avatar_url": avatarURL,
+            "avatar_url": avatarValue,
             "avatar_visibility": "public",
-            "background_url": backgroundURL,
+            "background_url": backgroundValue,
             "background_visibility": "friends"
         ])
 
@@ -491,6 +570,163 @@ private struct ProfileEditSheet: View {
                 onSaved()
                 dismiss()
             }
+        }.resume()
+    }
+
+    private func uploadDraftIfNeeded(
+        _ draft: ProfileImageDraft?,
+        source: String,
+        visibility: String,
+        completion: @escaping (_ value: String?, _ error: String?) -> Void
+    ) {
+        guard let draft else {
+            completion(nil, nil)
+            return
+        }
+
+        requestUploadIntent(for: draft, source: source, visibility: visibility) { intent in
+            guard let intent,
+                  intent.strategy != "legacy_multipart",
+                  let assetId = intent.assetId,
+                  let upload = intent.upload,
+                  let uploadURL = URL(string: upload.url) else {
+                uploadDraftLegacy(draft, source: source, visibility: visibility, completion: completion)
+                return
+            }
+
+            var uploadRequest = URLRequest(url: uploadURL)
+            uploadRequest.httpMethod = upload.method.isEmpty ? "PUT" : upload.method
+            uploadRequest.httpBody = draft.data
+            for (header, value) in upload.headers ?? [:] {
+                uploadRequest.setValue(value, forHTTPHeaderField: header)
+            }
+            if uploadRequest.value(forHTTPHeaderField: "Content-Type") == nil {
+                uploadRequest.setValue(draft.contentType, forHTTPHeaderField: "Content-Type")
+            }
+            if shouldAuthorizeUploadTarget(uploadURL) {
+                applyAuthorizationHeader(&uploadRequest, token: appState.token)
+            }
+
+            authorizedDataTask(appState: appState, request: uploadRequest) { _, response, _ in
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    uploadDraftLegacy(draft, source: source, visibility: visibility, completion: completion)
+                    return
+                }
+                finalizeUploadedDraft(assetId: assetId, completion: completion)
+            }.resume()
+        }
+    }
+
+    private func requestUploadIntent(
+        for draft: ProfileImageDraft,
+        source: String,
+        visibility: String,
+        completion: @escaping (UploadIntentResponse?) -> Void
+    ) {
+        guard let url = apiURL("/media/upload-url") else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "fileName": draft.filename,
+            "contentType": draft.contentType,
+            "sizeBytes": draft.data.count,
+            "source": source,
+            "visibility": visibility,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadIntentResponse.self, from: data) else {
+                completion(nil)
+                return
+            }
+            completion(response)
+        }.resume()
+    }
+
+    private func finalizeUploadedDraft(
+        assetId: String,
+        completion: @escaping (_ value: String?, _ error: String?) -> Void
+    ) {
+        guard let url = apiURL("/media/finalize") else {
+            completion(nil, "Failed to finalize profile image upload.")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "assetId": assetId
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+                completion(nil, "Failed to finalize profile image upload.")
+                return
+            }
+            let value = response.path.isEmpty ? (response.url ?? response.path) : response.path
+            completion(value, nil)
+        }.resume()
+    }
+
+    private func shouldAuthorizeUploadTarget(_ url: URL) -> Bool {
+        guard let apiBase = apiURL("/") else { return false }
+        return url.host == apiBase.host && url.port == apiBase.port
+    }
+
+    private func uploadDraftLegacy(
+        _ draft: ProfileImageDraft,
+        source: String,
+        visibility: String,
+        completion: @escaping (_ value: String?, _ error: String?) -> Void
+    ) {
+        guard let url = apiURL("/media/upload") else {
+            completion(nil, "Failed to upload profile image.")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        applyAuthorizationHeader(&request, token: appState.token)
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"source\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(source)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"visibility\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(visibility)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(draft.filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(draft.contentType)\r\n\r\n".data(using: .utf8)!)
+        body.append(draft.data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard statusCode >= 200 && statusCode < 300,
+                  let data = data,
+                  let upload = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
+                completion(nil, "Failed to upload profile image.")
+                return
+            }
+            let value = upload.path.isEmpty ? (upload.url ?? upload.path) : upload.path
+            completion(value, nil)
         }.resume()
     }
 }
@@ -1341,6 +1577,7 @@ private func parseAPIError(_ data: Data?) -> String? {
 
 struct APIProfile: Codable {
     let id: Int
+    let public_uuid: String?
     let username: String
     let avatar_url: String?
     let background_url: String?
@@ -1348,6 +1585,7 @@ struct APIProfile: Codable {
     let fitness_goal: String?
     let hobbies: String?
     let selected_coach: String?
+    let enabled_coaches: [String]?
 }
 
 struct AuthSessionsResponse: Codable {

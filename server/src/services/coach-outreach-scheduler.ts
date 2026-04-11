@@ -9,6 +9,7 @@ import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
 import { coachTypedToolsService } from './coach-typed-tools-service.js';
 import { computeCoachProgressSummary, normalizeCoachCheckIn } from '../utils/coach-progress.js';
+import { resolveSelectedCoachForUser } from '../utils/coach-prefs.js';
 
 const DEFAULT_INTERVAL_MINUTES = 10;
 const DEFAULT_NIGHTLY_HOUR = 20;
@@ -17,7 +18,6 @@ const DEFAULT_ONBOARDING_DELAY_HOURS = 6;
 
 interface OutreachUser {
   id: number;
-  selected_coach?: 'zj' | 'lc' | null;
   timezone?: string | null;
   created_at?: string | null;
   email_verified_at?: string | null;
@@ -140,7 +140,7 @@ export class CoachOutreachScheduler {
     try {
       const rows = getDB()
         .prepare(`
-          SELECT id, selected_coach, timezone, created_at, email_verified_at
+          SELECT id, timezone, created_at, email_verified_at
           FROM users
           WHERE email_verified_at IS NOT NULL
           ORDER BY id ASC
@@ -169,11 +169,7 @@ export class CoachOutreachScheduler {
     const userId = Number(user.id || 0);
     if (!Number.isInteger(userId) || userId <= 0) return false;
 
-    const coachId = user.selected_coach === 'lc'
-      ? 'lc'
-      : user.selected_coach === 'zj'
-        ? 'zj'
-        : null;
+    const coachId = resolveSelectedCoachForUser(userId);
     if (!coachId) {
       return false;
     }

@@ -4,6 +4,7 @@ export interface AuthPayload {
   refreshToken: string;
   username: string;
   selectedCoach: 'zj' | 'lc' | null;
+  enabledCoaches?: Array<'zj' | 'lc'>;
 }
 
 export interface AuthSession {
@@ -30,6 +31,8 @@ export interface PublicUser extends UserSummary {
 }
 
 export interface InboxCoach {
+  coach_id: 'zj' | 'lc';
+  coach_name: string;
   topic: string;
   last_message_at: string | null;
   last_message_preview: string;
@@ -60,7 +63,8 @@ export interface InboxGroup {
 }
 
 export interface InboxResponse {
-  coach: InboxCoach;
+  coach: InboxCoach | null;
+  coaches: InboxCoach[];
   dms: InboxDM[];
   groups: InboxGroup[];
 }
@@ -220,6 +224,7 @@ export interface Profile {
   fitness_goal: string | null;
   hobbies: string | null;
   selected_coach: 'zj' | 'lc' | null;
+  enabled_coaches?: Array<'zj' | 'lc'> | null;
   timezone?: string | null;
 }
 
@@ -402,6 +407,7 @@ export interface CoachDayRecord {
 
 export interface CoachRecordsResponse {
   selectedCoach?: 'zj' | 'lc' | null;
+  enabledCoaches?: Array<'zj' | 'lc'>;
   profile: CoachProfileData;
   progress?: CoachProgressSummary;
   records: CoachDayRecord[];

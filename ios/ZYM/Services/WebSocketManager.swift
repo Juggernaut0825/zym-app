@@ -24,6 +24,7 @@ enum SocketEvent {
     case messageCreated(topic: String, message: SocketChatMessage)
     case typing(topic: String, userId: String, isTyping: Bool)
     case inboxUpdated
+    case friendsUpdated
     case error(message: String)
 }
 
@@ -199,6 +200,11 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
         case "inbox_updated":
             DispatchQueue.main.async {
                 self.onEvent?(.inboxUpdated)
+            }
+
+        case "friends_updated":
+            DispatchQueue.main.async {
+                self.onEvent?(.friendsUpdated)
             }
 
         case "chat_response":
