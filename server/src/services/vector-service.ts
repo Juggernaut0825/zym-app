@@ -290,7 +290,14 @@ export class VectorService {
     }
 
     return Array.from(merged.values())
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => {
+        const aHasCitation = Number(Boolean(a.pdfUrl || a.referenceUrl));
+        const bHasCitation = Number(Boolean(b.pdfUrl || b.referenceUrl));
+        if (aHasCitation !== bHasCitation) {
+          return bHasCitation - aHasCitation;
+        }
+        return b.score - a.score;
+      })
       .slice(0, topK);
   }
 
@@ -485,75 +492,65 @@ export class VectorService {
       : [];
     if (!apiKey || normalized.length === 0) return [];
 
-    const primaryModel = String(process.env.GAUZ_EMBEDDING_MODEL || 'qwen/qwen3-embedding-4b').trim() || 'qwen/qwen3-embedding-4b';
-    const fallbackModels = String(process.env.GAUZ_EMBEDDING_FALLBACK_MODELS || 'openai/text-embedding-3-small,openai/text-embedding-3-large')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
-    const models = Array.from(new Set([primaryModel, ...fallbackModels]));
-
-    for (const model of models) {
-      const startedAt = Date.now();
-      let response: Response;
-      try {
-        response = await fetch('https://openrouter.ai/api/v1/embeddings', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model,
-            input: normalized.length === 1 ? normalized[0] : normalized,
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (error) {
-        OpenRouterUsageService.recordFailure(error, {
-          source: 'knowledge_embeddings',
-          requestKind: 'embeddings',
+    const model = String(process.env.GAUZ_EMBEDDING_MODEL || 'openai/text-embedding-3-small').trim() || 'openai/text-embedding-3-small';
+    const startedAt = Date.now();
+    let response: Response;
+    try {
+      response = await fetch('https://openrouter.ai/api/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           model,
-          metadata: { inputCount: normalized.length },
-        }, startedAt);
-        continue;
-      }
-
-      const rawBody = await response.text().catch(() => '');
-      let data: any = {};
-      if (rawBody) {
-        try {
-          data = JSON.parse(rawBody);
-        } catch {
-          data = {};
-        }
-      }
-      if (!response.ok || data?.error || !Array.isArray(data?.data)) {
-        const message = data?.error?.message
-          ? `OpenRouter embeddings request failed (${model}): ${String(data.error.message)}`
-          : `OpenRouter embeddings request failed (${model}, status ${response.status})`;
-        OpenRouterUsageService.recordFailure(new Error(message), {
-          source: 'knowledge_embeddings',
-          requestKind: 'embeddings',
-          model,
-          metadata: { inputCount: normalized.length },
-        }, startedAt);
-        continue;
-      }
-
-      OpenRouterUsageService.recordSuccessFromPayload(data, {
+          input: normalized.length === 1 ? normalized[0] : normalized,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      OpenRouterUsageService.recordFailure(error, {
         source: 'knowledge_embeddings',
         requestKind: 'embeddings',
         model,
         metadata: { inputCount: normalized.length },
       }, startedAt);
-      return data.data.map((item: any) => (
-        Array.isArray(item?.embedding)
-          ? item.embedding.map((value: unknown) => Number(value) || 0)
-          : []
-      ));
+      return [];
     }
 
-    return [];
+    const rawBody = await response.text().catch(() => '');
+    let data: any = {};
+    if (rawBody) {
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        data = {};
+      }
+    }
+    if (!response.ok || data?.error || !Array.isArray(data?.data)) {
+      const message = data?.error?.message
+        ? `OpenRouter embeddings request failed (${model}): ${String(data.error.message)}`
+        : `OpenRouter embeddings request failed (${model}, status ${response.status})`;
+      OpenRouterUsageService.recordFailure(new Error(message), {
+        source: 'knowledge_embeddings',
+        requestKind: 'embeddings',
+        model,
+        metadata: { inputCount: normalized.length },
+      }, startedAt);
+      return [];
+    }
+
+    OpenRouterUsageService.recordSuccessFromPayload(data, {
+      source: 'knowledge_embeddings',
+      requestKind: 'embeddings',
+      model,
+      metadata: { inputCount: normalized.length },
+    }, startedAt);
+    return data.data.map((item: any) => (
+      Array.isArray(item?.embedding)
+        ? item.embedding.map((value: unknown) => Number(value) || 0)
+        : []
+    ));
   }
 }
 
