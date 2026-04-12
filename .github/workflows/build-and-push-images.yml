@@ -129,7 +129,7 @@ jobs:
       url: https://app.zym8.com
     concurrency:
       group: deploy-production
-      cancel-in-progress: false
+      cancel-in-progress: true
 
     steps:
       - name: Checkout
