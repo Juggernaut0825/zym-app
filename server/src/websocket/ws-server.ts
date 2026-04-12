@@ -19,6 +19,7 @@ import { resolveUploadsDir } from '../config/app-paths.js';
 import { getRuntimeHealthReport } from '../health/runtime-health.js';
 
 const ALLOWED_MEDIA_URL_PROTOCOLS = new Set(['http:', 'https:']);
+const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 
 interface Client {
   ws: WebSocket;
@@ -398,7 +399,12 @@ export class WSServer {
         return;
       }
 
-      const content = String(msg.content || '').trim().slice(0, 8000);
+      const rawContent = String(msg.content || '').trim();
+      if (rawContent.length > MAX_CHAT_MESSAGE_CHARACTERS) {
+        this.send(ws, { type: 'error', message: `Message is too long. Keep it under ${MAX_CHAT_MESSAGE_CHARACTERS} characters.` });
+        return;
+      }
+      const content = rawContent;
       const mediaUrls = this.sanitizeMediaUrls(msg.mediaUrls, 5);
       const mediaIds = this.sanitizeMediaIds(msg.mediaIds, 5);
       const resolvedAssetIds = this.resolveOwnedAssetIds(userId, mediaIds, mediaUrls);

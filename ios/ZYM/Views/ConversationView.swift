@@ -20,6 +20,7 @@ struct DraftAttachment: Identifiable {
 
 struct ConversationView: View {
     let conversation: Conversation
+    private let maxMessageCharacters = 8000
 
     private let latestMessageAnchor = "conversation-latest-message-anchor"
 
@@ -35,12 +36,14 @@ struct ConversationView: View {
     @State private var groupMembers: [ConversationGroupMember] = []
     @State private var inviteUsername = ""
     @State private var groupActionPending = false
-    @State private var coachWorkspaceMode: CoachWorkspaceMode?
     @State private var infoNotice = ""
     @State private var showProfileSheet = false
     @State private var profileLoading = false
     @State private var viewedProfile: ConversationPublicProfileResponse?
     @State private var profileReportPending = false
+    @State private var animatedCoachReplies: [Int: Int] = [:]
+    @State private var coachRevealWorkItems: [Int: [DispatchWorkItem]] = [:]
+    @State private var coachRevealTick = 0
 
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
@@ -54,10 +57,45 @@ struct ConversationView: View {
         conversation.coachEnabled != "none"
     }
 
+    private var resolvedCoachId: String {
+        if conversation.coachId == "lc" { return "lc" }
+        if conversation.coachEnabled == "lc" { return "lc" }
+        if appState.selectedCoach == "lc" { return "lc" }
+        return "zj"
+    }
+
+    private var coachTypingName: String {
+        conversation.isCoach ? conversation.name : conversationCoachDisplayName(resolvedCoachId)
+    }
+
+    private var displayTimeZone: TimeZone {
+        if let stored = appState.timezone,
+           let zone = TimeZone(identifier: stored),
+           !stored.isEmpty {
+            return zone
+        }
+        return TimeZone.current
+    }
+
+    private var hasPendingCoachReveal: Bool {
+        messages.contains { message in
+            guard message.is_coach else { return false }
+            guard let revealed = animatedCoachReplies[message.id] else { return false }
+            return revealed < splitConversationReplySegments(message.content).count
+        }
+    }
+
+    private var messageTooLong: Bool {
+        newMessage.count > maxMessageCharacters
+    }
+
     private var typingLabel: String {
-        let activeTypers = typingUsers.filter { $0.value }.keys
+        let activeTypers = Set(typingUsers.filter { $0.value }.keys)
         if activeTypers.isEmpty { return "" }
-        if activeTypers.contains("coach") {
+        if (activeTypers.contains("coach") || activeTypers.contains("0")) && !hasPendingCoachReveal {
+            return "\(coachTypingName) is typing..."
+        }
+        if !conversation.isGroup {
             return "\(conversation.name) is typing..."
         }
         return "Someone is typing..."
@@ -68,212 +106,179 @@ struct ConversationView: View {
             ZYMBackgroundLayer().ignoresSafeArea()
 
             VStack(spacing: 0) {
-                if let coachWorkspaceMode, conversation.isCoach {
-                    CoachWorkspaceView(
-                        mode: coachWorkspaceMode,
-                        coachId: conversation.coachId ?? appState.selectedCoach ?? "zj",
-                        onBackToChat: {
-                            withAnimation(.zymSoft) {
-                                self.coachWorkspaceMode = nil
-                            }
-                        },
-                        onNotice: { notice in
-                            infoNotice = notice
-                        },
-                        onError: { error in
-                            infoNotice = error
-                        }
-                    )
-                    .environmentObject(appState)
-                    .transition(.opacity)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(spacing: 10) {
-                                ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
-                                    ConversationMessageBubble(
-                                        message: msg,
-                                        currentUserId: appState.userId ?? 0
-                                    )
-                                        .zymAppear(delay: Double(min(index, 5)) * 0.02)
-                                }
-
-                                if !typingLabel.isEmpty {
-                                    HStack {
-                                        TypingIndicator(label: typingLabel)
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.top, 4)
-                                    .transition(.opacity)
-                                }
-
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id(latestMessageAnchor)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.top, 10)
-                        }
-                        .onAppear {
-                            scrollToLatestMessage(using: proxy, animated: false)
-                        }
-                        .onChange(of: messages.last?.id) { _, _ in
-                            scrollToLatestMessage(using: proxy)
-                        }
-                    }
-                }
-
-                if coachWorkspaceMode == nil || !infoNotice.isEmpty {
-                    VStack(spacing: 8) {
-                        if !infoNotice.isEmpty {
-                            HStack {
-                                Text(infoNotice)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(Color.zymPrimaryDark)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14)
-                        }
-
-                        if coachWorkspaceMode == nil {
-                            if !draftAttachments.isEmpty {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(draftAttachments) { attachment in
-                                            DraftAttachmentPreview(attachment: attachment)
-                                        }
-                                    }
-                                    .padding(.horizontal, 12)
-                                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
+                                ConversationMessageRow(
+                                    message: msg,
+                                    previousMessage: index > 0 ? messages[index - 1] : nil,
+                                    currentUserId: appState.userId ?? 0,
+                                    conversationName: conversation.name,
+                                    conversationIsCoach: conversation.isCoach,
+                                    coachId: resolvedCoachId,
+                                    timeZone: displayTimeZone,
+                                    revealedCoachSegmentCount: animatedCoachReplies[msg.id],
+                                    inlineTypingLabel: "\(coachTypingName) is typing..."
+                                )
+                                    .zymAppear(delay: Double(min(index, 5)) * 0.02)
                             }
 
-                            HStack(spacing: 10) {
-                                Button(action: { showMediaPicker = true }) {
-                                    Image(systemName: "plus.circle.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(Color.zymPrimary)
-                                }
-
-                                TextField("", text: $newMessage)
-                                    .padding(12)
-                                    .background(Color.zymSurface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.zymLine, lineWidth: 1)
-                                    )
-                                    .cornerRadius(12)
-                                    .accessibilityLabel("Message")
-
-                                if conversation.isGroup && groupCoachEnabled {
-                                    Button("@coach") {
-                                        if !newMessage.lowercased().contains("@coach") {
-                                            newMessage = newMessage.isEmpty ? "@coach " : "@coach \(newMessage)"
-                                        }
-                                    }
-                                    .buttonStyle(ZYMGhostButton())
-                                }
-
-                                Button(action: sendMessage) {
-                                    Text(isSending ? "..." : "Send")
-                                }
-                                .buttonStyle(ZYMPrimaryButton())
-                                .disabled(isSending)
-                            }
-                            .padding(.horizontal, 12)
-
-                            if conversation.isGroup {
+                            if !typingLabel.isEmpty {
                                 HStack {
-                                    Text(groupCoachEnabled
-                                         ? "Tip: mention @coach in group to trigger AI reply."
-                                         : "Coach is disabled in this group.")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
+                                    TypingIndicator(label: typingLabel)
                                     Spacer()
                                 }
-                                .padding(.horizontal, 14)
+                                .padding(.horizontal, 12)
+                                .padding(.top, 4)
+                                .transition(.opacity)
                             }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(latestMessageAnchor)
                         }
                     }
-                    .padding(.bottom, 10)
-                    .padding(.top, 6)
-                    .background(Color.zymSurface)
-                    .overlay(
-                        Rectangle()
-                            .fill(Color.zymLine)
-                            .frame(height: 1),
-                        alignment: .top
-                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .onAppear {
+                        scrollToLatestMessage(using: proxy, animated: false)
+                    }
+                    .onChange(of: messages.last?.id) { _, _ in
+                        scrollToLatestMessage(using: proxy)
+                    }
+                    .onChange(of: coachRevealTick) { _, _ in
+                        scrollToLatestMessage(using: proxy)
+                    }
                 }
+
+                VStack(spacing: 8) {
+                    if !infoNotice.isEmpty {
+                        HStack {
+                            Text(infoNotice)
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymPrimaryDark)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                    }
+
+                    if !draftAttachments.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(draftAttachments) { attachment in
+                                    DraftAttachmentPreview(attachment: attachment)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button(action: { showMediaPicker = true }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(Color.zymPrimary)
+                        }
+
+                        TextField("", text: $newMessage)
+                            .padding(12)
+                            .background(Color.zymSurface)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(messageTooLong ? Color.red.opacity(0.7) : Color.zymLine, lineWidth: 1)
+                            )
+                            .cornerRadius(12)
+                            .accessibilityLabel("Message")
+
+                        if conversation.isGroup && groupCoachEnabled {
+                            Button("@coach") {
+                                if !newMessage.lowercased().contains("@coach") {
+                                    newMessage = newMessage.isEmpty ? "@coach " : "@coach \(newMessage)"
+                                }
+                            }
+                            .buttonStyle(ZYMGhostButton())
+                        }
+
+                        Button(action: sendMessage) {
+                            Text(isSending ? "..." : "Send")
+                        }
+                        .buttonStyle(ZYMPrimaryButton())
+                        .disabled(isSending || messageTooLong)
+                    }
+                    .padding(.horizontal, 12)
+
+                    if messageTooLong {
+                        HStack {
+                            Text("Message is too long to send. Keep it under \(maxMessageCharacters) characters.")
+                                .font(.system(size: 12))
+                                .foregroundColor(.red.opacity(0.82))
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                    }
+
+                    if conversation.isGroup {
+                        HStack {
+                            Text(groupCoachEnabled
+                                 ? "Tip: mention @coach in group to trigger AI reply."
+                                 : "Coach is disabled in this group.")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymSubtext)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                }
+                .padding(.bottom, 10)
+                .padding(.top, 6)
+                .background(Color.zymSurface)
+                .overlay(
+                    Rectangle()
+                        .fill(Color.zymLine)
+                        .frame(height: 1),
+                    alignment: .top
+                )
             }
         }
         .navigationTitle(conversation.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: openProfileSheet) {
-                    HStack(spacing: 8) {
-                        if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .scaledToFill()
-                                default:
-                                    Circle()
-                                        .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
+            if !conversation.isCoach && !conversation.isGroup {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: openProfileSheet) {
+                        HStack(spacing: 8) {
+                            if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    default:
+                                        Circle()
+                                            .fill(Color.zymSurfaceSoft)
+                                    }
                                 }
-                            }
-                            .frame(width: 32, height: 32)
-                            .clipShape(Circle())
-                        } else {
-                            Circle()
-                                .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)
                                 .frame(width: 32, height: 32)
-                                .overlay(
-                                    Text(conversation.isCoach
-                                         ? ((conversation.coachId ?? "zj").uppercased())
-                                         : String(conversation.name.prefix(2)).uppercased())
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(conversation.isCoach ? .white : Color.zymPrimaryDark)
-                                )
+                                .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(Color.zymSurfaceSoft)
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Text(String(conversation.name.prefix(2)).uppercased())
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(Color.zymPrimaryDark)
+                                    )
+                            }
                         }
                     }
                 }
-                .disabled(conversation.isGroup)
             }
 
-            if conversation.isCoach {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button("Info") {
-                            withAnimation(.zymSoft) {
-                                coachWorkspaceMode = .info
-                            }
-                        }
-                        Button("Meals") {
-                            withAnimation(.zymSoft) {
-                                coachWorkspaceMode = .meals
-                            }
-                        }
-                        Button("Trains") {
-                            withAnimation(.zymSoft) {
-                                coachWorkspaceMode = .trains
-                            }
-                        }
-                        Button("Progress") {
-                            withAnimation(.zymSoft) {
-                                coachWorkspaceMode = .progress
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(Color.zymPrimary)
-                    }
-                }
-            } else if groupId != nil {
+            if groupId != nil {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         showGroupSheet = true
@@ -308,6 +313,7 @@ struct ConversationView: View {
             wsManager.unsubscribe(topic: conversation.id)
             wsManager.disconnect()
             clearDraftAttachments()
+            cancelAllCoachReplyRevealAnimations()
         }
         .photosPicker(
             isPresented: $showMediaPicker,
@@ -355,20 +361,24 @@ struct ConversationView: View {
                 guard topic == conversation.id else { return }
 
                 let createdAt = incomingMessage.created_at ?? ISO8601DateFormatter().string(from: Date())
+                let isCoach = incomingMessage.is_coach ?? (incomingMessage.from_user_id == 0)
                 let mapped = Message(
                     id: incomingMessage.id,
                     topic: topic,
                     from_user_id: incomingMessage.from_user_id,
                     content: incomingMessage.content,
                     created_at: createdAt,
-                    username: incomingMessage.username ?? (incomingMessage.from_user_id == 0 ? "Coach" : "User"),
-                    media_urls: incomingMessage.media_urls ?? []
+                    username: incomingMessage.username ?? (isCoach ? conversationCoachDisplayName(resolvedCoachId) : "User"),
+                    avatar_url: incomingMessage.avatar_url,
+                    media_urls: incomingMessage.media_urls ?? [],
+                    is_coach: isCoach
                 )
 
                 if !messages.contains(where: { $0.id == mapped.id }) {
                     withAnimation(.zymSpring) {
                         messages.append(mapped)
                     }
+                    scheduleCoachReplyRevealIfNeeded(for: mapped)
                 }
 
                 if mapped.from_user_id != (appState.userId ?? 0) {
@@ -405,6 +415,7 @@ struct ConversationView: View {
                 withAnimation(.zymSoft) {
                     messages = response.messages
                 }
+                pruneCoachReplyRevealAnimations(validMessageIds: Set(response.messages.map(\.id)))
                 markConversationRead(messageId: response.messages.last?.id)
             }
         }.resume()
@@ -423,9 +434,82 @@ struct ConversationView: View {
         }
     }
 
+    private func scheduleCoachReplyRevealIfNeeded(for message: Message) {
+        guard message.is_coach else { return }
+        guard message.from_user_id != (appState.userId ?? 0) else { return }
+
+        let segments = splitConversationReplySegments(message.content)
+        guard !segments.isEmpty else { return }
+
+        cancelCoachReplyRevealAnimation(for: message.id)
+        animatedCoachReplies[message.id] = 0
+        coachRevealTick += 1
+
+        var pendingItems: [DispatchWorkItem] = []
+        var totalDelay: TimeInterval = 0
+
+        for (index, segment) in segments.enumerated() {
+            totalDelay += segmentRevealDelay(for: segment, index: index)
+            let revealItem = DispatchWorkItem {
+                guard animatedCoachReplies[message.id] != nil else { return }
+                withAnimation(.zymSoft) {
+                    animatedCoachReplies[message.id] = index + 1
+                    coachRevealTick += 1
+                }
+
+                if index == segments.count - 1 {
+                    let settleItem = DispatchWorkItem {
+                        animatedCoachReplies.removeValue(forKey: message.id)
+                        coachRevealWorkItems.removeValue(forKey: message.id)
+                        coachRevealTick += 1
+                    }
+                    coachRevealWorkItems[message.id, default: []].append(settleItem)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.26, execute: settleItem)
+                }
+            }
+            pendingItems.append(revealItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay, execute: revealItem)
+        }
+
+        coachRevealWorkItems[message.id] = pendingItems
+    }
+
+    private func segmentRevealDelay(for segment: String, index: Int) -> TimeInterval {
+        let characterCount = segment
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .count
+        let baseDelay = index == 0 ? 680 : 900
+        let milliseconds = min(3200, max(baseDelay, baseDelay + characterCount * 18))
+        return TimeInterval(milliseconds) / 1000
+    }
+
+    private func cancelCoachReplyRevealAnimation(for messageId: Int) {
+        coachRevealWorkItems[messageId]?.forEach { $0.cancel() }
+        coachRevealWorkItems.removeValue(forKey: messageId)
+        animatedCoachReplies.removeValue(forKey: messageId)
+    }
+
+    private func cancelAllCoachReplyRevealAnimations() {
+        Array(coachRevealWorkItems.keys).forEach(cancelCoachReplyRevealAnimation)
+    }
+
+    private func pruneCoachReplyRevealAnimations(validMessageIds: Set<Int>) {
+        for messageId in coachRevealWorkItems.keys where !validMessageIds.contains(messageId) {
+            cancelCoachReplyRevealAnimation(for: messageId)
+        }
+        for messageId in animatedCoachReplies.keys where !validMessageIds.contains(messageId) {
+            animatedCoachReplies.removeValue(forKey: messageId)
+        }
+    }
+
     private func sendMessage() {
         guard let userId = appState.userId else { return }
         if isSending { return }
+        if messageTooLong {
+            infoNotice = "Message is too long to send. Keep it under \(maxMessageCharacters) characters."
+            return
+        }
         if newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draftAttachments.isEmpty { return }
 
         isSending = true
@@ -664,10 +748,19 @@ struct ConversationView: View {
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        authorizedDataTask(appState: appState, request: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
             DispatchQueue.main.async {
+                defer { isSending = false }
+                if let error {
+                    infoNotice = error.localizedDescription
+                    return
+                }
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to send message."
+                    return
+                }
                 newMessage = ""
-                isSending = false
                 lastTypingSent = false
                 wsManager.sendTyping(topic: conversation.id, isTyping: false)
                 loadMessages()
@@ -909,47 +1002,305 @@ struct ConversationView: View {
     }
 }
 
-struct ConversationMessageBubble: View {
+private func conversationCoachDisplayName(_ coachId: String?) -> String {
+    coachId == "lc" ? "LC Coach" : "ZJ Coach"
+}
+
+private func splitConversationReplySegments(_ content: String?) -> [String] {
+    let text = String(content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return [] }
+    let normalized = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\n{2,}", with: "\u{000B}", options: .regularExpression)
+    let parts = normalized
+        .components(separatedBy: "\u{000B}")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    return parts.isEmpty ? [text] : parts
+}
+
+private func parseConversationDisplayDate(_ value: String?) -> Date? {
+    let raw = String(value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return nil }
+
+    let normalized: String
+    if raw.range(of: #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"#, options: .regularExpression) != nil {
+        normalized = raw.replacingOccurrences(of: " ", with: "T") + "Z"
+    } else if raw.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$"#, options: .regularExpression) != nil {
+        normalized = raw + "Z"
+    } else {
+        normalized = raw
+    }
+
+    let fractionalFormatter = ISO8601DateFormatter()
+    fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractionalFormatter.date(from: normalized) {
+        return date
+    }
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    if let date = formatter.date(from: normalized) {
+        return date
+    }
+
+    let fallback = DateFormatter()
+    fallback.locale = Locale(identifier: "en_US_POSIX")
+    fallback.timeZone = TimeZone(secondsFromGMT: 0)
+    fallback.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return fallback.date(from: raw)
+}
+
+private func conversationDayToken(_ value: String?, timeZone: TimeZone) -> String? {
+    guard let date = parseConversationDisplayDate(value) else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+    let components = calendar.dateComponents([.year, .month, .day], from: date)
+    guard let year = components.year,
+          let month = components.month,
+          let day = components.day else {
+        return nil
+    }
+    return "\(year)-\(month)-\(day)"
+}
+
+private func formatConversationTime(_ value: String?, timeZone: TimeZone) -> String {
+    guard let date = parseConversationDisplayDate(value) else { return "" }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = timeZone
+    formatter.dateFormat = "MM/dd, h:mm a"
+    return formatter.string(from: date)
+}
+
+private func formatConversationDayLabel(_ value: String?, timeZone: TimeZone) -> String {
+    guard let date = parseConversationDisplayDate(value) else { return "" }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = timeZone
+
+    let normalized = calendar.startOfDay(for: date)
+    let today = calendar.startOfDay(for: Date())
+    let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+
+    if normalized == today { return "Today" }
+    if normalized == yesterday { return "Yesterday" }
+
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = timeZone
+    formatter.dateFormat = "EEE, MMM d"
+    return formatter.string(from: date)
+}
+
+private struct ConversationMessageRow: View {
     let message: Message
+    let previousMessage: Message?
     let currentUserId: Int
+    let conversationName: String
+    let conversationIsCoach: Bool
+    let coachId: String
+    let timeZone: TimeZone
+    let revealedCoachSegmentCount: Int?
+    let inlineTypingLabel: String
+
+    private var isMine: Bool {
+        message.from_user_id == currentUserId
+    }
+
+    private var showDateDivider: Bool {
+        conversationDayToken(previousMessage?.created_at, timeZone: timeZone) != conversationDayToken(message.created_at, timeZone: timeZone)
+    }
+
+    private var compact: Bool {
+        guard let previousMessage else { return false }
+        return previousMessage.from_user_id == message.from_user_id && !showDateDivider
+    }
+
+    private var showMetaLine: Bool {
+        !compact || isMine
+    }
+
+    private var senderLabel: String {
+        if isMine { return "You" }
+        if message.is_coach { return conversationCoachDisplayName(coachId) }
+        let trimmed = message.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? conversationName : trimmed
+    }
+
+    private var senderMetaLabel: String {
+        if !isMine && conversationIsCoach && message.is_coach {
+            return ""
+        }
+        return senderLabel
+    }
+
+    private var avatarText: String {
+        message.is_coach ? coachId.uppercased() : String(senderLabel.prefix(2)).uppercased()
+    }
+
+    private var contentSegments: [String] {
+        if message.is_coach && !isMine {
+            return splitConversationReplySegments(message.content)
+        }
+        let text = String(message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? [] : [text]
+    }
+
+    private var renderedSegments: [String] {
+        guard message.is_coach && !isMine else { return contentSegments }
+        let count = max(0, min(revealedCoachSegmentCount ?? contentSegments.count, contentSegments.count))
+        return Array(contentSegments.prefix(count))
+    }
+
+    private var hasRemainingCoachSegments: Bool {
+        guard message.is_coach && !isMine else { return false }
+        return (revealedCoachSegmentCount ?? contentSegments.count) < contentSegments.count
+    }
+
+    private var mediaUrls: [String] {
+        message.media_urls ?? []
+    }
+
+    private var rowWidth: CGFloat {
+        min(UIScreen.main.bounds.width * 0.76, 360)
+    }
 
     var body: some View {
-        let isMine = message.from_user_id == currentUserId
-        let bubbleBackground = isMine ? Color.white.opacity(0.94) : Color.zymBubbleDark
-        let bubbleMetaColor = isMine ? Color.zymSubtext : Color.white.opacity(0.82)
+        VStack(spacing: 10) {
+            if showDateDivider {
+                ConversationDayDivider(label: formatConversationDayLabel(message.created_at, timeZone: timeZone))
+            }
 
-        return HStack {
-            if isMine { Spacer() }
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(isMine ? "You" : message.username)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(bubbleMetaColor)
-                    Text(String(message.created_at.prefix(16)))
-                        .font(.system(size: 11))
-                        .foregroundColor(isMine ? Color.zymSubtext : Color.white.opacity(0.68))
+            HStack(alignment: .bottom, spacing: 10) {
+                if isMine {
+                    Spacer(minLength: 40)
+                } else {
+                    ConversationAvatarBadge(
+                        isCoach: message.is_coach,
+                        coachId: coachId,
+                        avatarURL: message.avatar_url,
+                        fallbackText: avatarText
+                    )
+                    .opacity(compact ? 0 : 1)
                 }
 
-                if let content = message.content {
-                    ConversationMarkdownText(content: content, isMine: isMine)
-                }
+                VStack(alignment: isMine ? .trailing : .leading, spacing: 8) {
+                    if showMetaLine {
+                        HStack(spacing: 6) {
+                            if !senderMetaLabel.isEmpty {
+                                Text(senderMetaLabel.uppercased())
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .kerning(1.2)
+                            }
+                            Text(formatConversationTime(message.created_at, timeZone: timeZone).uppercased())
+                                .font(.system(size: 11))
+                                .kerning(1.2)
+                        }
+                        .foregroundColor(Color.zymSubtext.opacity(0.78))
+                    }
 
-                if let mediaUrls = message.media_urls, !mediaUrls.isEmpty {
-                    RemoteMediaGrid(mediaUrls: mediaUrls, isMine: isMine)
+                    VStack(alignment: isMine ? .trailing : .leading, spacing: 8) {
+                        ForEach(Array(renderedSegments.enumerated()), id: \.offset) { _, segment in
+                            ConversationSegmentBubble(content: segment, isMine: isMine)
+                        }
+
+                        if hasRemainingCoachSegments {
+                            TypingIndicator(label: inlineTypingLabel)
+                        }
+
+                        if !mediaUrls.isEmpty {
+                            RemoteMediaGrid(mediaUrls: mediaUrls, isMine: isMine)
+                        }
+                    }
+                }
+                .frame(maxWidth: rowWidth, alignment: isMine ? .trailing : .leading)
+
+                if !isMine {
+                    Spacer(minLength: 6)
                 }
             }
-            .padding(12)
-            .background(bubbleBackground)
+            .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
+        }
+    }
+}
+
+private struct ConversationDayDivider: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.zymLine.opacity(0.75))
+                .frame(height: 1)
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .kerning(1.4)
+                .foregroundColor(Color.zymSubtext.opacity(0.72))
+                .textCase(.uppercase)
+            Rectangle()
+                .fill(Color.zymLine.opacity(0.75))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct ConversationAvatarBadge: View {
+    let isCoach: Bool
+    let coachId: String
+    let avatarURL: String?
+    let fallbackText: String
+
+    var body: some View {
+        avatarContent
+            .frame(width: 34, height: 34)
+            .clipShape(Circle())
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        if !isCoach, let url = resolveRemoteURL(avatarURL) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    fallbackCircle
+                }
+            }
+        } else {
+            fallbackCircle
+        }
+    }
+
+    private var fallbackCircle: some View {
+        Circle()
+            .fill(isCoach ? Color.zymCoachAccent(coachId) : Color.zymSurfaceSoft)
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                Text(fallbackText)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(isCoach ? .white : Color.zymPrimaryDark)
+            )
+    }
+}
+
+private struct ConversationSegmentBubble: View {
+    let content: String
+    let isMine: Bool
+
+    var body: some View {
+        ConversationMarkdownText(content: content, isMine: isMine)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(isMine ? Color.white.opacity(0.94) : Color.zymBubbleDark)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(isMine ? Color.zymLine : Color.clear, lineWidth: 1)
             )
-            .cornerRadius(14)
-            .shadow(color: isMine ? Color.black.opacity(0.04) : Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
-
-            if !isMine { Spacer() }
-        }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: isMine ? Color.black.opacity(0.04) : Color.black.opacity(0.12), radius: 16, x: 0, y: 8)
     }
 }
 
@@ -1067,19 +1418,28 @@ struct TypingIndicator: View {
     @State private var pulse = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 4) {
-                Circle().frame(width: 5, height: 5)
-                Circle().frame(width: 5, height: 5)
-                Circle().frame(width: 5, height: 5)
-            }
-            .foregroundColor(Color.zymPrimary.opacity(0.75))
-            .scaleEffect(pulse ? 1 : 0.85)
-
+        HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(Color.zymSubtext)
+
+            HStack(spacing: 4) {
+                Circle().frame(width: 6, height: 6)
+                Circle().frame(width: 6, height: 6)
+                Circle().frame(width: 6, height: 6)
+            }
+            .foregroundColor(Color.zymSubtext.opacity(0.52))
+            .scaleEffect(pulse ? 1 : 0.85)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.96))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.zymLine.opacity(0.9), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 6)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.82).repeatForever(autoreverses: true)) {
                 pulse = true
@@ -1185,7 +1545,9 @@ struct Message: Identifiable, Codable {
     let content: String?
     let created_at: String
     let username: String
+    let avatar_url: String?
     let media_urls: [String]?
+    let is_coach: Bool
 }
 
 struct MessagesResponse: Codable {

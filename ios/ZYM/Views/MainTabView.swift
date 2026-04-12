@@ -27,13 +27,13 @@ struct MainTabView: View {
                         Text("Feed")
                     }
 
-                LeaderboardView()
+                CalendarView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
                     .tag(2)
                     .tabItem {
-                        Image(systemName: "trophy.fill")
+                        Image(systemName: "calendar")
                             .symbolEffect(.bounce, value: selectedTab)
-                        Text("Rank")
+                        Text("Calendar")
                     }
 
                 ProfileView()

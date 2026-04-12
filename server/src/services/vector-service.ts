@@ -179,7 +179,8 @@ export class VectorService {
           }
           const score = this.normalizeScore(Number(distances[index] || 0));
           const id = String(ids[index] || `${matchDomain}:${source}:${index + 1}`);
-          const key = `${source}:${text.slice(0, 120)}`;
+          const dedupeAnchor = String(metadata?.title || source).trim().slice(0, 300) || source;
+          const key = `${matchDomain}:${dedupeAnchor}`;
           const existing = merged.get(key);
           if (existing && existing.score >= score) continue;
           merged.set(key, {

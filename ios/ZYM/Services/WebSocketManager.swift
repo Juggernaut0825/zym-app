@@ -7,6 +7,7 @@ struct SocketChatMessage: Codable {
     let content: String?
     let created_at: String?
     let username: String?
+    let avatar_url: String?
     let media_urls: [String]?
     let is_coach: Bool?
 }

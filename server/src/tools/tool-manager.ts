@@ -3,7 +3,7 @@ import { SecurityEventService } from '../services/security-event-service.js';
 import { createDefaultTypedTools } from './tool-registry.js';
 
 const MAX_TOOL_OUTPUT_CHARS = 12_000;
-const WRITE_TOOL_NAMES = new Set(['set_profile', 'log_meal', 'log_training', 'set_training_plan']);
+const WRITE_TOOL_NAMES = new Set(['set_profile', 'log_check_in', 'log_meal', 'log_training']);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

@@ -1,8 +1,8 @@
 import SwiftUI
 
 extension Color {
-    static let zymBackground = Color(red: 0.969, green: 0.961, blue: 0.941)
-    static let zymBackgroundSoft = Color(red: 0.984, green: 0.980, blue: 0.969)
+    static let zymBackground = Color.white
+    static let zymBackgroundSoft = Color.white
     static let zymSurface = Color.white
     static let zymSurfaceSoft = Color(red: 0.965, green: 0.949, blue: 0.918)
     static let zymLine = Color(red: 0.867, green: 0.847, blue: 0.812)
@@ -12,7 +12,7 @@ extension Color {
     static let zymSecondaryDark = Color(red: 0.694, green: 0.388, blue: 0.133)
     static let zymText = Color(red: 0.122, green: 0.122, blue: 0.122)
     static let zymSubtext = Color(red: 0.439, green: 0.415, blue: 0.388)
-    static let zymBubbleDark = Color(red: 0.427, green: 0.475, blue: 0.557)
+    static let zymBubbleDark = Color(red: 0.353, green: 0.396, blue: 0.475)
     static let zymCoachBlue = Color(red: 0.424, green: 0.486, blue: 0.965)
     static let zymCoachBlueDark = Color(red: 0.290, green: 0.341, blue: 0.788)
 
@@ -58,7 +58,6 @@ struct ZYMCard: ViewModifier {
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 10)
-            .shadow(color: Color.zymSecondary.opacity(0.05), radius: 2, x: 0, y: 0)
     }
 }
 
@@ -159,30 +158,6 @@ struct ZYMCoachButtonStyle: ButtonStyle {
 
 struct ZYMBackgroundLayer: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.zymBackground, Color.zymBackgroundSoft, Color(red: 0.973, green: 0.968, blue: 0.955)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Circle()
-                .fill(Color.zymSecondary.opacity(0.12))
-                .frame(width: 280, height: 280)
-                .blur(radius: 28)
-                .offset(x: -150, y: -320)
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.13))
-                .frame(width: 320, height: 320)
-                .blur(radius: 36)
-                .offset(x: 170, y: -250)
-
-            Circle()
-                .fill(Color.zymSecondary.opacity(0.08))
-                .frame(width: 240, height: 240)
-                .blur(radius: 40)
-                .offset(x: 180, y: 340)
-        }
+        Color.white
     }
 }

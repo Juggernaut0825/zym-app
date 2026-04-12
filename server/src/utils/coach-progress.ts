@@ -131,11 +131,11 @@ export function normalizeCoachCheckIn(raw: unknown): CoachCheckIn | null {
   const normalized: CoachCheckIn = {
     weight_kg: toRoundedNumber(record.weight_kg, 20, 350),
     body_fat_pct: toRoundedNumber(record.body_fat_pct, 2, 70),
-    waist_cm: toRoundedNumber(record.waist_cm, 30, 250),
-    energy: toRoundedInt(record.energy, 1, 5),
-    hunger: toRoundedInt(record.hunger, 1, 5),
-    recovery: toRoundedInt(record.recovery, 1, 5),
-    adherence: normalizeAdherence(record.adherence),
+    waist_cm: null,
+    energy: null,
+    hunger: null,
+    recovery: null,
+    adherence: null,
     notes: safeText(record.notes, 500) || null,
     timezone: safeText(record.timezone, 80) || null,
     occurred_at_utc: normalizeIso(record.occurred_at_utc),
@@ -342,16 +342,6 @@ export function buildCoachProgressPinnedFacts(
 
   if (summary.latestBodyFatPct !== null) {
     facts.push(`Latest body fat ${summary.latestBodyFatPct}%${summary.lastBodyFatDay ? ` on ${summary.lastBodyFatDay}` : ''}`);
-  }
-
-  if (summary.avgEnergy7d !== null || summary.avgRecovery7d !== null || summary.adherence7d !== 'unknown') {
-    const parts: string[] = [];
-    if (summary.avgEnergy7d !== null) parts.push(`energy ${summary.avgEnergy7d}/5`);
-    if (summary.avgRecovery7d !== null) parts.push(`recovery ${summary.avgRecovery7d}/5`);
-    if (summary.adherence7d !== 'unknown') parts.push(`adherence ${summary.adherence7d}`);
-    if (parts.length > 0) {
-      facts.push(`Recent check-ins: ${parts.join(', ')}`);
-    }
   }
 
   if (summary.status !== 'insufficient_data') {

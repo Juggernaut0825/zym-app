@@ -418,10 +418,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   };
 
   return (
-    <div className="relative min-h-dvh overflow-x-hidden px-4 py-6 sm:px-6 sm:py-8">
-      <div className="pointer-events-none absolute -left-24 -top-24 size-[28rem] rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.14)_0%,_rgba(105,121,247,0)_70%)]" />
-      <div className="pointer-events-none absolute -bottom-24 -right-24 size-[30rem] rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.16)_0%,_rgba(242,138,58,0)_70%)]" />
-
+    <div className="relative min-h-dvh overflow-x-hidden bg-white px-4 py-6 sm:px-6 sm:py-8">
       <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col">
         <div className="mx-auto w-full max-w-4xl">
           <div className="mb-6 flex items-center justify-between gap-4">

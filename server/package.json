@@ -11,6 +11,7 @@
     "db:export:sqlite": "tsx scripts/export-sqlite-to-postgres.ts",
     "db:generate:postgres-import": "tsx scripts/generate-postgres-import-sql.ts",
     "db:bootstrap:postgres": "./scripts/bootstrap-postgres-from-sqlite.sh",
+    "kb:materialize": "tsx scripts/materialize-knowledge-manifest.ts",
     "kb:manifest": "node scripts/generate-knowledge-manifest.mjs",
     "kb:inspect": "tsx scripts/inspect-knowledge-corpus.ts",
     "kb:reindex": "tsx scripts/refresh-paper-corpus.ts --clear",

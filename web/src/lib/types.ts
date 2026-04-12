@@ -373,6 +373,13 @@ export interface CoachCheckInRecord {
   logged_at?: string | null;
 }
 
+export interface CoachHealthSnapshot {
+  steps: number;
+  calories_burned: number;
+  active_minutes: number;
+  synced_at: string | null;
+}
+
 export interface CoachProgressSummary {
   latestCheckInDay: string | null;
   latestCheckInAt: string | null;
@@ -401,6 +408,7 @@ export interface CoachDayRecord {
   total_intake: number;
   total_burned: number;
   check_in?: CoachCheckInRecord | null;
+  health?: CoachHealthSnapshot | null;
   meals: CoachMealRecord[];
   training: CoachTrainingRecord[];
 }
@@ -416,6 +424,7 @@ export interface CoachRecordsResponse {
     mealCount: number;
     trainingCount: number;
     checkInCount?: number;
+    healthDayCount?: number;
   };
 }
 

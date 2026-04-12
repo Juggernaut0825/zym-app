@@ -19,7 +19,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>ZYM uses your steps and active calories to sync leaderboard ranking with your consent.</string>
+	<string>ZYM uses your steps, active calories, and exercise minutes to sync your calendar progress with your consent.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>ZYM uses your camera to scan friend connect QR codes.</string>
 	<key>UILaunchScreen</key>

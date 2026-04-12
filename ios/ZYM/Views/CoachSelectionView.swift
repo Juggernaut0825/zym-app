@@ -6,7 +6,7 @@ struct CoachSelectionView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.98, green: 0.99, blue: 0.98).ignoresSafeArea()
+            Color.white.ignoresSafeArea()
 
             VStack(spacing: 40) {
                 Text("Choose Your Coach")

@@ -282,14 +282,6 @@ export class ConversationRunner {
       parts.push(`I logged that meal${day ? ` for ${day}` : ''}${calorieSuffix}.`);
     }
 
-    const plan = latestResults.get('set_training_plan');
-    if (plan?.plan) {
-      const title = this.safeToolString(plan.plan.title, 120);
-      const day = this.safeToolString(plan.day, 32);
-      const count = Array.isArray(plan.plan.exercises) ? plan.plan.exercises.length : 0;
-      parts.push(`I saved ${title || 'a training plan'}${day ? ` for ${day}` : ''}${count > 0 ? ` with ${count} exercise${count === 1 ? '' : 's'}` : ''}.`);
-    }
-
     const profile = latestResults.get('get_profile');
     if (parts.length === 0 && profile?.timezone) {
       parts.push(`I confirmed your profile context. Timezone: ${this.safeToolString(profile.timezone, 80)}.`);

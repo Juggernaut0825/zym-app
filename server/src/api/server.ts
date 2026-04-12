@@ -252,10 +252,18 @@ interface CoachTrainingEntry {
   [key: string]: unknown;
 }
 
+interface CoachHealthSnapshot {
+  steps: number;
+  calories_burned: number;
+  active_minutes: number;
+  synced_at: string | null;
+}
+
 interface CoachDailyBucket {
   meals: CoachMealEntry[];
   training: CoachTrainingEntry[];
   check_in?: CoachCheckIn | null;
+  health?: CoachHealthSnapshot | null;
   total_intake: number;
   total_burned: number;
   [key: string]: unknown;
@@ -265,6 +273,7 @@ type CoachDailyRecords = Record<string, CoachDailyBucket>;
 
 const COACH_RECORD_TEXT_MAX = 500;
 const COACH_PROFILE_TEXT_MAX = 80;
+const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 const COACH_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COACH_TIME_PATTERN = /^\d{2}:\d{2}$/;
 const COACH_RECORD_ID_PATTERN = /^[a-zA-Z0-9._-]{6,120}$/;
@@ -336,6 +345,59 @@ function roundTo2(value: unknown): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.round(numeric * 100) / 100;
+}
+
+function normalizeCoachDailyHealth(raw: unknown): CoachHealthSnapshot | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const hasSignal = [
+    record.steps,
+    record.calories_burned,
+    record.calories,
+    record.active_minutes,
+    record.activeMinutes,
+    record.synced_at,
+  ].some((value) => value !== null && value !== undefined && value !== '');
+
+  if (!hasSignal) {
+    return null;
+  }
+
+  const steps = Math.max(0, Math.min(300000, Number(record.steps || 0)));
+  const calories = Math.max(0, Math.min(20000, Number(record.calories_burned || record.calories || 0)));
+  const activeMinutes = Math.max(0, Math.min(1440, Number(record.active_minutes || record.activeMinutes || 0)));
+  const syncedAtRaw = sanitizePlainText(record.synced_at, 80);
+  const syncedAt = syncedAtRaw
+    ? (() => {
+        const parsed = new Date(syncedAtRaw);
+        return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+      })()
+    : null;
+
+  return {
+    steps: Number.isFinite(steps) ? Math.round(steps) : 0,
+    calories_burned: Number.isFinite(calories) ? Math.round(calories) : 0,
+    active_minutes: Number.isFinite(activeMinutes) ? Math.round(activeMinutes) : 0,
+    synced_at: syncedAt,
+  };
+}
+
+function localDayForTimezone(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const map = new Map(parts.map((item) => [item.type, item.value]));
+  const year = map.get('year') || '1970';
+  const month = map.get('month') || '01';
+  const day = map.get('day') || '01';
+  return `${year}-${month}-${day}`;
 }
 
 function parseRepsForVolume(repsRaw: unknown): number {
@@ -410,6 +472,7 @@ function normalizeCoachDailyRecords(raw: unknown): CoachDailyRecords {
       meals,
       training,
       check_in: normalizeCoachCheckIn(bucket.check_in),
+      health: normalizeCoachDailyHealth(bucket.health),
       total_intake: roundTo2(bucket.total_intake),
       total_burned: roundTo2(bucket.total_burned),
     };
@@ -2477,7 +2540,7 @@ app.post('/messages/send',
     maxLength: 120,
     pattern: /^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
   },
-  content: { type: 'string', maxLength: 8000 },
+  content: { type: 'string', maxLength: MAX_CHAT_MESSAGE_CHARACTERS },
   mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },
   mediaIds: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 128 },
   replyTo: { type: 'number', integer: true, min: 1 },
@@ -2487,7 +2550,7 @@ app.post('/messages/send',
   try {
     const fromUserId = toUserId(req.body.fromUserId);
     const topic = String(req.body.topic || '').trim();
-    const content = String(req.body.content || '').trim().slice(0, 8000);
+    const content = String(req.body.content || '').trim().slice(0, MAX_CHAT_MESSAGE_CHARACTERS);
     const clientMessageId = String(req.body.clientMessageId || '').trim().slice(0, 80) || null;
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
@@ -2877,7 +2940,10 @@ app.get('/profile/public/:userId', async (req, res) => {
     });
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const todayTimezone = user.timezone && isValidTimeZone(String(user.timezone))
+    ? String(user.timezone)
+    : 'UTC';
+  const today = localDayForTimezone(new Date(), todayTimezone);
   const todayHealth = db
     .prepare('SELECT steps, calories_burned, active_minutes, synced_at FROM health_data WHERE user_id = ? AND date = ?')
     .get(targetUserId, today) as any;
@@ -3018,6 +3084,7 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
     const profile = await coachTypedToolsService.getProfile(String(userId));
     const { daily, changed } = await loadCoachDailyRecords(userId);
     const progressSummary = computeCoachProgressSummary(daily, (profile as any)?.goal);
+    let shouldPersistDaily = changed;
 
     if (changed) {
       await writeJsonAtomic(getCoachDailyPath(userId), daily);
@@ -3028,22 +3095,52 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
       .sort((a, b) => b.localeCompare(a))
       .slice(0, maxDays);
 
+    const healthByDay = new Map<string, CoachHealthSnapshot>();
+    if (sortedDays.length > 0) {
+      const db = getDB();
+      const placeholders = sortedDays.map(() => '?').join(',');
+      const rows = db.prepare(`
+        SELECT date, steps, calories_burned, active_minutes, synced_at
+        FROM health_data
+        WHERE user_id = ? AND date IN (${placeholders})
+      `).all(userId, ...sortedDays) as Array<Record<string, unknown>>;
+
+      for (const row of rows) {
+        const day = sanitizePlainText(row.date, 20);
+        if (!isValidDayKey(day)) continue;
+        const health = normalizeCoachDailyHealth(row);
+        if (!health) continue;
+        healthByDay.set(day, health);
+      }
+    }
+
     const records = sortedDays.map((day) => {
       const bucket = daily[day];
       recomputeCoachDailyTotals(bucket);
+      const health = normalizeCoachDailyHealth(bucket.health) || healthByDay.get(day) || null;
+      if (health && (!bucket.health || JSON.stringify(bucket.health) !== JSON.stringify(health))) {
+        bucket.health = health;
+        shouldPersistDaily = true;
+      }
       return {
         day,
         total_intake: bucket.total_intake,
         total_burned: bucket.total_burned,
         check_in: bucket.check_in || null,
+        health,
         meals: bucket.meals,
         training: bucket.training,
       };
     });
 
+    if (shouldPersistDaily) {
+      await writeJsonAtomic(getCoachDailyPath(userId), daily);
+    }
+
     const mealCount = records.reduce((sum, day) => sum + day.meals.length, 0);
     const trainingCount = records.reduce((sum, day) => sum + day.training.length, 0);
     const checkInCount = records.reduce((sum, day) => sum + (day.check_in ? 1 : 0), 0);
+    const healthDayCount = records.reduce((sum, day) => sum + (day.health ? 1 : 0), 0);
     const selectedCoach = resolveSelectedCoachForUser(userId);
     const enabledCoaches = resolveEnabledCoachesForUser(userId);
 
@@ -3058,6 +3155,7 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
         mealCount,
         trainingCount,
         checkInCount,
+        healthDayCount,
       },
     });
   } catch (err: any) {
@@ -3167,11 +3265,6 @@ app.post('/coach/records/check-in/update',
     occurredAtUtc: { type: 'string', maxLength: 80 },
     weight_kg: { type: 'number', min: 20, max: 350 },
     body_fat_pct: { type: 'number', min: 2, max: 70 },
-    waist_cm: { type: 'number', min: 30, max: 250 },
-    energy: { type: 'number', integer: true, min: 1, max: 5 },
-    hunger: { type: 'number', integer: true, min: 1, max: 5 },
-    recovery: { type: 'number', integer: true, min: 1, max: 5 },
-    adherence: { type: 'string', enum: ['on_track', 'partial', 'off_track'] },
     notes: { type: 'string', maxLength: COACH_RECORD_TEXT_MAX },
   }),
   async (req, res) => {
@@ -3186,11 +3279,6 @@ app.post('/coach/records/check-in/update',
         occurredAt: req.body.occurredAtUtc,
         weight_kg: req.body.weight_kg,
         body_fat_pct: req.body.body_fat_pct,
-        waist_cm: req.body.waist_cm,
-        energy: req.body.energy,
-        hunger: req.body.hunger,
-        recovery: req.body.recovery,
-        adherence: req.body.adherence,
         notes: req.body.notes,
       });
 
@@ -3448,13 +3536,23 @@ app.post('/health/sync', requireSameUserIdFromBody('userId'), APIGateway.validat
   steps: { type: 'number', integer: true, min: 0, max: 300000 },
   calories: { type: 'number', integer: true, min: 0, max: 20000 },
   activeMinutes: { type: 'number', integer: true, min: 0, max: 1440 },
+  timezone: { type: 'string', maxLength: 80 },
 }), async (req, res) => {
   const db = getDB();
   const userId = toUserId(req.body.userId);
   const steps = toOptionalInt(req.body.steps) || 0;
   const calories = toOptionalInt(req.body.calories) || 0;
   const activeMinutes = toOptionalInt(req.body.activeMinutes) || 0;
-  const today = new Date().toISOString().split('T')[0];
+  const requestedTimezone = sanitizePlainText(req.body.timezone, 80);
+  const userRow = db.prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
+  const timezone = requestedTimezone && isValidTimeZone(requestedTimezone)
+    ? requestedTimezone
+    : userRow?.timezone && isValidTimeZone(String(userRow.timezone))
+      ? String(userRow.timezone)
+      : 'UTC';
+  const now = new Date();
+  const today = localDayForTimezone(now, timezone);
+  const syncedAt = now.toISOString();
 
   db.prepare('INSERT OR REPLACE INTO health_data (user_id, date, steps, calories_burned, active_minutes) VALUES (?, ?, ?, ?, ?)').run(
     userId,
@@ -3463,7 +3561,28 @@ app.post('/health/sync', requireSameUserIdFromBody('userId'), APIGateway.validat
     calories,
     activeMinutes,
   );
-  res.json({ success: true });
+
+  const dailyPath = getCoachDailyPath(userId);
+  const daily = normalizeCoachDailyRecords(await readJsonFile<Record<string, unknown>>(dailyPath, {}));
+  if (!daily[today]) {
+    daily[today] = { meals: [], training: [], total_intake: 0, total_burned: 0 };
+  }
+  daily[today].health = {
+    steps,
+    calories_burned: calories,
+    active_minutes: activeMinutes,
+    synced_at: syncedAt,
+  };
+  await writeJsonAtomic(dailyPath, daily);
+
+  db.prepare('UPDATE users SET apple_health_enabled = 1 WHERE id = ?').run(userId);
+
+  res.json({
+    success: true,
+    day: today,
+    timezone,
+    health: daily[today].health,
+  });
 });
 
 app.get('/health/leaderboard/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
@@ -3617,14 +3736,14 @@ app.post('/fitness/workout-plan',
 app.post('/chat',
   APIGateway.rateLimit(80, 10 * 60_000, 'coach-chat'),
   APIGateway.validateSchema({
-    message: { type: 'string', maxLength: 8000 },
+    message: { type: 'string', maxLength: MAX_CHAT_MESSAGE_CHARACTERS },
     mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },
     mediaIds: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 128 },
   }),
   async (req, res) => {
   try {
     const userId = String(assertAuthUser(req));
-    const message = String(req.body.message || '').trim().slice(0, 8000);
+    const message = String(req.body.message || '').trim().slice(0, MAX_CHAT_MESSAGE_CHARACTERS);
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
     const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : mediaPathsForAssetIds(mediaIds);

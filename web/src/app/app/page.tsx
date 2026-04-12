@@ -51,7 +51,7 @@ import { resolveApiAssetUrl } from '@/lib/config';
 import { clearAuth, getAuth } from '@/lib/auth-storage';
 import { RealtimeClient } from '@/lib/realtime';
 import { ConversationTile } from '@/components/chat/ConversationTile';
-import { CoachWorkspacePanel, type CoachWorkspaceMode } from '@/components/chat/CoachWorkspacePanel';
+import { CoachCalendarPanel } from '@/components/chat/CoachCalendarPanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
 import { WelcomeFlow } from '@/components/onboarding/WelcomeFlow';
 import {
@@ -80,17 +80,16 @@ const BASE_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1
 const tabs = [
   { key: 'messages', label: 'Message', icon: 'chat_bubble' },
   { key: 'community', label: 'Community', icon: 'groups' },
-  { key: 'leaderboard', label: 'Leaderboard', icon: 'emoji_events' },
+  { key: 'calendar', label: 'Calendar', icon: 'calendar_month' },
   { key: 'profile', label: 'Profile', icon: 'person' },
 ] as const;
 
-const visibleTabs = tabs.filter((item) => item.key !== 'leaderboard');
+const visibleTabs = tabs;
 
 type VisibleTabKey = (typeof tabs)[number]['key'];
 type TabKey = VisibleTabKey | 'friends';
 type TabIcon = (typeof tabs)[number]['icon'];
 type CoachId = 'zj' | 'lc';
-type CoachPanelMode = 'chat' | CoachWorkspaceMode;
 
 type ConversationType = 'coach' | 'dm' | 'group';
 interface Conversation {
@@ -138,6 +137,7 @@ const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 const GROUP_MEMBER_LIMIT = 500;
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
 const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
@@ -493,13 +493,6 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? 'LC Coach' : 'ZJ Coach';
 }
 
-function coachWorkspaceLabel(mode: CoachWorkspaceMode): string {
-  if (mode === 'info') return 'Info';
-  if (mode === 'meals') return 'Meals';
-  if (mode === 'trains') return 'Trains';
-  return 'Progress';
-}
-
 function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
@@ -649,7 +642,7 @@ function normalizeTabKey(value: string | null): TabKey {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'message' || raw === 'messages' || raw === 'chat') return 'messages';
   if (raw === 'community' || raw === 'feed' || raw === 'friends') return 'community';
-  if (raw === 'leaderboard') return 'leaderboard';
+  if (raw === 'leaderboard' || raw === 'calendar') return 'calendar';
   if (raw === 'profile') return 'profile';
   return 'messages';
 }
@@ -662,7 +655,6 @@ export default function AppPage() {
   const authStorageSyncTriggeredRef = useRef(false);
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatStreamRef = useRef<HTMLDivElement | null>(null);
-  const coachMenuRef = useRef<HTMLDivElement | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
   const conversationSearchRef = useRef<HTMLInputElement | null>(null);
   const messageDraftsRef = useRef<Record<string, string>>({});
@@ -670,7 +662,6 @@ export default function AppPage() {
   const coachReplyRevealTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>[]>>({});
   const coachReplyRevealQueuesRef = useRef<Record<string, ChatMessage[]>>({});
   const coachReplyRevealActiveMessageRef = useRef<Record<string, string | null>>({});
-  const previousCoachPanelModeRef = useRef<CoachPanelMode>('chat');
   const skipTypingPulseRef = useRef(false);
   const notificationAudioContextRef = useRef<AudioContext | null>(null);
   const lastNotificationKeyRef = useRef<string>('');
@@ -701,8 +692,6 @@ export default function AppPage() {
   const [attachmentPreviews, setAttachmentPreviews] = useState<Array<{ url: string; isVideo: boolean; name: string }>>([]);
   const [composerActionsOpen, setComposerActionsOpen] = useState(false);
   const [pendingSend, setPendingSend] = useState(false);
-  const [coachPanelMode, setCoachPanelMode] = useState<CoachPanelMode>('chat');
-  const [coachMenuOpen, setCoachMenuOpen] = useState(false);
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<Friend[]>([]);
@@ -932,6 +921,7 @@ export default function AppPage() {
     () => Object.keys(animatedCoachReplies).length > 0,
     [animatedCoachReplies],
   );
+  const composerTooLong = composer.length > MAX_CHAT_MESSAGE_CHARACTERS;
 
   const typingLabel = useMemo(() => {
     const ids = Object.entries(typingUsers)
@@ -1047,17 +1037,15 @@ export default function AppPage() {
       };
     }
 
-    if (tab === 'leaderboard') {
-      const topName = leaderboard[0]?.username || '-';
-      const topScore = leaderboard[0] ? String((leaderboard[0].steps || 0) + (leaderboard[0].calories_burned || 0)) : '0';
+    if (tab === 'calendar') {
       return {
-        kicker: 'Performance Board',
-        title: 'Climb your weekly ranking',
-        subtitle: 'Sync daily movement and keep pressure on your training circle.',
+        kicker: 'Daily Record',
+        title: 'See the whole day without opening coach menus',
+        subtitle: 'Progress, meals, training, and Apple Health sync now live in one calendar view.',
         stats: [
-          { label: 'Athletes', value: String(leaderboard.length) },
-          { label: '#1', value: topName },
-          { label: 'Top score', value: topScore },
+          { label: 'Active coaches', value: String(enabledCoaches.length) },
+          { label: 'Connections', value: String(friends.length) },
+          { label: 'History', value: '120d' },
         ],
       };
     }
@@ -1705,35 +1693,7 @@ export default function AppPage() {
   }, [activeConversation?.topic]);
 
   useEffect(() => {
-    setCoachMenuOpen(false);
-    if (!activeConversation || activeConversation.type !== 'coach') {
-      setCoachPanelMode('chat');
-      return;
-    }
-    setCoachPanelMode('chat');
-  }, [activeConversation?.topic]);
-
-  useEffect(() => {
-    if (coachPanelMode === 'chat') return;
-    setComposerActionsOpen(false);
-  }, [coachPanelMode]);
-
-  useEffect(() => {
-    const previousMode = previousCoachPanelModeRef.current;
-    previousCoachPanelModeRef.current = coachPanelMode;
-
-    if (activeConversation?.type !== 'coach') return;
-    if (coachPanelMode !== 'chat' || previousMode === 'chat') return;
-
-    scrollChatToBottom('auto');
-  }, [activeConversation?.type, coachPanelMode]);
-
-  useEffect(() => {
     if (!activeTopic) return;
-    if (activeConversation?.type === 'coach' && coachPanelMode !== 'chat') {
-      realtimeRef.current?.typing(activeTopic, false);
-      return;
-    }
     if (skipTypingPulseRef.current) {
       skipTypingPulseRef.current = false;
       return;
@@ -1744,7 +1704,7 @@ export default function AppPage() {
     return () => {
       realtimeRef.current?.typing(activeTopic, false);
     };
-  }, [composer, activeTopic, activeConversation?.type, coachPanelMode]);
+  }, [composer, activeTopic]);
 
   useEffect(() => {
     return () => {
@@ -1835,30 +1795,6 @@ export default function AppPage() {
       window.removeEventListener('keydown', onEscape);
     };
   }, [composerActionsOpen]);
-
-  useEffect(() => {
-    if (!coachMenuOpen) return;
-
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!coachMenuRef.current?.contains(target)) {
-        setCoachMenuOpen(false);
-      }
-    };
-
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCoachMenuOpen(false);
-      }
-    };
-
-    window.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('keydown', onEscape);
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('keydown', onEscape);
-    };
-  }, [coachMenuOpen]);
 
   useEffect(() => {
     const onHotkey = (event: KeyboardEvent) => {
@@ -2314,6 +2250,10 @@ export default function AppPage() {
   async function handleSendMessage() {
     if (!isOnline) {
       setError('You are offline. Reconnect to send messages.');
+      return;
+    }
+    if (composerTooLong) {
+      setError(`Message is too long to send. Keep it under ${MAX_CHAT_MESSAGE_CHARACTERS.toLocaleString()} characters.`);
       return;
     }
     if (pendingSend || !activeTopic || (!composer.trim() && attachments.length === 0)) return;
@@ -3067,8 +3007,6 @@ export default function AppPage() {
   const activeConversationTheme = coachTheme(activeConversationCoach);
   const selectedCoachTheme = coachTheme(selectedCoach);
   const selectedCoachButtonClass = coachButtonClass(selectedCoach);
-  const isCoachWorkspaceOpen = activeConversation?.type === 'coach' && coachPanelMode !== 'chat';
-  const activeCoachWorkspaceMode: CoachWorkspaceMode = coachPanelMode === 'chat' ? 'info' : coachPanelMode;
   const activeConversationButtonClass = coachButtonClass(activeConversation?.type === 'group'
     ? normalizeCoachId(activeConversation.coachEnabled)
     : activeConversationCoach);
@@ -3128,9 +3066,7 @@ export default function AppPage() {
   const renderMessagePage = () => {
     const showConversationList = isWideMessageLayout || mobileConversationListOpen || !activeConversation;
     const showConversationPane = isWideMessageLayout || !mobileConversationListOpen;
-    const coachWorkspaceHeaderTitle = coachWorkspaceLabel(activeCoachWorkspaceMode);
-    const showChatListBackButton = !isWideMessageLayout && !isCoachWorkspaceOpen;
-    const showWorkspaceBackButton = isCoachWorkspaceOpen;
+    const showChatListBackButton = !isWideMessageLayout;
 
     return (
     <div className="flex h-full flex-col">
@@ -3160,7 +3096,7 @@ export default function AppPage() {
         </label>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:gap-4 sm:p-4 md:p-6 xl:flex-row xl:gap-6">
+	      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:gap-4 sm:p-4 md:p-6 xl:flex-row xl:gap-6">
         <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-2.5 sm:gap-3 xl:flex xl:w-[320px]`}>
           <button
             type="button"
@@ -3199,69 +3135,57 @@ export default function AppPage() {
           </div>
         </section>
 
-        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[22px] border border-white/60 bg-white/35 backdrop-blur-xl sm:rounded-[28px] xl:flex`}>
-          <header className="flex items-center justify-between gap-2.5 rounded-t-[22px] border-b border-slate-200/50 bg-white/25 px-3.5 py-2.5 sm:gap-3 sm:rounded-t-[28px] sm:px-5 sm:py-3 md:px-6">
-            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+	        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[22px] border border-white/60 bg-white/35 backdrop-blur-xl sm:rounded-[28px] xl:flex`}>
+	          <header className="flex items-center justify-between gap-2.5 rounded-t-[22px] border-b border-slate-200/50 bg-white/25 px-3.5 py-2.5 sm:gap-3 sm:rounded-t-[28px] sm:px-5 sm:py-3 md:px-6">
+	            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
               {showChatListBackButton ? (
                 <button
                   type="button"
                   className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
                   onClick={() => setMobileConversationListOpen(true)}
                   aria-label="Back to chats"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
-                </button>
-              ) : null}
-              {showWorkspaceBackButton ? (
-                <button
-                  type="button"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
-                  onClick={() => setCoachPanelMode('chat')}
-                  aria-label="Back to chat"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
-                </button>
-              ) : null}
-              {!isCoachWorkspaceOpen ? (
-                <button
-                  type="button"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
-                  style={{
-                    background: activeConversation?.type === 'coach'
-                      ? activeCoachAvatarTone.background
-                      : 'rgba(255,255,255,0.75)',
-                    color: activeConversation?.type === 'coach' ? activeCoachAvatarTone.text : neutralTheme.ink,
-                  }}
-                  onClick={() => void openConversationProfile()}
-                  disabled={!activeConversation || activeConversation.type === 'group'}
-                  title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
-                  >
-                  {activeConversation?.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={resolveApiAssetUrl(activeConversation.avatarUrl)}
-                      alt={activeConversation.name}
-                      style={{
-                        width: isWideMessageLayout ? 40 : 34,
-                        height: isWideMessageLayout ? 40 : 34,
-                        borderRadius: isWideMessageLayout ? 14 : 12,
-                        objectFit: 'cover',
-                      }}
-                    />
-                  ) : (
-                    <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
-                  )}
-                </button>
-              ) : null}
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
-                    {isCoachWorkspaceOpen ? coachWorkspaceHeaderTitle : activeConversation?.name || 'Select a chat'}
-                  </h2>
-                  {activeConversation?.type === 'coach' && !isCoachWorkspaceOpen ? (
-                    <div className="group relative">
-                      <button
-                        type="button"
+	                >
+	                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
+	                </button>
+	              ) : null}
+	              <button
+	                type="button"
+	                className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
+	                style={{
+	                  background: activeConversation?.type === 'coach'
+	                    ? activeCoachAvatarTone.background
+	                    : 'rgba(255,255,255,0.75)',
+	                  color: activeConversation?.type === 'coach' ? activeCoachAvatarTone.text : neutralTheme.ink,
+	                }}
+	                onClick={() => void openConversationProfile()}
+	                disabled={!activeConversation || activeConversation.type === 'group'}
+	                title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
+	              >
+	                {activeConversation?.avatarUrl ? (
+	                  // eslint-disable-next-line @next/next/no-img-element
+	                  <img
+	                    src={resolveApiAssetUrl(activeConversation.avatarUrl)}
+	                    alt={activeConversation.name}
+	                    style={{
+	                      width: isWideMessageLayout ? 40 : 34,
+	                      height: isWideMessageLayout ? 40 : 34,
+	                      borderRadius: isWideMessageLayout ? 14 : 12,
+	                      objectFit: 'cover',
+	                    }}
+	                  />
+	                ) : (
+	                  <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
+	                )}
+	              </button>
+	              <div className="min-w-0">
+	                <div className="flex min-w-0 items-center gap-2">
+	                  <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
+	                    {activeConversation?.name || 'Select a chat'}
+	                  </h2>
+	                  {activeConversation?.type === 'coach' ? (
+	                    <div className="group relative">
+	                      <button
+	                        type="button"
                         className="flex size-[22px] items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[10px] font-semibold text-slate-500 sm:size-6 sm:text-[11px]"
                         aria-label="Coach safety notice"
                       >
@@ -3269,56 +3193,12 @@ export default function AppPage() {
                       </button>
                       <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
                         {COACH_SAFETY_TOOLTIP}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                {isCoachWorkspaceOpen && activeConversation?.type === 'coach' ? (
-                  <p className="mt-0.5 truncate text-sm text-slate-500">{coachDisplayName(activeConversationCoach)}</p>
-                ) : null}
-              </div>
-            </div>
-
-            {activeConversation?.type === 'coach' ? (
-              <div ref={coachMenuRef} className="relative shrink-0">
-                <button
-                  type="button"
-                  className={`flex size-9 items-center justify-center rounded-[12px] text-slate-500 transition sm:size-10 ${
-                    coachMenuOpen
-                      ? 'bg-slate-200/90 shadow-[0_12px_28px_rgba(15,23,42,0.14)]'
-                      : 'bg-transparent hover:bg-slate-100/85'
-                  }`}
-                  aria-label="Open coach workspace"
-                  onClick={() => setCoachMenuOpen((prev) => !prev)}
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>more_horiz</span>
-                </button>
-                {coachMenuOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[160px] flex-col rounded-[16px] border border-white/70 bg-white/95 p-2 shadow-xl sm:top-[calc(100%+12px)] sm:min-w-[180px] sm:rounded-[18px]">
-                    {([
-                      ['info', 'Info'],
-                      ['meals', 'Meals'],
-                      ['trains', 'Trains'],
-                      ['progress', 'Progress'],
-                    ] as Array<[CoachWorkspaceMode, string]>).map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={`rounded-[12px] px-3 py-2.5 text-left text-[13px] font-semibold transition sm:rounded-[14px] sm:px-4 sm:py-3 sm:text-sm ${
-                          coachPanelMode === value ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-100/80'
-                        }`}
-                        onClick={() => {
-                          setCoachPanelMode(value);
-                          setCoachMenuOpen(false);
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+	                      </div>
+	                    </div>
+	                  ) : null}
+	                </div>
+	              </div>
+	            </div>
 
             {activeConversation?.type === 'group' ? (
               <button
@@ -3332,19 +3212,8 @@ export default function AppPage() {
             ) : null}
           </header>
 
-          {isCoachWorkspaceOpen ? (
-            <CoachWorkspacePanel
-              userId={authUserId}
-              active={ready && authUserId > 0}
-              mode={activeCoachWorkspaceMode}
-              coachId={activeConversationCoach}
-              onNotice={showNotice}
-              onError={setError}
-              onOpenMedia={openMediaLightbox}
-            />
-          ) : (
-            <>
-              <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-3.5 py-3.5 sm:px-5 sm:py-5 md:px-6">
+          <>
+            <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-3.5 py-3.5 sm:px-5 sm:py-5 md:px-6">
                 {messages.map((message, index) => {
                   const mine = message.from_user_id === authUserId;
                   const previous = index > 0 ? messages[index - 1] : null;
@@ -3416,11 +3285,7 @@ export default function AppPage() {
                               {senderMetaLabel ? (
                                 <strong
                                   className="font-semibold"
-                                  style={{
-                                    color: !mine && message.is_coach
-                                      ? activeConversationTheme.ink
-                                      : 'var(--ink-500)',
-                                  }}
+                                  style={{ color: 'var(--ink-500)' }}
                                 >
                                   {senderMetaLabel}
                                 </strong>
@@ -3482,15 +3347,10 @@ export default function AppPage() {
                                   : 'rounded-tl-md text-white'
                               } ${segmentIndex > 0 ? 'mt-2' : ''}`}
                               style={!mine ? (
-                                message.is_coach
-                                  ? {
-                                      background: activeConversationTheme.gradient,
-                                      boxShadow: '0 18px 36px rgba(15,23,42,0.18)',
-                                    }
-                                  : {
-                                      background: 'rgba(100,116,139,0.95)',
-                                      boxShadow: '0 18px 36px rgba(100,116,139,0.22)',
-                                    }
+                                {
+                                  background: neutralTheme.gradient,
+                                  boxShadow: '0 18px 36px rgba(15,23,42,0.18)',
+                                }
                               ) : undefined}
                             >
                               {segment ? <p className="text-[13px] leading-5 sm:text-sm sm:leading-6">{renderMessageInlineLinks(segment)}</p> : null}
@@ -3499,10 +3359,7 @@ export default function AppPage() {
 
                           {isCoachReply && hasRemainingCoachSegments ? (
                             <div
-                              className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/75 px-3 py-1.5 text-[13px] shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm"
-                              style={{
-                                color: activeConversationTheme.ink,
-                              }}
+                              className="mt-2 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-500 shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm"
                             >
                               <span>{avatarText} is typing...</span>
                               <span className="typing-dots" aria-hidden="true">
@@ -3520,7 +3377,7 @@ export default function AppPage() {
 
                 {typingLabel ? (
                   <div className="mt-4 flex justify-start">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-500 sm:gap-3 sm:px-4 sm:py-2 sm:text-sm">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-500 shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm">
                       <span>{typingLabel}</span>
                       <span className="typing-dots" aria-hidden="true">
                         <i />
@@ -3533,7 +3390,7 @@ export default function AppPage() {
 
               </div>
 
-              <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 md:px-6">
+            <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 md:px-6">
                 <MediaPreviewGrid
                   items={attachmentPreviews}
                   onRemove={(index) => removeAttachmentAt(index, setAttachments)}
@@ -3543,7 +3400,7 @@ export default function AppPage() {
                   showVideoControls={false}
                 />
 
-                <div className="mt-2.5 flex items-end gap-2 rounded-[20px] border border-white/60 bg-white/65 p-2.5 sm:mt-3 sm:gap-3 sm:rounded-[24px] sm:p-3">
+	                <div className="mt-2.5 flex items-end gap-2 rounded-[20px] border border-white/60 bg-white/65 p-2.5 sm:mt-3 sm:gap-3 sm:rounded-[24px] sm:p-3">
                   <div ref={composerMenuRef} className="relative">
                     <button
                       className="flex size-10 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
@@ -3586,16 +3443,16 @@ export default function AppPage() {
                     ) : null}
                   </div>
 
-                  <input
-                    className="min-w-0 flex-1 rounded-[16px] border border-transparent bg-transparent px-1 py-2.5 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 sm:rounded-[18px] sm:px-2 sm:py-3 sm:text-sm"
-                    value={composer}
-                    onChange={(event) => setComposer(event.target.value)}
-                    placeholder="Type a message..."
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        void handleSendMessage();
-                      }
+	                  <input
+	                    className="min-w-0 flex-1 rounded-[16px] border border-transparent bg-transparent px-1 py-2.5 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 sm:rounded-[18px] sm:px-2 sm:py-3 sm:text-sm"
+	                    value={composer}
+	                    onChange={(event) => setComposer(event.target.value)}
+	                    placeholder="Type a message..."
+	                    onKeyDown={(event) => {
+	                      if (event.key === 'Enter' && !event.shiftKey && !composerTooLong) {
+	                        event.preventDefault();
+	                        void handleSendMessage();
+	                      }
                     }}
                   />
 
@@ -3614,25 +3471,29 @@ export default function AppPage() {
                         @coach
                       </button>
                     ) : null}
-                    <button
-                      className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
-                      disabled={pendingSend || !isOnline}
-                      onClick={() => void handleSendMessage()}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>send</span>
+	                    <button
+	                      className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
+	                      disabled={pendingSend || !isOnline || composerTooLong}
+	                      onClick={() => void handleSendMessage()}
+	                    >
+	                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>send</span>
                     </button>
                   </div>
                 </div>
 
-                {attachments.length > 0 ? (
-                  <p className="mt-3 text-xs text-slate-500">
-                    {attachments.length}/{MAX_MEDIA_ATTACHMENTS} file(s) ready
-                  </p>
-                ) : null}
-                {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
-              </footer>
-            </>
-          )}
+	                {attachments.length > 0 ? (
+	                  <p className="mt-3 text-xs text-slate-500">
+	                    {attachments.length}/{MAX_MEDIA_ATTACHMENTS} file(s) ready
+	                  </p>
+	                ) : null}
+	                {composerTooLong ? (
+	                  <p className="mt-1 text-xs text-[color:var(--danger)]">
+	                    Message is too long to send. Keep it under {MAX_CHAT_MESSAGE_CHARACTERS.toLocaleString()} characters.
+	                  </p>
+	                ) : null}
+	                {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
+	            </footer>
+          </>
         </section>
       </div>
     </div>
@@ -4015,10 +3876,10 @@ export default function AppPage() {
     </div>
   );
 
-  const renderLeaderboardPage = () => (
+  const renderCalendarPage = () => (
     <div className="flex h-full flex-col">
       {renderAppHeader(
-        'Global Rankings',
+        'Calendar',
         '',
         undefined,
         undefined,
@@ -4026,129 +3887,15 @@ export default function AppPage() {
         undefined,
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden p-4 md:p-6">
-        <div className="px-1">
-          <div className="inline-flex rounded-2xl bg-white/40 p-1 backdrop-blur-sm">
-            <button
-              type="button"
-              onClick={() => setLeaderboardMetric('steps')}
-              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${leaderboardMetric === 'steps' ? 'bg-white shadow-sm' : 'text-slate-500'}`}
-              style={leaderboardMetric === 'steps' ? { color: selectedCoachTheme.ink } : undefined}
-            >
-              Steps
-            </button>
-            <button
-              type="button"
-              onClick={() => setLeaderboardMetric('calories')}
-              className={`rounded-xl px-5 py-2 text-sm font-semibold transition ${leaderboardMetric === 'calories' ? 'bg-white shadow-sm' : 'text-slate-500'}`}
-              style={leaderboardMetric === 'calories' ? { color: selectedCoachTheme.ink } : undefined}
-            >
-              Calories
-            </button>
-          </div>
-        </div>
-
+      <div className="flex min-h-0 flex-1 overflow-hidden p-4 md:p-6">
         <section className="min-h-0 flex-1 overflow-hidden rounded-[32px] border border-white/70 bg-white/45 backdrop-blur-xl">
-          <div className="h-full overflow-auto">
-            <table className="min-w-full border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200/60">
-                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Rank</th>
-                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">User</th>
-                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Activity</th>
-                  <th className="px-6 py-5 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">Progress</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100/60">
-                {leaderboardLoading ? (
-                  <tr>
-                    <td className="px-6 py-8 text-sm text-slate-500" colSpan={4}>Loading leaderboard...</td>
-                  </tr>
-                ) : null}
-                {!leaderboardLoading && filteredLeaderboard.length === 0 ? (
-                  <tr>
-                    <td className="px-6 py-8 text-sm text-slate-500" colSpan={4}>No ranking data matched this search.</td>
-                  </tr>
-                ) : null}
-                {filteredLeaderboard.map((entry, index) => {
-                  const metricValue = leaderboardMetric === 'steps' ? Number(entry.steps || 0) : Number(entry.calories_burned || 0);
-                  const ratio = Math.max(0.08, metricValue / topLeaderboardMetric);
-                  const displayRank = index + 1;
-                  const rankTone = displayRank === 1 ? 'bg-amber-100 text-amber-600' : displayRank === 2 ? 'bg-slate-200 text-slate-600' : displayRank === 3 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-500';
-                  return (
-                    <tr key={entry.id} className="transition hover:bg-white/45">
-                      <td className="px-6 py-5">
-                        <span className={`flex size-8 items-center justify-center rounded-full text-sm font-bold ${rankTone}`}>
-                          {displayRank}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="flex size-10 items-center justify-center overflow-hidden rounded-full font-semibold"
-                            style={{
-                              background: neutralTheme.accentBackground,
-                              color: neutralTheme.ink,
-                            }}
-                          >
-                            {entry.avatar_url ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={resolveApiAssetUrl(entry.avatar_url)}
-                                alt={entry.username}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              />
-                            ) : (
-                              avatarInitial(entry.username)
-                            )}
-                          </div>
-                          <span className="font-semibold text-slate-800">{entry.username}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-sm font-medium text-slate-600">
-                        {leaderboardMetric === 'steps'
-                          ? `${entry.steps || 0} steps`
-                          : `${entry.calories_burned || 0} cal`}
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-4">
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
-                            <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: selectedCoachTheme.gradient }} />
-                          </div>
-                          <span className="text-xs font-bold text-slate-500">{Math.round(ratio * 100)}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <CoachCalendarPanel
+            userId={authUserId}
+            active={ready && authUserId > 0}
+            onNotice={showNotice}
+            onError={setError}
+          />
         </section>
-
-        <div className="flex justify-center pt-1">
-          <button className="rounded-full border border-slate-200/80 bg-white/70 px-8 py-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-white">
-            Load more users
-          </button>
-        </div>
-
-        <div className="grid gap-4 xl:hidden">
-          <div className="rounded-[24px] border border-white/70 bg-white/45 p-5 backdrop-blur-xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Momentum</p>
-            <div className="overflow-x-auto">
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Current streak</span>
-                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{healthMomentum?.streakDays ?? 0}d</strong>
-                </article>
-                <article className="rounded-2xl border border-white/70 bg-white/70 p-4">
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Avg steps</span>
-                  <strong className="mt-2 block text-2xl font-bold text-slate-900">{healthMomentum?.averages.steps ?? 0}</strong>
-                </article>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -4351,7 +4098,7 @@ export default function AppPage() {
   return (
     <>
       {welcomeFlowOpen && authUserId > 0 ? (
-        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[rgba(244,239,232,0.78)] backdrop-blur-xl">
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-white">
           <WelcomeFlow
             userId={authUserId}
             initialCoach={authSelectedCoach}
@@ -4360,15 +4107,12 @@ export default function AppPage() {
         </div>
       ) : null}
 
-      <main className="relative h-dvh overflow-hidden md:h-screen">
+      <main className="relative h-dvh overflow-hidden bg-white md:h-screen">
         {!isOnline ? (
           <div className="absolute left-4 right-4 top-3 z-20 rounded-full border border-[rgba(242,138,58,0.24)] bg-white/85 px-4 py-2 text-center text-xs font-semibold text-[color:var(--coach-lc-ink)] shadow-[0_10px_20px_rgba(177,99,34,0.12)] backdrop-blur-xl">
             Offline mode: browsing is available, but sending messages and posts is temporarily disabled.
           </div>
         ) : null}
-
-        <div className="pointer-events-none absolute -left-16 -top-16 size-72 rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.14)_0%,_rgba(105,121,247,0)_72%)]" />
-        <div className="pointer-events-none absolute -bottom-24 -right-24 size-96 rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.12)_0%,_rgba(242,138,58,0)_72%)]" />
 
         <aside className="fixed left-0 top-0 z-30 hidden h-screen w-20 flex-col items-center border-r border-slate-200/50 bg-[rgba(255,255,255,0.52)] py-6 backdrop-blur-xl md:flex">
             <button
@@ -4432,7 +4176,7 @@ export default function AppPage() {
         <section className={`mobile-app-content relative z-10 h-dvh min-w-0 overflow-hidden md:ml-20 md:h-screen md:pb-0 ${isOnline ? '' : 'pt-12'}`}>
             {activeTab === 'messages' ? renderMessagePage() : null}
             {activeTab === 'community' ? renderCommunityPage() : null}
-            {activeTab === 'leaderboard' ? renderLeaderboardPage() : null}
+            {activeTab === 'calendar' ? renderCalendarPage() : null}
             {activeTab === 'profile' ? renderProfilePage() : null}
         </section>
 

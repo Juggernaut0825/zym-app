@@ -42,18 +42,6 @@ private struct ZYMLaunchSplashView: View {
             ZYMBackgroundLayer()
                 .ignoresSafeArea()
 
-            Circle()
-                .fill(Color.zymSecondary.opacity(0.14))
-                .frame(width: 180, height: 180)
-                .blur(radius: 8)
-                .offset(x: animate ? -40 : 40, y: animate ? -120 : -90)
-
-            Circle()
-                .fill(Color.zymPrimary.opacity(0.13))
-                .frame(width: 130, height: 130)
-                .blur(radius: 6)
-                .offset(x: animate ? 58 : 20, y: animate ? 100 : 76)
-
             VStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)

@@ -5,7 +5,7 @@ import { requireUserId, toJson } from './base-tool-helpers.js';
 export class LogCheckInTool implements Tool {
   definition: ToolDefinition = {
     name: 'log_check_in',
-    description: 'Log a progress check-in like weight, waist, body fat, energy, hunger, recovery, or adherence.',
+    description: 'Log a progress check-in like bodyweight, body fat, and a short daily note.',
     parameters: {
       type: 'object',
       properties: {
@@ -21,38 +21,9 @@ export class LogCheckInTool implements Tool {
           minimum: 2,
           maximum: 70,
         },
-        waist_cm: {
-          type: 'number',
-          description: 'Optional waist measurement in centimeters.',
-          minimum: 30,
-          maximum: 250,
-        },
-        energy: {
-          type: 'number',
-          description: 'Optional energy rating from 1 to 5.',
-          minimum: 1,
-          maximum: 5,
-        },
-        hunger: {
-          type: 'number',
-          description: 'Optional hunger rating from 1 to 5.',
-          minimum: 1,
-          maximum: 5,
-        },
-        recovery: {
-          type: 'number',
-          description: 'Optional recovery rating from 1 to 5.',
-          minimum: 1,
-          maximum: 5,
-        },
-        adherence: {
-          type: 'string',
-          description: 'Optional adherence label.',
-          enum: ['on_track', 'partial', 'off_track'],
-        },
         notes: {
           type: 'string',
-          description: 'Optional short note about how the day felt.',
+          description: 'Optional short note about the day, including recovery, waist, hunger, adherence, or anything else worth remembering.',
           maxLength: 500,
         },
         localDate: {
@@ -80,11 +51,6 @@ export class LogCheckInTool implements Tool {
     const result = await coachTypedToolsService.logCheckIn(userId, {
       weight_kg: args?.weight_kg,
       body_fat_pct: args?.body_fat_pct,
-      waist_cm: args?.waist_cm,
-      energy: args?.energy,
-      hunger: args?.hunger,
-      recovery: args?.recovery,
-      adherence: args?.adherence,
       notes: args?.notes,
       localDate: args?.localDate,
       occurredAt: args?.occurredAt,

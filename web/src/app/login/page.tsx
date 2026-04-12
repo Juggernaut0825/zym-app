@@ -138,10 +138,7 @@ function LoginScreen() {
   };
 
   return (
-    <main className="relative min-h-dvh overflow-x-hidden px-4 py-[clamp(1.25rem,3vh,2.5rem)] sm:px-6">
-      <div className="pointer-events-none absolute -left-20 -top-20 size-[28rem] rounded-full bg-[radial-gradient(circle,_rgba(105,121,247,0.18)_0%,_rgba(105,121,247,0)_70%)]" />
-      <div className="pointer-events-none absolute -bottom-24 -right-16 size-[30rem] rounded-full bg-[radial-gradient(circle,_rgba(242,138,58,0.16)_0%,_rgba(242,138,58,0)_70%)]" />
-
+    <main className="relative min-h-dvh overflow-x-hidden bg-white px-4 py-[clamp(1.25rem,3vh,2.5rem)] sm:px-6">
       <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-clamp(2.5rem,6vh,5rem))] w-full max-w-[480px] flex-col justify-center gap-[clamp(1.25rem,3vh,2.25rem)]">
         <section className="rounded-[28px] border border-white/60 bg-white/70 p-[clamp(1.5rem,4vw,2.5rem)] text-sm text-[color:var(--ink-900)] shadow-[0_30px_80px_rgba(59,49,40,0.12)] backdrop-blur-2xl">
           <div className="mb-[clamp(1.5rem,3vh,2rem)] flex items-center justify-center gap-3">

@@ -221,6 +221,7 @@ struct LoginView: View {
                 appState.userId = loginResponse.userId
                 let preservedCoach = appState.userId == loginResponse.userId ? appState.selectedCoach : nil
                 appState.selectedCoach = loginResponse.selectedCoach ?? preservedCoach
+                appState.timezone = loginResponse.timezone ?? appState.timezone ?? TimeZone.current.identifier
                 appState.isLoggedIn = true
             }
         }.resume()

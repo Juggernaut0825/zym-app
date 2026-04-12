@@ -150,6 +150,7 @@ class AppState: ObservableObject {
         static let userId = "zym.userId"
         static let username = "zym.username"
         static let selectedCoach = "zym.selectedCoach"
+        static let timezone = "zym.timezone"
     }
 
     private var restoring = false
@@ -182,6 +183,10 @@ class AppState: ObservableObject {
         didSet { persistSessionIfNeeded() }
     }
 
+    @Published var timezone: String? {
+        didSet { persistSessionIfNeeded() }
+    }
+
     init() {
         restoreSession()
     }
@@ -193,6 +198,7 @@ class AppState: ObservableObject {
         userId = nil
         username = nil
         selectedCoach = nil
+        timezone = nil
     }
 
     func refreshAccessToken(completion: @escaping (Bool) -> Void) {
@@ -222,6 +228,7 @@ class AppState: ObservableObject {
                 var nextToken: String?
                 var nextRefreshToken: String?
                 var nextSelectedCoach: String?
+                var nextTimezone: String?
                 var shouldLogout = false
 
                 if let http = response as? HTTPURLResponse {
@@ -239,6 +246,9 @@ class AppState: ObservableObject {
                         if let selectedCoach = payload["selectedCoach"] as? String, !selectedCoach.isEmpty {
                             nextSelectedCoach = selectedCoach
                         }
+                        if let timezone = payload["timezone"] as? String, !timezone.isEmpty {
+                            nextTimezone = timezone
+                        }
                     }
                 }
 
@@ -250,6 +260,9 @@ class AppState: ObservableObject {
                         }
                         if let nextSelectedCoach {
                             self.selectedCoach = nextSelectedCoach
+                        }
+                        if let nextTimezone {
+                            self.timezone = nextTimezone
                         }
                         self.finishRefresh(success: true, shouldLogout: false)
                         return
@@ -273,6 +286,7 @@ class AppState: ObservableObject {
         let savedUserId = defaults.integer(forKey: Keys.userId)
         let savedUsername = defaults.string(forKey: Keys.username)
         let savedCoach = defaults.string(forKey: Keys.selectedCoach)
+        let savedTimezone = defaults.string(forKey: Keys.timezone)
 
         if let legacyToken, AppKeychain.get(account: keychainTokenAccount) == nil {
             AppKeychain.set(legacyToken, account: keychainTokenAccount)
@@ -288,6 +302,7 @@ class AppState: ObservableObject {
         userId = savedUserId > 0 ? savedUserId : nil
         username = savedUsername
         selectedCoach = savedCoach
+        timezone = savedTimezone
         isLoggedIn = (savedToken?.isEmpty == false) && (savedRefreshToken?.isEmpty == false) && (savedUserId > 0)
     }
 
@@ -305,6 +320,7 @@ class AppState: ObservableObject {
             defaults.set(userId, forKey: Keys.userId)
             defaults.set(username, forKey: Keys.username)
             defaults.set(selectedCoach, forKey: Keys.selectedCoach)
+            defaults.set(timezone, forKey: Keys.timezone)
             defaults.removeObject(forKey: Keys.token)
             defaults.removeObject(forKey: Keys.refreshToken)
             return
@@ -318,6 +334,7 @@ class AppState: ObservableObject {
         defaults.removeObject(forKey: Keys.userId)
         defaults.removeObject(forKey: Keys.username)
         defaults.removeObject(forKey: Keys.selectedCoach)
+        defaults.removeObject(forKey: Keys.timezone)
     }
 
     private func finishRefresh(success: Bool, shouldLogout: Bool) {

@@ -182,14 +182,14 @@ struct InboxView: View {
                     isCoach: true,
                     coachId: coach.coach_id,
                     coachEnabled: nil,
-                    avatarUrl: nil,
-                    otherUserId: nil,
-                    previewText: coach.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                        ? (coach.last_message_preview ?? "")
-                        : "Your coach conversation lives here.",
-                    unreadCount: coach.unread_count ?? 0,
-                    mentionCount: coach.mention_count ?? 0
-                )
+                        avatarUrl: nil,
+                        otherUserId: nil,
+                        previewText: coach.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                            ? (coach.last_message_preview ?? "")
+                            : "Ask about training, meals, or form.",
+                        unreadCount: coach.unread_count ?? 0,
+                        mentionCount: coach.mention_count ?? 0
+                    )
             }
 
             let dms = inboxResponse?.dms ?? []

@@ -11,7 +11,8 @@ class HealthKitManager: ObservableObject {
 
         let types: Set<HKSampleType> = [
             HKQuantityType(.stepCount),
-            HKQuantityType(.activeEnergyBurned)
+            HKQuantityType(.activeEnergyBurned),
+            HKQuantityType(.appleExerciseTime)
         ]
 
         healthStore.requestAuthorization(toShare: [], read: types) { success, _ in
@@ -42,6 +43,20 @@ class HealthKitManager: ObservableObject {
         let query = HKStatisticsQuery(quantityType: calorieType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
             let calories = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
             completion(Int(calories))
+        }
+
+        healthStore.execute(query)
+    }
+
+    func fetchTodayActiveMinutes(completion: @escaping (Int) -> Void) {
+        let exerciseType = HKQuantityType(.appleExerciseTime)
+        let now = Date()
+        let startOfDay = Calendar.current.startOfDay(for: now)
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now)
+
+        let query = HKStatisticsQuery(quantityType: exerciseType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+            let minutes = result?.sumQuantity()?.doubleValue(for: .minute()) ?? 0
+            completion(Int(minutes))
         }
 
         healthStore.execute(query)

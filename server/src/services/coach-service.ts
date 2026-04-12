@@ -198,10 +198,6 @@ function toolStatusLabel(toolName: string): string {
       return 'Analyzing attached media...';
     case 'search_knowledge':
       return 'Searching knowledge...';
-    case 'search_exercise_library':
-      return 'Matching exercise demos...';
-    case 'search_exercise_videos':
-      return 'Searching demo videos...';
     case 'log_meal':
       return 'Saving meal log...';
     case 'log_check_in':
@@ -210,8 +206,6 @@ function toolStatusLabel(toolName: string): string {
       return 'Saving training log...';
     case 'set_profile':
       return 'Updating profile...';
-    case 'list_recent_media':
-      return 'Checking recent media...';
     case 'search_message_history':
       return 'Searching previous discussions...';
     case 'get_media_analyses':

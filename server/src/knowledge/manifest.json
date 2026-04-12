@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-03-13T02:44:14.509Z",
+  "generatedAt": "2026-04-12T21:34:57.115Z",
   "documents": [
     {
       "file": "nutrition-basics.md",
@@ -11,7 +11,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2024-pmc11743574.md",
-      "sha256": "9191caa2c9d5eadbdb3e3f4cb36d18187c2131a9612ee0e68aa38e30ad0c4d45",
+      "sha256": "f30ffd9b51b7e134e74da19e4c946d9a3a70b50eb117e75a532252202b710050",
       "source": "Jing et al. 2024 - Effects of upper extremity blood flow restriction training on muscle strength and hypertrophy: a systematic re",
       "domain": "fitness",
       "approved": true,
@@ -24,7 +24,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2025-pmc12339475.md",
-      "sha256": "65348a8dd6648542013f43f69875b4e4a346a35b2884ad6adba540478c02707d",
+      "sha256": "3b12235a768130a6404ab472779f78d7a7368c20860478cd95c36a9917d3c603",
       "source": "Deng et al. 2025 - The effects of blood flow restriction combined with resistance training on lower limb strength, muscle hypertr",
       "domain": "fitness",
       "approved": true,
@@ -37,7 +37,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2025-pmc12473220.md",
-      "sha256": "7269b4bb57d545a87791a2cedc436eb20ebea16456c893893cb76b41668204d5",
+      "sha256": "ae990685786f9122197814abb5036db1d2b9c030cee8b2636098e5ea4016e230",
       "source": "Wiens et al. 2025 - Does High-Intensity Interval Training Increase Muscle Strength, Muscle Mass, and Muscle Endurance? A Systemati",
       "domain": "fitness",
       "approved": true,
@@ -50,7 +50,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2025-pmc12717450.md",
-      "sha256": "dc006b30811189c22da6563c2003a23f029c3c5ef53c84c73f263e4428aae888",
+      "sha256": "3b23f7018e13dd203c3d83e43d67ba1e347e5bcc409f8079da40559df31a584b",
       "source": "Hamidvand et al. 2025 - Acute effects of resistance exercise on skeletal muscle glycogen depletion: A systematic review and meta-analy",
       "domain": "fitness",
       "approved": true,
@@ -63,7 +63,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12862422.md",
-      "sha256": "4658d83c5aaeaad82329c90983209b00926d20b15ded03c60b98419cf1ff9077",
+      "sha256": "7c03cdca5af2160a1d08223888a63ead1da71830b975af246c652356470c71a2",
       "source": "Drummond et al. 2026 - Which Protein-Based Dietary Supplements Most Effectively Enhance Fat-Free Mass and Strength Gains in Healthy A",
       "domain": "fitness",
       "approved": true,
@@ -76,7 +76,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12882733.md",
-      "sha256": "ed1d5a5d80e69a9542792def0b4bc3ffcc13965ac5f92422e4b04fecd2d85c3d",
+      "sha256": "4d13915f7e9745d3eac6810a8bf8ffa12bab0d8ba90ba5a0dd43ebe1e8f6d67e",
       "source": "Xu et al. 2026 - Effects of variable resistance training on lower limb explosive power in athletes: a systematic review and met",
       "domain": "fitness",
       "approved": true,
@@ -89,7 +89,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12916111.md",
-      "sha256": "ea0550a928ebb6bc5720fe3375e9660bea042619c0e0b0b783a756187ac9e784",
+      "sha256": "b6ff756af09e7a5b71d3419560af042b17ee9aa5b0100d4072c5de48da57697b",
       "source": "Zhu et al. 2026 - Effects of cold-water immersion at different body regions on post-exercise muscle damage recovery: a systemati",
       "domain": "fitness",
       "approved": true,
@@ -102,7 +102,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12922048.md",
-      "sha256": "067db17feb2737e65bb5fc023c3e0dc10cc70aee8d8b8d27d65e8876d0e91fa8",
+      "sha256": "6fb7fb8c654366dde62af2f16df952ca4b083de2b63cd45a93b8dc6bb52dea1d",
       "source": "Tsartsapakis et al. 2026 - Effects of Advanced Resistance Training Systems on Muscle Hypertrophy and Strength in Recreationally Trained A",
       "domain": "fitness",
       "approved": true,
@@ -115,7 +115,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12951884.md",
-      "sha256": "f8a99dec7ffda778b6681ec2c8164417fb69e2733ea8dda518d5d74ca2b3c2db",
+      "sha256": "9595ec49a5c9a891d5f8e4d294591638281e4f365c3268fb5acab58da9b48d12",
       "source": "Lin et al. 2026 - Acute and long-term effects of hip thrust training on athletic performance: a systematic review and meta-analy",
       "domain": "fitness",
       "approved": true,
@@ -128,7 +128,7 @@
     },
     {
       "file": "papers/hypertrophy-strength-2026-pmc12965823.md",
-      "sha256": "ebb29efa80caac6f2e474f4e3d6aca48125bf168eaaa853c988bb3ea28099a00",
+      "sha256": "68e9ba5fb09764e2daab2bbbf59384ac3e13f75b8cb88de7dec3c0b868ce58c7",
       "source": "CURRIER et al. 2026 - American College of Sports Medicine Position Stand. Resistance Training Prescription for Muscle Function, Hype",
       "domain": "fitness",
       "approved": true,
@@ -141,7 +141,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2025-pmc12348594.md",
-      "sha256": "a238cbb6883ab07d283c7699f863c8f7e02a595c774563ab546a314e58a9fee2",
+      "sha256": "c393f18ca99ba9f8753ef7877a1b2e7dcad463d801fa146d6ef9ec2e9e15705c",
       "source": "Khalafi et al. 2025 - The Effects of Intermittent Fasting on Inflammatory Markers in Adults: A Systematic Review and Pairwise and Ne",
       "domain": "nutrition",
       "approved": true,
@@ -154,7 +154,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2025-pmc12576900.md",
-      "sha256": "57624d99196f326acec7898cd098ea09586f3ea837081b01ddcfb7d50023366f",
+      "sha256": "bea3e2830cf6de46a2d2f2a9ba7729aeab2cbc6342a23e6d7e5cf18b088f0544",
       "source": "Mhamdi et al. 2025 - Clarifying fasting-based dietary strategies: toward alignment with emerging consensus terminology",
       "domain": "nutrition",
       "approved": true,
@@ -167,7 +167,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2025-pmc12604837.md",
-      "sha256": "1b6b9df00b05575ccedaae9fd023c44166a639be157749dee524b1ae06abff19",
+      "sha256": "4882793dabf88baed2f9cfa49e7605a5981dc8c99d6c7c1d4e5a07ae03adf9ae",
       "source": "Koo et al. 2025 - A Scoping Review of the Effect of Intermittent Fasting on Diabetes Regulation and Weight Control",
       "domain": "nutrition",
       "approved": true,
@@ -180,7 +180,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2025-pmc12672340.md",
-      "sha256": "1c367079a97ed37e1c9037468a28cfc16249ae11edd15d361b687a7ea26fd4f5",
+      "sha256": "59c27315ee7eb60eeb94fb2cd5e8191a33dc31ed91172f163d5c01f5ddb485cb",
       "source": "Yi et al. 2025 - Effects of time-restricted eating without caloric restriction on blood pressure and cardiometabolic profile in",
       "domain": "nutrition",
       "approved": true,
@@ -193,7 +193,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2025-pmc12739519.md",
-      "sha256": "7fba35afd5c1d6c078e2494aba4c54bc437f433062918cc088f9a8804e1cab9b",
+      "sha256": "3092757249e1a02e1291e01764af3d6f3c156d6620ebaf18dcc1a9ac3e914e70",
       "source": "Ding et al. 2025 - Effect of meal timing on cognitive function: a scoping review",
       "domain": "nutrition",
       "approved": true,
@@ -206,7 +206,7 @@
     },
     {
       "file": "papers/meal-timing-energy-balance-2026-pmc12809989.md",
-      "sha256": "5ab0a50ee8526c27edd00de123526971a67a423354453047c9349cf951d445a7",
+      "sha256": "13694469f50f6df0c1bd7d2e8e9a9a0f567383059f2a82a47e7affae576e7919",
       "source": "Mohamadinarab et al. 2026 - The effect of dietary interventions on brain-derived neurotrophic factor (BDNF) levels in adults: a systematic",
       "domain": "nutrition",
       "approved": true,
@@ -219,7 +219,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc11996837.md",
-      "sha256": "d3c4e68fb8832a2809ab9de57df01b1b4783bfef20602fbb31e8bbc593f5b2bd",
+      "sha256": "3efbb4a5aeb69388a69533529098df5bfbf6ded4381953eaba1f6be4966e0257",
       "source": "Cui et al. 2025 - Effectiveness of long-term cluster training and traditional resistance training in enhancing maximum strength ",
       "domain": "fitness",
       "approved": true,
@@ -232,7 +232,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12006712.md",
-      "sha256": "f93ef1fdc83ffa7a852f69ad9070a6c0209086edf0328f04d42e415afcb0774f",
+      "sha256": "9e5073fd448532f3ca3ad87976afb7a7f6ce871e993fa0b65607eddc7dfd79aa",
       "source": "Ogrezeanu et al. 2025 - Effects of Blood Flow Restriction Training on Strength and Functionality in People With Knee Arthropathies: A ",
       "domain": "fitness",
       "approved": true,
@@ -245,7 +245,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12130258.md",
-      "sha256": "140c163d6d862fc0c38d246b76968c467f1431da6fbe7e48f34a277ee3bac735",
+      "sha256": "80f6c8c7f1dd6470b83ffae4208a94b2454843bd3e6e1601c6e416fc9037ae2c",
       "source": "Rong et al. 2025 - Effects of strength training on neuromuscular adaptations in the development of maximal strength: a systematic",
       "domain": "fitness",
       "approved": true,
@@ -258,7 +258,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12263917.md",
-      "sha256": "572e44dfb8f71ead412db62918f2c845c06d290c7dbbc9aea01c3ad68eb05349",
+      "sha256": "f375b0842d6786abc532483f981479a9002d71b5feb6aba425645ef6a1ed08d8",
       "source": "Hua-Rui et al. 2025 - Optimal dose of resistance training to improve handgrip strength in older adults with sarcopenia: a systematic",
       "domain": "fitness",
       "approved": true,
@@ -271,7 +271,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12278580.md",
-      "sha256": "559b3119194c6ad2dbfb538116c0ddf12011bb7f362f62e05eddd80a0aca3596",
+      "sha256": "d397be192701508b59d2ce7f3393fce3d3d326e67e8b550bedcf5f372d13a823",
       "source": "Amare et al. 2025 - Effects of concurrent continuous aerobic and short rest resistance exercise training on metabolic biomarkers i",
       "domain": "fitness",
       "approved": true,
@@ -284,7 +284,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12602684.md",
-      "sha256": "9c4e75fb5e40b5eb205223e3e4474df3ff9871ccf9bf2aefdb9c27d56c96bdf3",
+      "sha256": "c5bf15d269a7c23db174baa85979ab6cd7ed7bec1eacb2fd7b0f31040d1b5200",
       "source": "Yan et al. 2025 - Optimal resistance training prescriptions to improve muscle strength, physical function, and muscle mass in ol",
       "domain": "fitness",
       "approved": true,
@@ -297,7 +297,7 @@
     },
     {
       "file": "papers/programming-concurrent-2025-pmc12639618.md",
-      "sha256": "54ce73f5c537512a54c4d4437bd8f2cd43868f18ff5a911f3356987f21b48017",
+      "sha256": "f5c4f54b90da770ae74ea1727d4afdba70afc836f67dc8261374208a61bdc6d1",
       "source": "Yan et al. 2025 - Comparative Effectiveness of Exercise and Protein-Based Interventions on Muscle Strength, Mass, and Function i",
       "domain": "fitness",
       "approved": true,
@@ -310,7 +310,7 @@
     },
     {
       "file": "papers/programming-concurrent-2026-pmc12870409.md",
-      "sha256": "4533d37216feb4a0db7b25a7fa62f56610c3d8edf6de536973e1fe281c5050e1",
+      "sha256": "864221585fe0b7bf71e2d88e7232acf886305af870405e43fd277d704c452ddb",
       "source": "Wang et al. 2026 - The effects of velocity-based vs. percentage-based resistance training on sports performance in trainedindivid",
       "domain": "fitness",
       "approved": true,
@@ -323,7 +323,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12046708.md",
-      "sha256": "303442e993d8f7a0ccfacf61d55de5da3f36d7edf906e37404621a1bfefce3bf",
+      "sha256": "0ea9afc4f601a9beb48c464793c3ffb1ec6e8e5ae37490af0e06cefe2a338afa",
       "source": "Khani et al. 2025 - Peri-operative protein or amino acid supplementation for total joint arthroplasty: a systematic review and met",
       "domain": "nutrition",
       "approved": true,
@@ -336,7 +336,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12250900.md",
-      "sha256": "086b75a4fd926bbee6d4761e7955ec76df359a4947ea60b6452482b9d2f7dbc4",
+      "sha256": "982e2d5a4fea1d53d66fd344f56027d5c1a5b03730321b519b87bc3d47050739",
       "source": "Casuso et al. 2025 - Does Protein Ingestion Timing Affect Exercise-Induced Adaptations? A Systematic Review with Meta-Analysis",
       "domain": "nutrition",
       "approved": true,
@@ -349,7 +349,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12295849.md",
-      "sha256": "613d182a4889d667b8655a54d466c0efed7027dc1b9fa9d6c2b871f51923bc51",
+      "sha256": "0adf999d61c9450c71651a6505bc0ef179e97296716c53dd032f2f5d3fd8f31c",
       "source": "Deng et al. 2025 - Effects of different dietary supplements combined with conditioning training on muscle strength, jump performa",
       "domain": "nutrition",
       "approved": true,
@@ -362,7 +362,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12369418.md",
-      "sha256": "e217378f0beb19deb5368f60648f3041faeb096768f3b67ec6d7bbe42f8a0a6c",
+      "sha256": "20de3727650abbe0999cb741c9793af41a7e0f9aed1807c4724da46d51d2e197",
       "source": "Xiao et al. 2025 - Effects of protein supplementation on body composition, physiological adaptations, and performance during endu",
       "domain": "nutrition",
       "approved": true,
@@ -375,7 +375,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12389377.md",
-      "sha256": "424791acb4c88cb79d80455c898009dff6f4ac311a946397a9d1980888d21a26",
+      "sha256": "19d1df8590f2d447895659b988dbe1532e7c42979b7383d70e52276c5352f08e",
       "source": "Ji et al. 2025 - Whey Protein Supplementation Combined with Exercise on Muscle Protein Synthesis and the AKT/mTOR Pathway in He",
       "domain": "nutrition",
       "approved": true,
@@ -388,7 +388,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12610255.md",
-      "sha256": "23a4bc8fab427977745d31a477b8c0acffe90d396107e99ac7c30d3297ad04fb",
+      "sha256": "8ebd0cb48915e4791b2623836d5a8c5ba52464f788234119ab9862d2b5ede62a",
       "source": "Khalafi et al. 2025 - Effects of Whey Protein Supplementation on Body Composition, Muscular Strength, and Cardiometabolic Health in ",
       "domain": "nutrition",
       "approved": true,
@@ -401,7 +401,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12622227.md",
-      "sha256": "8b1014686b4911c0c315a78120cc1fc607b921f88ef1f3493e7833611d6bfb64",
+      "sha256": "351ee15386bcfe6cc73fc6f751335bd15283656e28a80549fa65d17c586b8310",
       "source": "Zhou et al. 2025 - Effects of multi-ingredient protein supplementation combined with exercise intervention on body composition an",
       "domain": "nutrition",
       "approved": true,
@@ -414,7 +414,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2025-pmc12655442.md",
-      "sha256": "6553385fae21366b3f21de27f80df38e5f90f7b92d2fb55fbc0e3c864a283524",
+      "sha256": "60610167d093cb9863ce829999d207664249790ca59f8760a99b7ca4176518dc",
       "source": "García-Alonso et al. 2025 - The Role of HMB Supplementation in Enhancing the Effects of Resistance Training in Older Adults: A Systematic ",
       "domain": "nutrition",
       "approved": true,
@@ -427,7 +427,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2026-pmc12777903.md",
-      "sha256": "377e00c81e22bcc31debb96c3eb229321f842b7b2947820003658c9c116001ba",
+      "sha256": "f0d111f1d2f490a4f115e017a223ebda0d0fb22162a0a51df88a6bb48ffdfc21",
       "source": "Zhao et al. 2026 - The effectiveness of protein supplements on athletic performance and post-exercise recovery - a Bayesian multi",
       "domain": "nutrition",
       "approved": true,
@@ -440,7 +440,7 @@
     },
     {
       "file": "papers/protein-hypertrophy-2026-pmc12967945.md",
-      "sha256": "4c9a0c73bcd94613b3def40a4fd6b143ebdfa466c1ed08ed0dbf8af2f207cbb1",
+      "sha256": "5506a122889d9a16693d49ce6a2a251d8d505dfa14f715c28ab7f1f79137f76f",
       "source": "Yu et al. 2026 - Comparative effectiveness of exercise modalities and nutritional supplementation for sarcopenic obesity in old",
       "domain": "nutrition",
       "approved": true,
@@ -453,7 +453,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2025-pmc12513969.md",
-      "sha256": "5f239a71468eb2c9963a8ed9c584a669709a034b0a70a3ff0e1accb9547cb0db",
+      "sha256": "6699d0bda9f3ba4f4e44650e13054483829b59b6b66ab7cb525f5e62326d2a04",
       "source": "Delany et al. 2025 - Dietary Recommendations for Body Mass and Composition Manipulation in Male and Female Athletes: a Scoping Revi",
       "domain": "nutrition",
       "approved": true,
@@ -466,7 +466,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2025-pmc12663695.md",
-      "sha256": "c8a1977c206ecafc0476891a65440bcb283a95e6655e63fbcfa68015abec67f3",
+      "sha256": "6ec0373687221c81ab62fb19e2188971671703530f5e2b4e3a32c6a524c2808e",
       "source": "Deng et al. 2025 - Dietary Supplement Strategies During Conditioning Training in Athletes: A Network Meta-Analysis of Peak and Me",
       "domain": "nutrition",
       "approved": true,
@@ -479,7 +479,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2025-pmc12735723.md",
-      "sha256": "0327350990f96629b2f60096e632de00bb1a41048011777f69fcf5ce3d005de1",
+      "sha256": "6878db8a307c756f94313e23f446bbadff4283ad26433959bcf44c6609db1935",
       "source": "Mielgo-Ayuso et al. 2025 - Consensus Document of the Spanish Nutrition Society (SEÑ) on Nutritional Strategies in Sports",
       "domain": "nutrition",
       "approved": true,
@@ -492,7 +492,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2025-pmc12777911.md",
-      "sha256": "44e66ccd9a131886322a0054edb12a9ba481fad6130565152fece7638f84f50d",
+      "sha256": "13f7c0c7778c349efa7ecebedffd8c313a870006d13d57c57fc47996814bab19",
       "source": "Ashtary-Larky et al. 2025 - Creatine supplementation and resistance training: a comparison between novice and experienced lifters - a syst",
       "domain": "nutrition",
       "approved": true,
@@ -505,7 +505,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2026-pmc12903275.md",
-      "sha256": "0a9b12c21b52906a5a29095cdce1530f54e13148002b8c3292c9dd4b1f045bd4",
+      "sha256": "87e9032ca07bcb4ec8b860344941c58578d400803bf2bbb4beaa938976f9eaf1",
       "source": "Zhang et al. 2026 - Effect of probiotic intake on athletic ability in healthy people: a systematic review and Bayesian meta-analys",
       "domain": "nutrition",
       "approved": true,
@@ -518,7 +518,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2026-pmc12915426.md",
-      "sha256": "105860c3a0924c3a6cf4d9ddf61c308c6f1bdb36e9b27ea0e3514bf864de0b6e",
+      "sha256": "1c8af9dce5db04121b297406eb4f966de49a8967b4dcc5d6c2924e5c0a9244af",
       "source": "Gonzalez et al. 2026 - International Society of Sports Nutrition position stand: effects of dietary antioxidants on exercise and spor",
       "domain": "nutrition",
       "approved": true,
@@ -531,7 +531,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2026-pmc12946080.md",
-      "sha256": "1359c80bdab2bb625ffa7f059a347cb8d5810693825ecc96dc3271b60946508a",
+      "sha256": "c5fa219219aa701cb2ecfb82486b3247218aca85c86218cf36b489bff8e35871",
       "source": "Guo et al. 2026 - Timing-dependent effects of melatonin supplementation on exercise performance and exercise-induced muscle dama",
       "domain": "nutrition",
       "approved": true,
@@ -544,7 +544,7 @@
     },
     {
       "file": "papers/sports-nutrition-guidance-2026-pmc12961398.md",
-      "sha256": "b8310461d270950924a73eb10190923a49edf9f32cc302315fc2b9c341a95ae9",
+      "sha256": "f3e65dffd939f057fa5e68003183a21c53bd7449454b2ae94c1b2cf0851fe321",
       "source": "de et al. 2026 - Impact of creatine supplementation on inflammation: evidence from a systematic review and meta-analysis of ran",
       "domain": "nutrition",
       "approved": true,
@@ -557,7 +557,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12158682.md",
-      "sha256": "9f49da238671cf49b2cfa46719ae979eb259c45b231bd72c033823a18fcfbf1d",
+      "sha256": "203ac0562648e3645a27d8e24845d4594e7ee1ccbafc28afb2d964627542363d",
       "source": "Xie et al. 2025 - Comparing exercise modalities during caloric restriction: a systematic review and network meta-analysis on bod",
       "domain": "nutrition",
       "approved": true,
@@ -570,7 +570,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12239108.md",
-      "sha256": "0f2ba7f83f415b364feaefe43ac83949dff5bd27d7c574b3fcf1715498d8ab1d",
+      "sha256": "f57c2ce709b91dcc03a79c244ea78631c135163503bdcd0367dd210818dfd4b6",
       "source": "Kazeminasab et al. 2025 - Combined exercise training and dietary interventions versus independent effect of exercise on ectopic fat in i",
       "domain": "nutrition",
       "approved": true,
@@ -583,7 +583,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12406911.md",
-      "sha256": "1e37883087c05b3c646365e97563def68842b6023c3d14dc01f1d0410d244dba",
+      "sha256": "f26bff590bb9362177af0e30654bf97a819e5cb45b9161495777c771685c3c99",
       "source": "Binmahfoz et al. 2025 - Effect of resistance exercise on body composition, muscle strength and cardiometabolic health during dietary w",
       "domain": "nutrition",
       "approved": true,
@@ -596,7 +596,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12479299.md",
-      "sha256": "2ac31e972a0e62d6112e7af10fa14dd20faa817ab4a8e6f26b0f040c4ac36f49",
+      "sha256": "4d6ea335b4acf2221556d5e3578b1b89c4ef1d1707eb30e468a200deeef1b40a",
       "source": "Chen et al. 2025 - Effects of time-restricted eating on body composition and metabolic parameters in overweight and obese women: ",
       "domain": "nutrition",
       "approved": true,
@@ -609,7 +609,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12487415.md",
-      "sha256": "0542c858753abf390639d60fdc3ab8b16fef532f41c7257ea65b8d78a32fa590",
+      "sha256": "8faf52edf20078bf53db5cf5e44f0cde2a7fd15752a2b0d6fdabb0f00a90e35e",
       "source": "Sun et al. 2025 - Efficiency of time-restricted eating and energy restriction on anthropometrics and body composition in adults:",
       "domain": "nutrition",
       "approved": true,
@@ -622,7 +622,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12735435.md",
-      "sha256": "bbf06478f815b987e4b2e7b5d884f83bb125f984cea1c333594077f4e2613297",
+      "sha256": "107156a54a19d25ac1ec80a75a7160659b88aa12ac0364cd4c2b723d1a2dfe2a",
       "source": "Mullath et al. 2025 - Impact of Dietary Patterns on Skeletal Health: A Systematic Review and Meta-Analysis of Bone Mineral Density, ",
       "domain": "nutrition",
       "approved": true,
@@ -635,7 +635,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2025-pmc12906740.md",
-      "sha256": "136f58e4152f35e708019144cb919ed483b87091d517503edc89ac443ccc9045",
+      "sha256": "87fb296ca0546c5b0aafbd4d8fd74fe258ec94069cef646a38fafc55a1299ad1",
       "source": "Fatmawati et al. 2025 - Synergistic Effects of Combined Diet and Exercise on Body Composition in Adults: A Systematic Review and Meta-",
       "domain": "nutrition",
       "approved": true,
@@ -648,7 +648,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2026-pmc12775015.md",
-      "sha256": "410d8b6353a77e1268b88ae05c859ff240e546abc2d405107371a8fae2da105b",
+      "sha256": "c0d3705c80fbadd9adb1e1ef9f5e4c84028fae1baefee75672a6581e16990de9",
       "source": "Anagnostou et al. 2026 - Effects of energy-matched low- versus high-carbohydrate diets on glycaemic control, lipid profile, and body co",
       "domain": "nutrition",
       "approved": true,
@@ -661,7 +661,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2026-pmc12899630.md",
-      "sha256": "c97fb54f9110864fcad6ddca773143a013e869b0e71cff082778104e0884b2b7",
+      "sha256": "003499f2cf41a20dc6e5956c7ca13a536e5148499dd629765ebd60a8c09aa8d4",
       "source": "Werndle et al. 2026 - Comparative Effects of Diet, Exercise, and Pharmacotherapy on Metabolic Syndrome Severity in Overweight and Ob",
       "domain": "nutrition",
       "approved": true,
@@ -674,7 +674,7 @@
     },
     {
       "file": "papers/weight-loss-body-composition-2026-pmc12902457.md",
-      "sha256": "65c38972192df463be2c828ca6e039aaabf6e3bfb93048736459bbc329538523",
+      "sha256": "9d6bf70b8f837c2cf83823089e60d980832f94418b659b85723d797e2a2e78e7",
       "source": "Anker et al. 2026 - iCARDIO Alliance Global Implementation Guidelines for the Management of Obesity 2025",
       "domain": "nutrition",
       "approved": true,

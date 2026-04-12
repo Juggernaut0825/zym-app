@@ -617,7 +617,13 @@ export async function getHealthMomentum(userId: number): Promise<HealthMomentumR
   return request<HealthMomentumResponse>(`/health/momentum/${userId}`);
 }
 
-export async function syncHealth(payload: { userId: number; steps: number; calories: number }): Promise<void> {
+export async function syncHealth(payload: {
+  userId: number;
+  steps: number;
+  calories: number;
+  activeMinutes?: number;
+  timezone?: string;
+}): Promise<void> {
   await request('/health/sync', {
     method: 'POST',
     body: JSON.stringify(payload),

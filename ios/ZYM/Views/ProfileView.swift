@@ -131,17 +131,7 @@ struct ProfileView: View {
                         .buttonStyle(ZYMPrimaryButton())
                         .zymAppear(delay: 0.14)
 
-                        Button(action: {
-                            showSessionsSheet = true
-                            loadSessions()
-                        }) {
-                            Text("Manage Sessions")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(ZYMGhostButton())
-                        .zymAppear(delay: 0.17)
-
-                        Text("Coach info, progress check-ins, meals, and training logs now live inside your coach conversation.")
+                        Text("Coach info, check-ins, meals, training, and Apple Health sync now live in Calendar.")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(Color.zymSubtext)
                             .frame(maxWidth: .infinity, alignment: .leading)

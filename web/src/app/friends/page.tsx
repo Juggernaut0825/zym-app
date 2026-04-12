@@ -203,7 +203,7 @@ export default function FriendsPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/20 px-4 py-6">
+    <main className="min-h-dvh bg-white px-4 py-6">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex items-center gap-4">
           <button className="btn btn-ghost" type="button" onClick={() => router.replace(returnToCommunityUrl)}>

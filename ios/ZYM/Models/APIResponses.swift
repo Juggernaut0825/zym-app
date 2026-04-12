@@ -333,6 +333,13 @@ struct CoachCheckInRecord: Codable {
     let logged_at: String?
 }
 
+struct CoachHealthSnapshot: Codable {
+    let steps: Int
+    let calories_burned: Int
+    let active_minutes: Int
+    let synced_at: String?
+}
+
 struct CoachProgressSummary: Codable {
     let latestCheckInDay: String?
     let latestCheckInAt: String?
@@ -361,6 +368,7 @@ struct CoachDayRecord: Codable, Identifiable {
     let total_intake: Double
     let total_burned: Double
     let check_in: CoachCheckInRecord?
+    let health: CoachHealthSnapshot?
     let meals: [CoachMealRecord]
     let training: [CoachTrainingRecord]
 
@@ -372,6 +380,7 @@ struct CoachRecordsStats: Codable {
     let mealCount: Int
     let trainingCount: Int
     let checkInCount: Int?
+    let healthDayCount: Int?
 }
 
 struct CoachRecordsResponse: Decodable {

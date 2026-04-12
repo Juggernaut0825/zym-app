@@ -288,8 +288,8 @@ struct CoachWelcomeFlowView: View {
                 title: "What happens next",
                 accent: Color.zymSecondary,
                 lines: [
-                    "The coach can now shape meal feedback, recipes, and training plans around the profile you just saved.",
-                    "You can still edit all of this later inside the coach conversation, including progress check-ins.",
+                    "The coach can now shape meal feedback, calorie guidance, and training advice around the profile you just saved.",
+                    "You can still review or update your check-ins, meals, training, and health sync later inside Calendar.",
                 ]
             )
         }
