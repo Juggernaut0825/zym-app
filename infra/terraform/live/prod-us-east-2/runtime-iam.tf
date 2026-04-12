@@ -129,3 +129,22 @@ resource "aws_iam_role_policy" "app_task_media_access" {
     ]
   })
 }
+
+resource "aws_iam_role_policy" "app_task_service_discovery" {
+  name = "ZymServiceDiscoveryRead"
+  role = aws_iam_role.app_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DiscoverInternalServices"
+        Effect = "Allow"
+        Action = [
+          "servicediscovery:DiscoverInstances",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}

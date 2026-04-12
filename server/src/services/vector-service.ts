@@ -1,3 +1,4 @@
+import { DiscoverInstancesCommand, ServiceDiscoveryClient } from '@aws-sdk/client-servicediscovery';
 import { ChromaClient, type Collection } from 'chromadb';
 import { OpenRouterUsageService } from './openrouter-usage-service.js';
 
@@ -75,20 +76,100 @@ function parseChromaUrl(raw: string): { host: string; port: number; ssl: boolean
   }
 }
 
+function isLiteralIpAddress(host: string): boolean {
+  const value = String(host || '').trim();
+  if (!value) return false;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) return true;
+  return value.includes(':');
+}
+
+function shouldDiscoverChromaHost(host: string): boolean {
+  const value = String(host || '').trim().toLowerCase();
+  if (!value || value === 'localhost' || isLiteralIpAddress(value)) return false;
+  return !value.includes('.');
+}
+
 export class VectorService {
   private static client: ChromaClient | null = null;
   private static collection: Collection | null = null;
   private static initialized = false;
+  private static serviceDiscoveryClient: ServiceDiscoveryClient | null = null;
+  private static resolvedEndpointCache:
+    | { host: string; port: number; ssl: boolean; expiresAt: number }
+    | null = null;
   private static collectionName = String(process.env.CHROMA_COLLECTION_NAME || 'zym-knowledge').trim();
   private static chromaUrl = String(process.env.CHROMA_URL || 'http://127.0.0.1:8000').trim();
   private static allowedSourceRegex: RegExp | null = parseAllowedSourceRegex();
 
-  static async init() {
-    if (this.initialized) return;
+  private static resetClient() {
+    this.client = null;
+    this.collection = null;
+    this.initialized = false;
+  }
+
+  private static getServiceDiscoveryClient(): ServiceDiscoveryClient {
+    if (!this.serviceDiscoveryClient) {
+      this.serviceDiscoveryClient = new ServiceDiscoveryClient({});
+    }
+    return this.serviceDiscoveryClient;
+  }
+
+  private static async resolveChromaEndpoint(parsed: { host: string; port: number; ssl: boolean }) {
+    if (!shouldDiscoverChromaHost(parsed.host)) {
+      return parsed;
+    }
+
+    const cached = this.resolvedEndpointCache;
+    if (cached && cached.expiresAt > Date.now()) {
+      return { host: cached.host, port: cached.port, ssl: cached.ssl };
+    }
+
+    const namespace = String(process.env.CHROMA_DISCOVERY_NAMESPACE || process.env.CLOUDMAP_NAMESPACE || 'zym-internal').trim();
+    if (!namespace) {
+      return parsed;
+    }
+
+    try {
+      const response = await this.getServiceDiscoveryClient().send(new DiscoverInstancesCommand({
+        NamespaceName: namespace,
+        ServiceName: parsed.host,
+      }));
+      const instances = Array.isArray(response.Instances) ? response.Instances : [];
+      const match = instances.find((instance) => {
+        const attributes = instance.Attributes || {};
+        return Boolean(String(attributes.AWS_INSTANCE_IPV4 || '').trim());
+      });
+      const attributes = match?.Attributes || {};
+      const host = String(attributes.AWS_INSTANCE_IPV4 || '').trim();
+      const port = Number(attributes.AWS_INSTANCE_PORT || parsed.port);
+      if (!host || !Number.isFinite(port) || port <= 0) {
+        return parsed;
+      }
+
+      const ttlMs = Math.max(15_000, Math.min(300_000, Number(process.env.CHROMA_DISCOVERY_CACHE_MS || 60_000)));
+      this.resolvedEndpointCache = {
+        host,
+        port,
+        ssl: parsed.ssl,
+        expiresAt: Date.now() + ttlMs,
+      };
+      return { host, port, ssl: parsed.ssl };
+    } catch {
+      return parsed;
+    }
+  }
+
+  static async init(force = false) {
+    if (this.initialized && !force) return;
+    if (force) {
+      this.client = null;
+      this.collection = null;
+    }
     this.initialized = true;
 
     const parsed = parseChromaUrl(this.chromaUrl);
     if (!parsed) return;
+    const resolved = await this.resolveChromaEndpoint(parsed);
 
     const headers: Record<string, string> = {};
     const authToken = String(process.env.CHROMA_AUTH_TOKEN || '').trim();
@@ -97,16 +178,16 @@ export class VectorService {
     }
 
     this.client = new ChromaClient({
-      host: parsed.host,
-      port: parsed.port,
-      ssl: parsed.ssl,
+      host: resolved.host,
+      port: resolved.port,
+      ssl: resolved.ssl,
       tenant: String(process.env.CHROMA_TENANT || '').trim() || undefined,
       database: String(process.env.CHROMA_DATABASE || '').trim() || undefined,
       headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
   }
 
-  private static async getCollection(): Promise<Collection | null> {
+  private static async getCollection(retried = false): Promise<Collection | null> {
     await this.init();
     if (!this.client) return null;
     if (this.collection) return this.collection;
@@ -119,6 +200,11 @@ export class VectorService {
       });
       return this.collection;
     } catch {
+      if (!retried) {
+        this.resetClient();
+        await this.init(true);
+        return this.getCollection(true);
+      }
       return null;
     }
   }
