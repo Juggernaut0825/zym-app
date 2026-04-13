@@ -214,6 +214,63 @@ function normalizeMarkdownLinkLabel(label: string): string {
     .slice(0, 80);
 }
 
+function extractCitationYear(raw: string): string {
+  const match = String(raw || '').match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : '';
+}
+
+function extractLeadAuthorSurname(raw: string): string {
+  const cleaned = safeString(raw, 300)
+    .replace(/\bet al\.?/gi, ' ')
+    .replace(/[()]/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+
+  const firstChunk = cleaned.split(/[;,]| and |&/i)[0]?.trim() || '';
+  if (!firstChunk) return '';
+
+  const tokens = firstChunk
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ'-]/g, ''))
+    .filter(Boolean);
+
+  if (tokens.length === 0) return '';
+  if (tokens.length === 1) return tokens[0];
+
+  const candidate = tokens.find((token) => token.length > 1 && token === token.toLowerCase())
+    || tokens.find((token) => token.length > 1 && token === token.toUpperCase())
+    || tokens[0];
+
+  const surname = candidate || tokens[0];
+  return surname
+    .split(/([-'])/g)
+    .map((part) => {
+      if (part === '-' || part === "'") return part;
+      return part ? `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}` : part;
+    })
+    .join('');
+}
+
+function buildKnowledgeCitationText(authors: string, year: string, title: string, rank: number): string {
+  const authorSurname = extractLeadAuthorSurname(authors);
+  const citationYear = extractCitationYear(year);
+  const safeTitle = safeString(title, 120);
+
+  if (authorSurname && citationYear) {
+    return `${authorSurname} et al. (${citationYear})`;
+  }
+  if (authorSurname) {
+    return `${authorSurname} et al.`;
+  }
+  if (safeTitle && citationYear) {
+    return `${safeTitle} (${citationYear})`;
+  }
+  if (safeTitle) {
+    return safeTitle;
+  }
+  return `Source ${rank}`;
+}
+
 async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
@@ -1710,24 +1767,37 @@ ${domainPrompt[domain]}`;
     return {
       query,
       total: matches.length,
-      matches: matches.map((item, idx) => ({
-        rank: idx + 1,
-        title: safeString(item.title || item.source, 300),
-        source: item.source,
-        domain: item.domain,
-        backend: item.backend,
-        score: Number(item.score.toFixed(4)),
-        authors: safeString(item.authors, 300),
-        year: safeString(item.year, 16),
-        category: safeString(item.category, 80),
-        referenceUrl: safeString(item.referenceUrl, 500),
-        pdfUrl: safeString(item.pdfUrl, 500),
-        sourceUrl: safeString(item.pdfUrl || item.referenceUrl, 500),
-        citationMarkdown: item.pdfUrl || item.referenceUrl
-          ? `[${idx + 1}](${safeString(item.pdfUrl || item.referenceUrl, 500)})`
-          : '',
-        snippet: safeString(item.text, 1200),
-      })),
+      matches: matches.map((item, idx) => {
+        const rank = idx + 1;
+        const title = safeString(item.title || item.source, 300);
+        const authors = safeString(item.authors, 300);
+        const year = safeString(item.year, 16);
+        const sourceUrl = safeString(item.pdfUrl || item.referenceUrl, 500);
+        const citationText = buildKnowledgeCitationText(authors, year, title || item.source, rank);
+
+        return {
+          rank,
+          title,
+          source: item.source,
+          domain: item.domain,
+          backend: item.backend,
+          score: Number(item.score.toFixed(4)),
+          authors,
+          year,
+          category: safeString(item.category, 80),
+          referenceUrl: safeString(item.referenceUrl, 500),
+          pdfUrl: safeString(item.pdfUrl, 500),
+          sourceUrl,
+          citationText,
+          citationMarkdown: sourceUrl
+            ? `[${rank}](${sourceUrl})`
+            : '',
+          citationInlineMarkdown: sourceUrl
+            ? `[${normalizeMarkdownLinkLabel(citationText)}](${sourceUrl})`
+            : '',
+          snippet: safeString(item.text, 1200),
+        };
+      }),
     };
   }
 

@@ -262,6 +262,7 @@ function coachButtonClass(coachId?: CoachId | null): string {
 
 const neutralTheme = {
   gradient: 'linear-gradient(135deg, rgba(75,85,99,0.98), rgba(17,24,39,0.98))',
+  solidBubble: 'rgba(75,85,99,0.98)',
   softBackground: 'linear-gradient(165deg, rgba(255,255,255,0.98), rgba(71,85,105,0.08))',
   borderColor: 'rgba(71,85,105,0.18)',
   ink: '#334155',
@@ -585,6 +586,51 @@ function renderMessageInlineLinks(text: string): ReactNode[] {
   }
 
   return nodes.length > 0 ? nodes : [text];
+}
+
+function MessageAvatarBadge(props: {
+  avatarUrl?: string | null;
+  label: string;
+  background: string;
+  color: string;
+  hidden?: boolean;
+}) {
+  const { avatarUrl, label, background, color, hidden = false } = props;
+  const resolvedUrl = avatarUrl ? resolveApiAssetUrl(avatarUrl) : '';
+
+  return (
+    <div
+      className={`mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${hidden ? 'opacity-0' : ''}`}
+      style={{ background, color }}
+    >
+      {!hidden && resolvedUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={resolvedUrl}
+          alt={label}
+          className="h-full w-full rounded-full object-cover"
+        />
+      ) : (!hidden ? label : '')}
+    </div>
+  );
+}
+
+function TypingPill(props: {
+  label: string;
+  className?: string;
+}) {
+  const { label, className = '' } = props;
+
+  return (
+    <div className={`typing-pill ${className}`.trim()}>
+      <span>{label}</span>
+      <span className="typing-dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+    </div>
+  );
 }
 
 function buildFaviconHref(unreadCount: number): string {
@@ -923,37 +969,67 @@ export default function AppPage() {
   );
   const composerTooLong = composer.length > MAX_CHAT_MESSAGE_CHARACTERS;
 
-  const typingLabel = useMemo(() => {
+  const typingIndicatorState = useMemo(() => {
     const ids = Object.entries(typingUsers)
       .filter(([, value]) => value)
       .map(([userId]) => userId)
       .filter((userId) => userId !== String(authUserId))
       .filter((userId) => !hasInlineCoachReveal || (userId !== 'coach' && userId !== '0'));
 
-    if (ids.length === 0) return '';
+    if (ids.length === 0) return null;
 
-    const names = Array.from(
-      new Set(
-        ids.map((userId) => {
-          if (userId === 'coach' || userId === '0') {
-            if (activeConversation?.type === 'coach') {
-              return activeConversation.name.toLowerCase().includes('lc') ? 'LC' : 'ZJ';
-            }
-            return 'Coach';
-          }
-          const numericId = Number(userId);
-          if (!Number.isFinite(numericId)) return 'Someone';
-          const groupName = activeGroupMembers.find((member) => member.id === numericId)?.username;
-          if (groupName) return groupName;
-          const messageName = [...messages].reverse().find((message) => message.from_user_id === numericId)?.username;
-          return messageName || 'Someone';
-        }),
-      ),
-    );
+    const activeCoachId = resolveConversationCoachId(activeConversation, selectedCoach);
+    const coachTone = coachAvatarTheme(activeCoachId);
+    const entries = Array.from(new Map(ids.map((userId) => {
+      if (userId === 'coach' || userId === '0') {
+        const coachName = activeConversation?.type === 'coach'
+          ? (activeConversation.name.toLowerCase().includes('lc') ? 'LC' : 'ZJ')
+          : activeCoachId.toUpperCase();
+        return [userId, {
+          userId,
+          name: coachName,
+          avatarText: avatarInitial(coachName),
+          avatarUrl: '',
+          background: coachTone.background,
+          color: coachTone.text,
+        }];
+      }
 
-    if (names.length === 1) return `${names[0]} is typing...`;
-    if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
-    return `${names[0]} and ${names.length - 1} others are typing...`;
+      const numericId = Number(userId);
+      const groupMember = Number.isFinite(numericId)
+        ? activeGroupMembers.find((member) => member.id === numericId)
+        : null;
+      const messageName = Number.isFinite(numericId)
+        ? [...messages].reverse().find((message) => message.from_user_id === numericId)?.username
+        : '';
+      const name = groupMember?.username
+        || messageName
+        || (activeConversation?.type === 'dm' ? activeConversation.name : 'Someone');
+      const avatarUrl = groupMember?.avatar_url
+        || (activeConversation?.type === 'dm' ? activeConversation.avatarUrl || '' : '');
+      return [userId, {
+        userId,
+        name,
+        avatarText: avatarInitial(name),
+        avatarUrl,
+        background: 'rgba(148,163,184,0.16)',
+        color: 'rgb(71 85 105)',
+      }];
+    })).values());
+
+    if (entries.length === 0) return null;
+
+    const names = entries.map((entry) => entry.name);
+    const label = names.length === 1
+      ? `${names[0]} is typing...`
+      : names.length === 2
+        ? `${names[0]} and ${names[1]} are typing...`
+        : `${names[0]} and ${names.length - 1} others are typing...`;
+
+    return {
+      label,
+      primary: entries[0],
+    };
   }, [typingUsers, authUserId, activeConversation, activeGroupMembers, messages, selectedCoach, hasInlineCoachReveal]);
 
   const connectCodeMeta = useMemo(() => {
@@ -3257,26 +3333,13 @@ export default function AppPage() {
 
                       <div className={`flex gap-2.5 sm:gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-1.5 sm:mt-2' : ''}`}>
                         {!mine ? (
-                          <div
-                            className={`mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${compact ? 'opacity-0' : ''}`}
-                            style={{
-                              background: message.is_coach
-                                ? activeCoachAvatarTone.background
-                                : 'rgba(148,163,184,0.16)',
-                              color: message.is_coach
-                                ? activeCoachAvatarTone.text
-                                : 'rgb(71 85 105)',
-                            }}
-                          >
-                            {compact ? '' : counterpartyAvatarUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={counterpartyAvatarUrl}
-                                alt={counterpartyName}
-                                className="h-full w-full rounded-full object-cover"
-                              />
-                            ) : avatarText}
-                          </div>
+                          <MessageAvatarBadge
+                            avatarUrl={counterpartyAvatarUrl}
+                            label={avatarText}
+                            background={message.is_coach ? activeCoachAvatarTone.background : 'rgba(148,163,184,0.16)'}
+                            color={message.is_coach ? activeCoachAvatarTone.text : 'rgb(71 85 105)'}
+                            hidden={compact}
+                          />
                         ) : null}
 
                         <article className={`max-w-[88%] sm:max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
@@ -3348,8 +3411,8 @@ export default function AppPage() {
                               } ${segmentIndex > 0 ? 'mt-2' : ''}`}
                               style={!mine ? (
                                 {
-                                  background: neutralTheme.gradient,
-                                  boxShadow: '0 18px 36px rgba(15,23,42,0.18)',
+                                  background: neutralTheme.solidBubble,
+                                  boxShadow: '0 16px 30px rgba(15,23,42,0.16)',
                                 }
                               ) : undefined}
                             >
@@ -3358,16 +3421,7 @@ export default function AppPage() {
                           ))}
 
                           {isCoachReply && hasRemainingCoachSegments ? (
-                            <div
-                              className="mt-2 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-500 shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm"
-                            >
-                              <span>{avatarText} is typing...</span>
-                              <span className="typing-dots" aria-hidden="true">
-                                <i />
-                                <i />
-                                <i />
-                              </span>
-                            </div>
+                            <TypingPill label={`${avatarText} is typing...`} className="mt-2" />
                           ) : null}
                         </article>
                       </div>
@@ -3375,15 +3429,16 @@ export default function AppPage() {
                   );
                 })}
 
-                {typingLabel ? (
+                {typingIndicatorState ? (
                   <div className="mt-4 flex justify-start">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-500 shadow-sm sm:gap-3 sm:px-4 sm:py-2 sm:text-sm">
-                      <span>{typingLabel}</span>
-                      <span className="typing-dots" aria-hidden="true">
-                        <i />
-                        <i />
-                        <i />
-                      </span>
+                    <div className="flex gap-2.5 sm:gap-3">
+                      <MessageAvatarBadge
+                        avatarUrl={typingIndicatorState.primary.avatarUrl}
+                        label={typingIndicatorState.primary.avatarText}
+                        background={typingIndicatorState.primary.background}
+                        color={typingIndicatorState.primary.color}
+                      />
+                      <TypingPill label={typingIndicatorState.label} />
                     </div>
                   </div>
                 ) : null}

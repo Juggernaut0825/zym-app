@@ -24,7 +24,7 @@ function buildGuardrailPrompt() {
 - Never claim certainty when visual evidence is missing.
 - For medical red flags (severe pain, dizziness, chest pain), advise professional care.
 - Keep recommendations practical, step-based, and personalized.
-- Use plain text. Inline markdown links are allowed only for citations or helpful resources, for example [1](https://example.com).
+- Use plain text. Inline markdown links are allowed only for citations or helpful resources, for example [Wiens et al. (2024)](https://example.com).
 - Do not use Markdown formatting like headings, bold text, or code fences.
 - Use only validated tool outputs when providing grounded guidance.`;
 }
@@ -104,6 +104,53 @@ function sanitizeCoachResponseText(text: string): string {
     .replace(/`/g, '')
     .replace(/\r\n/g, '\n')
     .trim();
+}
+
+interface KnowledgeCitationLink {
+  url: string;
+  inlineMarkdown: string;
+  text: string;
+}
+
+function collectKnowledgeCitationLinks(result: unknown): KnowledgeCitationLink[] {
+  const matches = Array.isArray((result as { matches?: unknown[] } | null)?.matches)
+    ? (result as { matches: Array<Record<string, unknown>> }).matches
+    : [];
+
+  return matches
+    .map((match) => {
+      const url = String(match?.sourceUrl || match?.pdfUrl || match?.referenceUrl || '').trim();
+      const inlineMarkdown = String(match?.citationInlineMarkdown || '').trim();
+      const text = String(match?.citationText || '').trim();
+      if (!url || !inlineMarkdown || !text) return null;
+      return { url, inlineMarkdown, text };
+    })
+    .filter((item): item is KnowledgeCitationLink => Boolean(item))
+    .slice(0, 2);
+}
+
+function responseHasKnowledgeCitation(response: string, citations: KnowledgeCitationLink[]): boolean {
+  const normalized = String(response || '').toLowerCase();
+  if (!normalized) return false;
+  return citations.some((citation) => (
+    normalized.includes(citation.url.toLowerCase())
+    || normalized.includes(citation.text.toLowerCase())
+  ));
+}
+
+function ensureKnowledgeCitationLanguage(response: string, searchKnowledgeResult: unknown): string {
+  const citations = collectKnowledgeCitationLinks(searchKnowledgeResult);
+  if (citations.length === 0 || responseHasKnowledgeCitation(response, citations)) {
+    return response;
+  }
+
+  const suffix = citations.length === 1
+    ? `I checked ${citations[0].inlineMarkdown} while answering this.`
+    : `I checked studies including ${citations[0].inlineMarkdown} and ${citations[1].inlineMarkdown} while answering this.`;
+
+  return String(response || '').trim()
+    ? `${String(response || '').trim()}\n\n${suffix}`
+    : suffix;
 }
 
 function buildSessionPrompt(session: SessionState): string {
@@ -402,7 +449,11 @@ export class CoachService {
       active: true,
     });
 
-    const finalResponse = sanitizeCoachResponseText(String(result.response || '').trim());
+    const latestToolResults = collectLatestToolResults(result.messages);
+    const finalResponse = ensureKnowledgeCitationLanguage(
+      sanitizeCoachResponseText(String(result.response || '').trim()),
+      latestToolResults.get('search_knowledge'),
+    );
 
     await sessionStore.appendAssistantMessage(session, finalResponse);
     await sessionStore.saveToFile(session, sessionFile);

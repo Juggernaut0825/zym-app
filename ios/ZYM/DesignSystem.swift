@@ -12,7 +12,7 @@ extension Color {
     static let zymSecondaryDark = Color(red: 0.694, green: 0.388, blue: 0.133)
     static let zymText = Color(red: 0.122, green: 0.122, blue: 0.122)
     static let zymSubtext = Color(red: 0.439, green: 0.415, blue: 0.388)
-    static let zymBubbleDark = Color(red: 0.353, green: 0.396, blue: 0.475)
+    static let zymBubbleDark = Color(red: 0.294, green: 0.333, blue: 0.388)
     static let zymCoachBlue = Color(red: 0.424, green: 0.486, blue: 0.965)
     static let zymCoachBlueDark = Color(red: 0.290, green: 0.341, blue: 0.788)
 

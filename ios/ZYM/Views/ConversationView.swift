@@ -18,6 +18,14 @@ struct DraftAttachment: Identifiable {
     let previewURL: URL?
 }
 
+private struct ConversationTypingState {
+    let label: String
+    let isCoach: Bool
+    let coachId: String?
+    let avatarURL: String?
+    let fallbackText: String
+}
+
 struct ConversationView: View {
     let conversation: Conversation
     private let maxMessageCharacters = 8000
@@ -64,9 +72,7 @@ struct ConversationView: View {
         return "zj"
     }
 
-    private var coachTypingName: String {
-        conversation.isCoach ? conversation.name : conversationCoachDisplayName(resolvedCoachId)
-    }
+    private var coachTypingName: String { resolvedCoachId.uppercased() }
 
     private var displayTimeZone: TimeZone {
         if let stored = appState.timezone,
@@ -89,16 +95,54 @@ struct ConversationView: View {
         newMessage.count > maxMessageCharacters
     }
 
-    private var typingLabel: String {
-        let activeTypers = Set(typingUsers.filter { $0.value }.keys)
-        if activeTypers.isEmpty { return "" }
+    private var typingIndicatorState: ConversationTypingState? {
+        let activeTypers = typingUsers
+            .filter { $0.value }
+            .map(\.key)
+            .filter { $0 != String(appState.userId ?? -1) }
+
+        if activeTypers.isEmpty { return nil }
+
         if (activeTypers.contains("coach") || activeTypers.contains("0")) && !hasPendingCoachReveal {
-            return "\(coachTypingName) is typing..."
+            return ConversationTypingState(
+                label: "\(coachTypingName) is typing...",
+                isCoach: true,
+                coachId: resolvedCoachId,
+                avatarURL: nil,
+                fallbackText: coachTypingName
+            )
         }
+
         if !conversation.isGroup {
-            return "\(conversation.name) is typing..."
+            return ConversationTypingState(
+                label: "\(conversation.name) is typing...",
+                isCoach: false,
+                coachId: nil,
+                avatarURL: conversation.avatarUrl,
+                fallbackText: String(conversation.name.prefix(2)).uppercased()
+            )
         }
-        return "Someone is typing..."
+
+        let activeUserIds = activeTypers.compactMap(Int.init)
+        let primaryMember = groupMembers.first { activeUserIds.contains($0.id) }
+        let primaryName = primaryMember?.username ?? "Someone"
+        let label: String
+        if activeUserIds.count <= 1 {
+            label = "\(primaryName) is typing..."
+        } else if activeUserIds.count == 2 {
+            let secondaryName = groupMembers.first { $0.id != primaryMember?.id && activeUserIds.contains($0.id) }?.username ?? "Someone"
+            label = "\(primaryName) and \(secondaryName) are typing..."
+        } else {
+            label = "\(primaryName) and \(activeUserIds.count - 1) others are typing..."
+        }
+
+        return ConversationTypingState(
+            label: label,
+            isCoach: false,
+            coachId: nil,
+            avatarURL: primaryMember?.avatar_url,
+            fallbackText: String(primaryName.prefix(2)).uppercased()
+        )
     }
 
     var body: some View {
@@ -124,9 +168,15 @@ struct ConversationView: View {
                                     .zymAppear(delay: Double(min(index, 5)) * 0.02)
                             }
 
-                            if !typingLabel.isEmpty {
+                            if let typingIndicatorState {
                                 HStack {
-                                    TypingIndicator(label: typingLabel)
+                                    TypingIndicatorRow(
+                                        label: typingIndicatorState.label,
+                                        isCoach: typingIndicatorState.isCoach,
+                                        coachId: typingIndicatorState.coachId,
+                                        avatarURL: typingIndicatorState.avatarURL,
+                                        fallbackText: typingIndicatorState.fallbackText
+                                    )
                                     Spacer()
                                 }
                                 .padding(.horizontal, 12)
@@ -1205,7 +1255,7 @@ private struct ConversationMessageRow: View {
                         }
 
                         if hasRemainingCoachSegments {
-                            TypingIndicator(label: inlineTypingLabel)
+                            TypingIndicatorPill(label: inlineTypingLabel)
                         }
 
                         if !mediaUrls.isEmpty {
@@ -1413,7 +1463,27 @@ struct DraftAttachmentPreview: View {
     }
 }
 
-struct TypingIndicator: View {
+private struct TypingIndicatorRow: View {
+    let label: String
+    let isCoach: Bool
+    let coachId: String?
+    let avatarURL: String?
+    let fallbackText: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            ConversationAvatarBadge(
+                isCoach: isCoach,
+                coachId: coachId ?? "zj",
+                avatarURL: avatarURL,
+                fallbackText: fallbackText
+            )
+            TypingIndicatorPill(label: label)
+        }
+    }
+}
+
+struct TypingIndicatorPill: View {
     let label: String
     @State private var pulse = false
 
