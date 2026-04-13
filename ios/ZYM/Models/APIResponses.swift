@@ -285,48 +285,9 @@ struct CoachTrainingRecord: Codable, Identifiable {
     let from_plan: Bool?
 }
 
-struct CoachTrainingPlanExercise: Codable, Identifiable {
-    let id: String
-    let exercise_key: String?
-    let order: Int
-    let name: String
-    let sets: Int
-    let reps: String
-    let rest_seconds: Int
-    let target_weight_kg: Double?
-    let cue: String?
-    let notes: String?
-    let demo_url: String?
-    let demo_thumbnail: String?
-    let completed_at: String?
-}
-
-struct CoachTrainingPlan: Codable {
-    let id: String
-    let day: String
-    let coach_id: String
-    let title: String
-    let summary: String
-    let timezone: String
-    let created_at: String
-    let updated_at: String
-    let exercises: [CoachTrainingPlanExercise]
-}
-
-struct CoachTrainingPlanResponse: Codable {
-    let day: String
-    let timezone: String
-    let plan: CoachTrainingPlan?
-}
-
 struct CoachCheckInRecord: Codable {
     let weight_kg: Double?
     let body_fat_pct: Double?
-    let waist_cm: Double?
-    let energy: Int?
-    let hunger: Int?
-    let recovery: Int?
-    let adherence: String?
     let notes: String?
     let timezone: String?
     let occurred_at_utc: String?
@@ -346,16 +307,10 @@ struct CoachProgressSummary: Codable {
     let latestWeightDay: String?
     let latestWeightKg: Double?
     let latestBodyFatPct: Double?
-    let latestWaistCm: Double?
     let weight7dAvg: Double?
     let weight14dDelta: Double?
     let weight30dDelta: Double?
-    let avgEnergy7d: Double?
-    let avgHunger7d: Double?
-    let avgRecovery7d: Double?
-    let adherence7d: String?
     let lastBodyFatDay: String?
-    let lastWaistDay: String?
     let checkInDays: Int
     let trendLine: String
     let status: String

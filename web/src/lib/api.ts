@@ -3,7 +3,6 @@ import { clearAuth, getAuth, setAuthTokens } from './auth-storage';
 import {
   AbuseReport,
   AuthSession,
-  CoachTrainingPlanResponse,
   CoachRecordsResponse,
   FeedComment,
   ChatMessage,
@@ -709,11 +708,6 @@ export async function updateCoachCheckInRecord(payload: {
   occurredAtUtc?: string | null;
   weight_kg?: number;
   body_fat_pct?: number;
-  waist_cm?: number;
-  energy?: number;
-  hunger?: number;
-  recovery?: number;
-  adherence?: 'on_track' | 'partial' | 'off_track';
   notes?: string;
 }): Promise<void> {
   await request('/coach/records/check-in/update', {
@@ -738,32 +732,6 @@ export async function updateCoachTrainingRecord(payload: {
   await request('/coach/records/training/update', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
-}
-
-export async function getCoachTrainingPlan(userId: number, day?: string): Promise<CoachTrainingPlanResponse> {
-  const params = new URLSearchParams();
-  if (day) {
-    params.set('day', day);
-  }
-  const query = params.toString();
-  return request<CoachTrainingPlanResponse>(`/coach/training-plan/${userId}${query ? `?${query}` : ''}`);
-}
-
-export async function toggleCoachTrainingPlanExercise(payload: {
-  userId: number;
-  day: string;
-  exerciseId: string;
-  completed: boolean;
-  occurredAtUtc?: string;
-  timezone?: string;
-}): Promise<CoachTrainingPlanResponse & { completed: boolean }> {
-  return request<CoachTrainingPlanResponse & { completed: boolean }>('/coach/training-plan/toggle', {
-    method: 'POST',
-    body: JSON.stringify({
-      ...payload,
-      timezone: payload.timezone || detectClientTimeZone(),
-    }),
   });
 }
 

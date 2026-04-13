@@ -1,13 +1,6 @@
-export type CoachCheckInAdherence = 'on_track' | 'partial' | 'off_track';
-
 export interface CoachCheckIn {
   weight_kg?: number | null;
   body_fat_pct?: number | null;
-  waist_cm?: number | null;
-  energy?: number | null;
-  hunger?: number | null;
-  recovery?: number | null;
-  adherence?: CoachCheckInAdherence | null;
   notes?: string | null;
   timezone?: string | null;
   occurred_at_utc?: string | null;
@@ -19,11 +12,6 @@ export interface CoachProgressPoint {
   logged_at: string | null;
   weight_kg: number | null;
   body_fat_pct: number | null;
-  waist_cm: number | null;
-  energy: number | null;
-  hunger: number | null;
-  recovery: number | null;
-  adherence: CoachCheckInAdherence | null;
   notes: string | null;
   has_check_in: boolean;
   meal_count: number;
@@ -38,16 +26,10 @@ export interface CoachProgressSummary {
   latestWeightDay: string | null;
   latestWeightKg: number | null;
   latestBodyFatPct: number | null;
-  latestWaistCm: number | null;
   weight7dAvg: number | null;
   weight14dDelta: number | null;
   weight30dDelta: number | null;
-  avgEnergy7d: number | null;
-  avgHunger7d: number | null;
-  avgRecovery7d: number | null;
-  adherence7d: 'on_track' | 'partial' | 'off_track' | 'mixed' | 'unknown';
   lastBodyFatDay: string | null;
-  lastWaistDay: string | null;
   checkInDays: number;
   trendLine: 'down' | 'up' | 'flat' | 'unknown';
   status: 'on_track' | 'watch' | 'off_track' | 'insufficient_data';
@@ -68,22 +50,6 @@ function toRoundedNumber(value: unknown, min: number, max: number): number | nul
   if (!Number.isFinite(numeric)) return null;
   if (numeric < min || numeric > max) return null;
   return Math.round(numeric * 100) / 100;
-}
-
-function toRoundedInt(value: unknown, min: number, max: number): number | null {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const integer = Math.round(numeric);
-  if (integer < min || integer > max) return null;
-  return integer;
-}
-
-function normalizeAdherence(value: unknown): CoachCheckInAdherence | null {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'on_track' || normalized === 'partial' || normalized === 'off_track') {
-    return normalized;
-  }
-  return null;
 }
 
 function normalizeIso(value: unknown): string | null {
@@ -131,11 +97,6 @@ export function normalizeCoachCheckIn(raw: unknown): CoachCheckIn | null {
   const normalized: CoachCheckIn = {
     weight_kg: toRoundedNumber(record.weight_kg, 20, 350),
     body_fat_pct: toRoundedNumber(record.body_fat_pct, 2, 70),
-    waist_cm: null,
-    energy: null,
-    hunger: null,
-    recovery: null,
-    adherence: null,
     notes: safeText(record.notes, 500) || null,
     timezone: safeText(record.timezone, 80) || null,
     occurred_at_utc: normalizeIso(record.occurred_at_utc),
@@ -170,11 +131,6 @@ export function buildCoachProgressPoints(rawDaily: unknown, maxDays = 120): Coac
         logged_at: checkIn?.logged_at ?? null,
         weight_kg: checkIn?.weight_kg ?? null,
         body_fat_pct: checkIn?.body_fat_pct ?? null,
-        waist_cm: checkIn?.waist_cm ?? null,
-        energy: checkIn?.energy ?? null,
-        hunger: checkIn?.hunger ?? null,
-        recovery: checkIn?.recovery ?? null,
-        adherence: checkIn?.adherence ?? null,
         notes: checkIn?.notes ?? null,
         has_check_in: Boolean(checkIn),
         meal_count: meals.length,
@@ -183,15 +139,6 @@ export function buildCoachProgressPoints(rawDaily: unknown, maxDays = 120): Coac
         total_burned: Math.round(Number(bucket.total_burned || 0) * 100) / 100,
       } satisfies CoachProgressPoint;
     });
-}
-
-function summarizeAdherence(values: Array<CoachCheckInAdherence | null | undefined>): CoachProgressSummary['adherence7d'] {
-  const clean = values.filter((value): value is CoachCheckInAdherence => Boolean(value));
-  if (clean.length === 0) return 'unknown';
-  if (clean.every((value) => value === 'on_track')) return 'on_track';
-  if (clean.every((value) => value === 'partial')) return 'partial';
-  if (clean.every((value) => value === 'off_track')) return 'off_track';
-  return 'mixed';
 }
 
 function buildStatus(goalRaw: unknown, weight14dDelta: number | null): Pick<CoachProgressSummary, 'status' | 'statusLabel' | 'trendLine'> {
@@ -262,7 +209,6 @@ export function computeCoachProgressSummary(
   const latestCheckInPoint = [...points].reverse().find((point) => point.has_check_in) || null;
   const latestWeightPoint = [...points].reverse().find((point) => typeof point.weight_kg === 'number') || null;
   const latestBodyFatPoint = [...points].reverse().find((point) => typeof point.body_fat_pct === 'number') || null;
-  const latestWaistPoint = [...points].reverse().find((point) => typeof point.waist_cm === 'number') || null;
   const weightSeries = points
     .filter((point) => typeof point.weight_kg === 'number')
     .map((point) => ({ day: point.day, value: point.weight_kg }));
@@ -286,10 +232,6 @@ export function computeCoachProgressSummary(
   const weight30dDelta = recent30Start && anchorDay
     ? firstAndLastDelta(weightSeries, recent30Start, anchorDay)
     : null;
-  const avgEnergy7d = average(recentPoints.map((point) => point.energy));
-  const avgHunger7d = average(recentPoints.map((point) => point.hunger));
-  const avgRecovery7d = average(recentPoints.map((point) => point.recovery));
-  const adherence7d = summarizeAdherence(recentPoints.map((point) => point.adherence));
   const { status, statusLabel, trendLine } = buildStatus(goalRaw, weight14dDelta);
 
   const summaryWithoutNarrative: Omit<CoachProgressSummary, 'trendNarrative'> = {
@@ -298,16 +240,10 @@ export function computeCoachProgressSummary(
     latestWeightDay: latestWeightPoint?.day || null,
     latestWeightKg: latestWeightPoint?.weight_kg ?? null,
     latestBodyFatPct: latestBodyFatPoint?.body_fat_pct ?? null,
-    latestWaistCm: latestWaistPoint?.waist_cm ?? null,
     weight7dAvg,
     weight14dDelta,
     weight30dDelta,
-    avgEnergy7d,
-    avgHunger7d,
-    avgRecovery7d,
-    adherence7d,
     lastBodyFatDay: latestBodyFatPoint?.day || null,
-    lastWaistDay: latestWaistPoint?.day || null,
     checkInDays: points.filter((point) => point.has_check_in).length,
     trendLine,
     status,

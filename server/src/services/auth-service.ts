@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
 import { googleAuthService } from './google-auth-service.js';
+import { appleAuthService } from './apple-auth-service.js';
 
 dotenv.config();
 
@@ -564,6 +565,97 @@ export class AuthService {
         params.push(identity.email);
       }
       if (!isEmailVerified(user.email_verified_at)) {
+        updates.push('email_verified_at = CURRENT_TIMESTAMP');
+      }
+
+      if (updates.length > 0) {
+        db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params, user.id);
+      }
+    }
+
+    return this.issueSessionForUser(Number(user.id || 0), context);
+  }
+
+  static async loginWithApple(
+    identityToken: string,
+    context: {
+      fullName?: string | null;
+      deviceName?: string;
+      ipAddress?: string;
+      healthDisclaimerAccepted?: boolean;
+      consentVersion?: string;
+      userAgent?: string | null;
+    } = {},
+  ) {
+    const identity = await appleAuthService.verifyIdentityToken(identityToken);
+    const db = getDB();
+
+    let user = db.prepare(`
+      SELECT id, username, email, email_verified_at, apple_sub
+      FROM users
+      WHERE apple_sub = ?
+      LIMIT 1
+    `).get(identity.sub) as any;
+
+    if (!user && identity.email) {
+      user = db.prepare(`
+        SELECT id, username, email, email_verified_at, apple_sub
+        FROM users
+        WHERE lower(email) = ?
+        LIMIT 1
+      `).get(identity.email) as any;
+    }
+
+    if (!user) {
+      if (!context.healthDisclaimerAccepted) {
+        throw new Error('Please confirm the health disclaimer before continuing with Apple.');
+      }
+      if (!identity.email) {
+        throw new Error('Apple sign-in did not include an email. Try again and choose to share your email.');
+      }
+      const usernameSeed = context.fullName || identity.email.split('@')[0] || 'zymuser';
+      const username = this.generateUniqueUsername(usernameSeed);
+      const publicUuid = issueUniquePublicUuid();
+      const result = db.prepare(`
+        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, apple_sub, public_uuid)
+        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
+      `).run(username, identity.email, identity.sub, publicUuid);
+      const userId = Number(result.lastInsertRowid || 0);
+      if (userId > 0) {
+        db.prepare(`
+          INSERT OR IGNORE INTO user_consents (user_id, consent_type, version, ip_address, user_agent)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          userId,
+          'health_disclaimer',
+          String(context.consentVersion || '2026-03-26').slice(0, 40),
+          String(context.ipAddress || '').slice(0, 120) || null,
+          String(context.userAgent || '').slice(0, 500) || null,
+        );
+      }
+      user = db.prepare(`
+        SELECT id, username, email, email_verified_at, apple_sub
+        FROM users
+        WHERE id = ?
+      `).get(userId) as any;
+    } else {
+      const existingAppleSub = String(user.apple_sub || '').trim();
+      if (existingAppleSub && existingAppleSub !== identity.sub) {
+        throw new Error('This account is already linked to a different Apple identity.');
+      }
+
+      const updates: string[] = [];
+      const params: unknown[] = [];
+
+      if (!existingAppleSub) {
+        updates.push('apple_sub = ?');
+        params.push(identity.sub);
+      }
+      if (!normalizeEmail(user.email) && identity.email) {
+        updates.push('email = ?');
+        params.push(identity.email);
+      }
+      if (identity.emailVerified && !isEmailVerified(user.email_verified_at)) {
         updates.push('email_verified_at = CURRENT_TIMESTAMP');
       }
 

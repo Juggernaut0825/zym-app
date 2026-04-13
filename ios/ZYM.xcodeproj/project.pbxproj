@@ -14,8 +14,8 @@
 			34E9C1025A6B7C8D90ABCDEF /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */; };
 		3D990E2FD78D1C53327F4997 /* CreatePostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E953F40CD0755DFA2272B07 /* CreatePostView.swift */; };
 		A11F0E2B3C4D5E6F70000001 /* CoachWelcomeFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */; };
-		A11F0E2B3C4D5E6F70000003 /* CoachWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000004 /* CoachWorkspaceView.swift */; };
 		A11F0E2B3C4D5E6F70000005 /* AuthSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */; };
+		A11F0E2B3C4D5E6F70000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */; };
 		700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */; };
 		70DE2935BEC343D85E049018 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */; };
 		77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */; };
@@ -55,8 +55,8 @@
 		9CE85FAD3EB546359D5A70E2 /* DesignSystem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DesignSystem.swift; path = ZYM/DesignSystem.swift; sourceTree = "<group>"; };
 		9F9455F05EA97DAFBC4A2508 /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = ZYM/Views/LoginView.swift; sourceTree = "<group>"; };
 		A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CoachWelcomeFlowView.swift; path = ZYM/Views/CoachWelcomeFlowView.swift; sourceTree = "<group>"; };
-		A11F0E2B3C4D5E6F70000004 /* CoachWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CoachWorkspaceView.swift; path = ZYM/Views/CoachWorkspaceView.swift; sourceTree = "<group>"; };
 		A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AuthSupportViews.swift; path = ZYM/Views/AuthSupportViews.swift; sourceTree = "<group>"; };
+		A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ZYM/Assets.xcassets; sourceTree = "<group>"; };
 		ABD8953369AFD68CF2995D07 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
 		B977A73E78161F25F55F9612 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
 		BD07A6AD2F8347E734C7B699 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
@@ -91,7 +91,6 @@
 					A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */,
 					F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */,
 					A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */,
-					A11F0E2B3C4D5E6F70000004 /* CoachWorkspaceView.swift */,
 					2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */,
 					3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */,
 					FC61CF138FD5E4180092DB82 /* FeedView.swift */,
@@ -149,6 +148,7 @@
 				4DC0AD496B349508F2DACC2B /* ZYMApp.swift */,
 				7650D1583361CD88A0543424 /* AppState.swift */,
 				C3B5354881D825F89198A6AA /* Info.plist */,
+				A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */,
 				FF08263C02AA5C9EA9F0083B /* Models */,
 				9CE85FAD3EB546359D5A70E2 /* DesignSystem.swift */,
 			);
@@ -234,6 +234,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11F0E2B3C4D5E6F70000007 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,7 +267,6 @@
 				97CE01195CE02A06CEE85392 /* LeaderboardView.swift in Sources */,
 				A11F0E2B3C4D5E6F70000005 /* AuthSupportViews.swift in Sources */,
 				A11F0E2B3C4D5E6F70000001 /* CoachWelcomeFlowView.swift in Sources */,
-				A11F0E2B3C4D5E6F70000003 /* CoachWorkspaceView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

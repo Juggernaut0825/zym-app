@@ -74,7 +74,6 @@ import {
 } from '@/lib/types';
 
 const APP_TITLE = 'ZYM Community Coach';
-const COACH_SAFETY_TOOLTIP = 'ZYM AI Coach is not medical advice.\nIf you have injuries, medical conditions, chest pain, severe pain, dizziness, or urgent symptoms, stop and seek professional or emergency care.';
 const BASE_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none"><defs><linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#f28a3a"/><stop offset="50%" stop-color="#e17734"/><stop offset="100%" stop-color="#6c7cf6"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="2" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="60" cy="60" r="55" fill="#0a0a0a" stroke="url(#logoGradient)" stroke-width="3"/><path d="M30 35 L90 35 L90 45 L50 75 L90 75 L90 85 L30 85 L30 75 L70 45 L30 45 Z" fill="url(#logoGradient)" filter="url(#glow)"/><path d="M75 30 L85 50 L78 50 L85 70 L75 50 L82 50 Z" fill="#fbbf24" opacity="0.9"/><circle cx="25" cy="60" r="3" fill="#f28a3a" opacity="0.65"/><circle cx="95" cy="60" r="3" fill="#6c7cf6" opacity="0.65"/><circle cx="60" cy="60" r="45" fill="none" stroke="#f28a3a" stroke-width="1" opacity="0.28"/><circle cx="60" cy="60" r="50" fill="none" stroke="#6c7cf6" stroke-width="0.5" opacity="0.22"/></svg>`;
 
 const tabs = [
@@ -3258,20 +3257,6 @@ export default function AppPage() {
 	                  <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
 	                    {activeConversation?.name || 'Select a chat'}
 	                  </h2>
-	                  {activeConversation?.type === 'coach' ? (
-	                    <div className="group relative">
-	                      <button
-	                        type="button"
-                        className="flex size-[22px] items-center justify-center rounded-full border border-slate-200 bg-white/80 text-[10px] font-semibold text-slate-500 sm:size-6 sm:text-[11px]"
-                        aria-label="Coach safety notice"
-                      >
-                        i
-                      </button>
-                      <div className="pointer-events-none absolute left-0 top-[calc(100%+10px)] z-20 hidden w-[320px] rounded-2xl border border-white/70 bg-white/95 p-3 text-xs leading-5 text-slate-600 shadow-xl whitespace-pre-line group-hover:block">
-                        {COACH_SAFETY_TOOLTIP}
-	                      </div>
-	                    </div>
-	                  ) : null}
 	                </div>
 	              </div>
 	            </div>

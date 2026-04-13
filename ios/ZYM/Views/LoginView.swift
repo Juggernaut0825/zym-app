@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 struct LoginView: View {
     @State private var identifier = ""
@@ -11,6 +12,7 @@ struct LoginView: View {
     @State private var showVerifyEmail = false
     @State private var verificationEmail = ""
     @State private var verificationSentOnAppear = false
+    @State private var appleConsentAccepted = false
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -95,6 +97,47 @@ struct LoginView: View {
                 }
                 .buttonStyle(ZYMPrimaryButton())
                 .disabled(pending)
+
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        Rectangle()
+                            .fill(Color.zymLine)
+                            .frame(height: 1)
+                        Text("Or continue with Apple")
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundColor(Color.zymSubtext)
+                        Rectangle()
+                            .fill(Color.zymLine)
+                            .frame(height: 1)
+                    }
+
+                    SignInWithAppleButton(.continue) { request in
+                        request.requestedScopes = [.fullName, .email]
+                    } onCompletion: { result in
+                        handleAppleSignIn(result)
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .disabled(pending)
+
+                    Button {
+                        appleConsentAccepted.toggle()
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: appleConsentAccepted ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(appleConsentAccepted ? Color.zymPrimaryDark : Color.zymSubtext)
+                            Text("I understand ZYM AI Coach is not medical advice and I agree to the Terms and Health Disclaimer.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymSubtext)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 HStack(spacing: 10) {
                     Button("Forgot password?") {
@@ -216,6 +259,99 @@ struct LoginView: View {
             DispatchQueue.main.async {
                 pending = false
                 appState.username = loginResponse.username ?? trimmedIdentifier
+                appState.token = loginResponse.token
+                appState.refreshToken = loginResponse.refreshToken
+                appState.userId = loginResponse.userId
+                let preservedCoach = appState.userId == loginResponse.userId ? appState.selectedCoach : nil
+                appState.selectedCoach = loginResponse.selectedCoach ?? preservedCoach
+                appState.timezone = loginResponse.timezone ?? appState.timezone ?? TimeZone.current.identifier
+                appState.isLoggedIn = true
+            }
+        }.resume()
+    }
+
+    private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
+        if pending { return }
+        switch result {
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            showError = true
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+                errorMessage = "Apple sign-in did not return a valid credential."
+                showError = true
+                return
+            }
+            guard let tokenData = credential.identityToken,
+                  let identityToken = String(data: tokenData, encoding: .utf8),
+                  !identityToken.isEmpty else {
+                errorMessage = "Apple sign-in did not return an identity token."
+                showError = true
+                return
+            }
+            loginWithApple(identityToken: identityToken, fullName: appleFullName(credential.fullName))
+        }
+    }
+
+    private func appleFullName(_ components: PersonNameComponents?) -> String? {
+        guard let components else { return nil }
+        let formatter = PersonNameComponentsFormatter()
+        formatter.style = .default
+        let rendered = formatter.string(from: components).trimmingCharacters(in: .whitespacesAndNewlines)
+        return rendered.isEmpty ? nil : rendered
+    }
+
+    private func loginWithApple(identityToken: String, fullName: String?) {
+        guard let url = apiURL("/auth/apple") else {
+            errorMessage = "API URL is unavailable."
+            showError = true
+            return
+        }
+
+        pending = true
+        showError = false
+
+        var body: [String: Any] = [
+            "identityToken": identityToken,
+            "timezone": TimeZone.current.identifier,
+            "healthDisclaimerAccepted": appleConsentAccepted,
+            "consentVersion": zymHealthDisclaimerVersion,
+        ]
+        if let fullName, !fullName.isEmpty {
+            body["fullName"] = fullName
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if let error {
+                DispatchQueue.main.async {
+                    pending = false
+                    errorMessage = "Cannot reach server (\(apiBaseURLString())). \(error.localizedDescription)"
+                    showError = true
+                }
+                return
+            }
+
+            guard statusCode >= 200 && statusCode < 300,
+                  let data,
+                  let loginResponse = try? JSONDecoder().decode(AuthLoginResponse.self, from: data) else {
+                let apiMessage = parseAPIErrorMessage(from: data) ?? "Apple sign-in failed."
+                DispatchQueue.main.async {
+                    pending = false
+                    errorMessage = apiMessage
+                    showError = true
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                pending = false
+                appState.username = loginResponse.username
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId

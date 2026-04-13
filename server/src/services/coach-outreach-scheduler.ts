@@ -493,11 +493,6 @@ ${stateContext}
       const todayCheckIn = normalizeCoachCheckIn((todayBucket as any)?.check_in);
       const todayMeals = Array.isArray((todayBucket as any)?.meals) ? (todayBucket as any).meals.length : 0;
       const todayTraining = Array.isArray((todayBucket as any)?.training) ? (todayBucket as any).training.length : 0;
-      const planResult = await coachTypedToolsService.getTrainingPlan(String(userId), { day: localDay, timezone }).catch(() => ({ plan: null }));
-      const plan = (planResult as any)?.plan || null;
-      const remainingExercises = Array.isArray(plan?.exercises)
-        ? plan.exercises.filter((item: any) => !item?.completed_at).length
-        : 0;
 
       const lines: string[] = ['[USER_STATE]'];
       if ((profile as any)?.goal) {
@@ -512,9 +507,6 @@ ${stateContext}
         lines.push('Today does not have a progress check-in yet.');
       }
       lines.push(`Today logs: ${todayMeals} meals, ${todayTraining} training entries.`);
-      if (plan) {
-        lines.push(`Today's coach plan: ${plan.title || 'Training plan'}${remainingExercises > 0 ? ` with ${remainingExercises} exercises still unchecked` : ', already completed'}.`);
-      }
       return `\n\n${lines.join('\n')}`;
     } catch {
       return '';

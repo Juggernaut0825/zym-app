@@ -26,7 +26,8 @@ function buildGuardrailPrompt() {
 - Keep recommendations practical, step-based, and personalized.
 - Use plain text. Inline markdown links are allowed only for citations or helpful resources, for example [Wiens et al. (2024)](https://example.com).
 - Do not use Markdown formatting like headings, bold text, or code fences.
-- Use only validated tool outputs when providing grounded guidance.`;
+- Use only validated tool outputs when providing grounded guidance.
+- If the available tools and visible conversation context are not enough to solve a request, say so plainly and redirect back to training, food, recovery, progress, or media-analysis topics.`;
 }
 
 type CoachId = 'zj' | 'lc';

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   selected_coach TEXT,
   enabled_coaches TEXT,
   google_sub TEXT,
+  apple_sub TEXT,
   avatar_url TEXT,
   background_url TEXT,
   bio TEXT,
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ALTER COLUMN selected_coach DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled_coaches TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_sub TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS public_uuid TEXT;
 
 CREATE TABLE IF NOT EXISTS friendships (
@@ -294,6 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_friendships_friend_id ON friendships(friend_id);
 CREATE INDEX IF NOT EXISTS idx_groups_owner_id ON groups(owner_id);
 CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON group_members(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_sub ON users(apple_sub) WHERE apple_sub IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_uuid ON users(public_uuid) WHERE public_uuid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);

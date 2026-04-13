@@ -1533,6 +1533,73 @@ app.post('/auth/google',
     }
   });
 
+app.post('/auth/apple',
+  APIGateway.rateLimit(36, 10 * 60_000, 'auth-apple'),
+  APIGateway.validateSchema({
+    identityToken: { required: true, type: 'string', minLength: 32, maxLength: 4096 },
+    fullName: { type: 'string', maxLength: 160 },
+    timezone: { type: 'string', maxLength: 80 },
+    healthDisclaimerAccepted: { type: 'boolean' },
+    consentVersion: { type: 'string', minLength: 4, maxLength: 40 },
+  }),
+  async (req, res) => {
+    try {
+      const identityToken = String(req.body.identityToken || '').trim();
+      const fullName = sanitizePlainText(req.body.fullName, 160);
+      const timezone = String(req.body.timezone || '').trim();
+      if (timezone && !isValidTimeZone(timezone)) {
+        return res.status(400).json({ error: 'Invalid timezone format' });
+      }
+
+      const forwarded = req.headers['x-forwarded-for'];
+      const ipAddress = Array.isArray(forwarded)
+        ? String(forwarded[0] || '')
+        : String(forwarded || req.ip || '').split(',')[0].trim();
+
+      const result = await AuthService.loginWithApple(identityToken, {
+        fullName: fullName || null,
+        deviceName: String(req.headers['user-agent'] || '').trim(),
+        ipAddress,
+        userAgent: String(req.headers['user-agent'] || '').trim(),
+        healthDisclaimerAccepted: Boolean(req.body.healthDisclaimerAccepted),
+        consentVersion: String(req.body.consentVersion || '').trim(),
+      });
+
+      if (timezone) {
+        await persistUserTimezone(Number(result.userId), timezone);
+      }
+
+      const db = getDB();
+      const user = db.prepare('SELECT id, username, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+      const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
+      const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
+
+      trackSecurityEvent(req, 'auth_apple_login_success', {
+        userId: Number(result.userId),
+        sessionId: String(result.sessionId || ''),
+        metadata: {
+          email: String(user?.email || '').slice(0, 120),
+        },
+      });
+
+      res.json({
+        ...result,
+        username: user?.username,
+        selectedCoach,
+        enabledCoaches,
+        timezone: user?.timezone || null,
+      });
+    } catch (err: any) {
+      trackSecurityEvent(req, 'auth_apple_login_failed', {
+        severity: 'warn',
+        metadata: {
+          message: String(err?.message || '').slice(0, 160),
+        },
+      });
+      res.status(400).json({ error: err.message || 'Apple sign-in failed.' });
+    }
+  });
+
 app.post('/auth/refresh',
   APIGateway.rateLimit(80, 10 * 60_000, 'auth-refresh'),
   APIGateway.validateSchema({
@@ -3466,68 +3533,6 @@ app.post('/coach/records/training/update',
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to update training record' });
-    }
-  });
-
-app.get('/coach/training-plan/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
-  try {
-    const userId = toUserId(req.params.userId);
-    const day = String(req.query.day || '').trim() || undefined;
-    const timezone = String(req.query.timezone || '').trim() || undefined;
-    const result = await coachTypedToolsService.getTrainingPlan(String(userId), { day, timezone });
-    res.json(result);
-  } catch (err: any) {
-    res.status(400).json({ error: err.message || 'Failed to load training plan' });
-  }
-});
-
-app.post('/coach/training-plan/toggle',
-  requireSameUserIdFromBody('userId'),
-  APIGateway.rateLimit(90, 10 * 60_000, 'coach-training-plan-toggle'),
-  APIGateway.validateSchema({
-    userId: { required: true, type: 'number', integer: true, min: 1 },
-    day: { required: true, type: 'string', pattern: COACH_DAY_PATTERN },
-    exerciseId: { required: true, type: 'string', pattern: COACH_RECORD_ID_PATTERN },
-    completed: { required: true, type: 'boolean' },
-    occurredAtUtc: { type: 'string', maxLength: 80 },
-    timezone: { type: 'string', maxLength: 80 },
-  }),
-  async (req, res) => {
-    try {
-      const userId = toUserId(req.body.userId);
-      const day = String(req.body.day || '').trim();
-      const exerciseId = sanitizePlainText(req.body.exerciseId, 120);
-      const timezone = req.body.timezone !== undefined ? sanitizePlainText(req.body.timezone, COACH_PROFILE_TEXT_MAX) : undefined;
-      if (!isValidDayKey(day)) {
-        return res.status(400).json({ error: 'Invalid day format' });
-      }
-      if (!COACH_RECORD_ID_PATTERN.test(exerciseId)) {
-        return res.status(400).json({ error: 'Invalid exerciseId format' });
-      }
-      if (timezone !== undefined && !isValidTimeZone(timezone)) {
-        return res.status(400).json({ error: 'Invalid timezone format' });
-      }
-
-      const result = await coachTypedToolsService.toggleTrainingPlanExerciseCompletion(String(userId), {
-        day,
-        exerciseId,
-        completed: Boolean(req.body.completed),
-        occurredAt: req.body.occurredAtUtc,
-        timezone,
-      });
-
-      trackSecurityEvent(req, 'coach_training_plan_toggled', {
-        userId,
-        metadata: {
-          day,
-          exerciseId,
-          completed: Boolean(req.body.completed),
-        },
-      });
-
-      res.json(result);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message || 'Failed to update training plan' });
     }
   });
 

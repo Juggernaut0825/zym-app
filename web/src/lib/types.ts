@@ -325,48 +325,9 @@ export interface CoachTrainingRecord {
   from_plan?: boolean;
 }
 
-export interface CoachTrainingPlanExercise {
-  id: string;
-  exercise_key?: string;
-  order: number;
-  name: string;
-  sets: number;
-  reps: string;
-  rest_seconds: number;
-  target_weight_kg?: number | null;
-  cue?: string;
-  notes?: string;
-  demo_url?: string;
-  demo_thumbnail?: string;
-  completed_at?: string | null;
-}
-
-export interface CoachTrainingPlan {
-  id: string;
-  day: string;
-  coach_id: 'zj' | 'lc';
-  title: string;
-  summary: string;
-  timezone: string;
-  created_at: string;
-  updated_at: string;
-  exercises: CoachTrainingPlanExercise[];
-}
-
-export interface CoachTrainingPlanResponse {
-  day: string;
-  timezone: string;
-  plan: CoachTrainingPlan | null;
-}
-
 export interface CoachCheckInRecord {
   weight_kg?: number | null;
   body_fat_pct?: number | null;
-  waist_cm?: number | null;
-  energy?: number | null;
-  hunger?: number | null;
-  recovery?: number | null;
-  adherence?: 'on_track' | 'partial' | 'off_track' | null;
   notes?: string | null;
   timezone?: string | null;
   occurred_at_utc?: string | null;
@@ -386,16 +347,10 @@ export interface CoachProgressSummary {
   latestWeightDay: string | null;
   latestWeightKg: number | null;
   latestBodyFatPct: number | null;
-  latestWaistCm: number | null;
   weight7dAvg: number | null;
   weight14dDelta: number | null;
   weight30dDelta: number | null;
-  avgEnergy7d: number | null;
-  avgHunger7d: number | null;
-  avgRecovery7d: number | null;
-  adherence7d: 'on_track' | 'partial' | 'off_track' | 'mixed' | 'unknown';
   lastBodyFatDay: string | null;
-  lastWaistDay: string | null;
   checkInDays: number;
   trendLine: 'down' | 'up' | 'flat' | 'unknown';
   status: 'on_track' | 'watch' | 'off_track' | 'insufficient_data';
