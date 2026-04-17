@@ -10,6 +10,7 @@ import { authEmailService } from '../services/auth-email-service.js';
 import { CommunityService } from '../services/community-service.js';
 import { MediaService } from '../services/media-service.js';
 import { MessageService, buildP2PTopic } from '../services/message-service.js';
+import { ActivityNotificationService } from '../services/activity-notification-service.js';
 import { FriendService } from '../services/friend-service.js';
 import { GroupService } from '../services/group-service.js';
 import { getDB } from '../database/runtime-db.js';
@@ -18,6 +19,7 @@ import { CoachService } from '../services/coach-service.js';
 import { ModerationService } from '../services/moderation-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
 import { SecurityEventService } from '../services/security-event-service.js';
+import { LocationService, type LocationSelection } from '../services/location-service.js';
 import { knowledgeIngestionService } from '../services/knowledge-ingestion-service.js';
 import { coachTypedToolsService } from '../services/coach-typed-tools-service.js';
 import { AdminAuthService } from '../services/admin-auth-service.js';
@@ -157,7 +159,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
 
@@ -183,6 +185,26 @@ function toOptionalInt(raw: unknown): number | undefined {
   if (raw === null || raw === undefined || raw === '') return undefined;
   const parsed = Number(raw);
   return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function readOptionalLocationSelection(input: Record<string, unknown>): LocationSelection | null {
+  const label = String(input.locationLabel || '').trim();
+  const city = String(input.locationCity || '').trim();
+  const latitude = input.locationLatitude;
+  const longitude = input.locationLongitude;
+
+  if (!label && !city && (latitude === undefined || latitude === null || latitude === '')
+    && (longitude === undefined || longitude === null || longitude === '')) {
+    return null;
+  }
+
+  return LocationService.sanitizeSelection({
+    label,
+    city,
+    latitude,
+    longitude,
+    precision: input.locationPrecision,
+  });
 }
 
 function isValidTimeZone(value: string): boolean {
@@ -2040,6 +2062,63 @@ app.get('/users/public/:id', (req, res) => {
   });
 });
 
+app.get('/location/search', APIGateway.rateLimit(80, 10 * 60_000, 'location-search'), async (req, res) => {
+  assertAuthUser(req);
+  try {
+    const query = String(req.query.q || '').trim().slice(0, 120);
+    const results = await LocationService.searchLocations(query);
+    res.json({ results });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to search locations.' });
+  }
+});
+
+app.post('/location/reverse', APIGateway.rateLimit(60, 10 * 60_000, 'location-reverse'), APIGateway.validateSchema({
+  latitude: { required: true, type: 'number', min: -90, max: 90 },
+  longitude: { required: true, type: 'number', min: -180, max: 180 },
+}), async (req, res) => {
+  assertAuthUser(req);
+  try {
+    const result = await LocationService.reverseLookup(Number(req.body.latitude), Number(req.body.longitude));
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to reverse geocode location.' });
+  }
+});
+
+app.get('/location/profile/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  res.json({ location: LocationService.getUserLocation(userId) });
+});
+
+app.post('/location/profile', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  locationLabel: { type: 'string', maxLength: 160 },
+  locationCity: { type: 'string', maxLength: 120 },
+  locationLatitude: { type: 'number', min: -90, max: 90 },
+  locationLongitude: { type: 'number', min: -180, max: 180 },
+  locationPrecision: { type: 'string', enum: ['city', 'precise'] },
+  locationShared: { type: 'boolean' },
+}), (req, res) => {
+  try {
+    const userId = toUserId(req.body.userId);
+    const shared = typeof req.body.locationShared === 'boolean' ? req.body.locationShared : true;
+    const next = LocationService.setUserLocation(userId, readOptionalLocationSelection(req.body || {}), shared);
+    res.json({ location: next });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to save location.' });
+  }
+});
+
+app.get('/location/nearby/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  const nearby = LocationService.getNearbyUsers(userId).map((item) => ({
+    ...item,
+    avatar_url: mediaUrlForClient(req, item.avatar_url),
+  }));
+  res.json({ users: nearby });
+});
+
 app.get('/users/:id', (req, res) => {
   const authUserId = assertAuthUser(req);
   const targetUserId = toUserId(req.params.id);
@@ -2093,6 +2172,11 @@ app.post('/community/post',
     content: { type: 'string', maxLength: 8000 },
     mediaUrls: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 2048 },
     mediaIds: { type: 'array', maxItems: 5, itemType: 'string', maxItemLength: 128 },
+    locationLabel: { type: 'string', maxLength: 160 },
+    locationCity: { type: 'string', maxLength: 120 },
+    locationLatitude: { type: 'number', min: -90, max: 90 },
+    locationLongitude: { type: 'number', min: -180, max: 180 },
+    locationPrecision: { type: 'string', enum: ['city', 'precise'] },
   }),
   async (req, res) => {
   try {
@@ -2104,8 +2188,9 @@ app.post('/community/post',
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
     const resolvedAssetIds = resolveOwnedAssetIds(userId, mediaIds, mediaUrls);
     const resolvedMediaUrls = mediaUrls.length > 0 ? mediaUrls : mediaPathsForAssetIds(resolvedAssetIds);
+    const location = readOptionalLocationSelection(req.body || {});
 
-    const postId = CommunityService.createPost(userId, type, content, resolvedMediaUrls, visibility);
+    const postId = CommunityService.createPost(userId, type, content, resolvedMediaUrls, visibility, location);
     await mediaAssetService.attachAssetsToPost(resolvedAssetIds, userId, postId, visibility);
     res.json({ postId });
   } catch (err: any) {
@@ -2163,7 +2248,33 @@ app.post('/community/react',
   }),
   async (req, res) => {
   try {
-    CommunityService.reactToPost(toUserId(req.body.postId), toUserId(req.body.userId), String(req.body.reactionType || 'like'));
+    const postId = toUserId(req.body.postId);
+    const userId = toUserId(req.body.userId);
+    if (!CommunityService.canAccessPost(userId, postId)) {
+      return res.status(403).json({ error: 'Forbidden post scope' });
+    }
+
+    const post = CommunityService.getPostById(postId);
+    if (!post?.id) {
+      return res.status(404).json({ error: 'Post not found.' });
+    }
+
+    const reactionId = CommunityService.reactToPost(postId, userId, String(req.body.reactionType || 'like'));
+    const notificationUsers = ActivityNotificationService.createPostReactionNotification({
+      postId,
+      reactionId,
+      postOwnerId: Number(post.user_id || 0),
+      actorUserId: userId,
+      snippet: 'liked your post',
+    });
+
+    if (notificationUsers.length > 0) {
+      await publishRealtimeEventSafely({
+        type: 'inbox_updated',
+        userIds: notificationUsers,
+      }, 'community-reaction-notifications');
+    }
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2214,6 +2325,11 @@ app.post('/community/comment',
     return res.status(403).json({ error: 'Forbidden post scope' });
   }
 
+  const post = CommunityService.getPostById(postId);
+  if (!post?.id) {
+    return res.status(404).json({ error: 'Post not found.' });
+  }
+
   const commentId = CommunityService.addComment(postId, userId, content);
   const mentions = extractMentionHandles(content);
   const notifiedUsers = MessageService.createPostCommentMentionNotifications(
@@ -2223,11 +2339,22 @@ app.post('/community/comment',
     commentId,
     content,
   );
-  if (notifiedUsers.length > 0) {
+  const activityNotificationUsers = ActivityNotificationService.createPostCommentNotification({
+    postId,
+    commentId,
+    postOwnerId: Number(post.user_id || 0),
+    actorUserId: userId,
+    snippet: content,
+  });
+  const realtimeNotificationUsers = Array.from(new Set([
+    ...notifiedUsers,
+    ...activityNotificationUsers,
+  ]));
+  if (realtimeNotificationUsers.length > 0) {
     await publishRealtimeEventSafely({
       type: 'inbox_updated',
-      userIds: notifiedUsers,
-    }, 'community-comment-mentions');
+      userIds: realtimeNotificationUsers,
+    }, 'community-comment-notifications');
   }
 
   res.json({ success: true, commentId });
@@ -2435,6 +2562,69 @@ app.get('/notifications/mentions/:userId', requireSameUserIdFromParam('userId'),
   const userId = toUserId(req.params.userId);
   const mentions = MessageService.getMentionNotifications(userId);
   res.json({ mentions });
+});
+
+app.get('/notifications/feed/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  const notifications = ActivityNotificationService.listNotifications(userId);
+  res.json({ notifications });
+});
+
+app.post('/notifications/feed/read', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  ids: { type: 'array', maxItems: 80, itemType: 'number' },
+}), (req, res) => {
+  const userId = toUserId(req.body.userId);
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map((item: unknown) => Number(item)) : [];
+  const changed = ActivityNotificationService.markNotificationsRead(userId, ids);
+  res.json({ success: true, updated: changed });
+});
+
+app.get('/notifications/preferences/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  res.json(ActivityNotificationService.getUserPreferences(userId));
+});
+
+app.post('/notifications/preferences', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  messageNotificationsEnabled: { type: 'boolean' },
+  postNotificationsEnabled: { type: 'boolean' },
+}), (req, res) => {
+  const userId = toUserId(req.body.userId);
+  const next = ActivityNotificationService.updateUserPreferences(userId, {
+    messageNotificationsEnabled: typeof req.body.messageNotificationsEnabled === 'boolean'
+      ? req.body.messageNotificationsEnabled
+      : undefined,
+    postNotificationsEnabled: typeof req.body.postNotificationsEnabled === 'boolean'
+      ? req.body.postNotificationsEnabled
+      : undefined,
+  });
+  res.json(next);
+});
+
+app.get('/notifications/conversation-preference/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  const topic = String(req.query.topic || '').trim();
+  if (!/^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/.test(topic)) {
+    return res.status(400).json({ error: 'Invalid topic format' });
+  }
+  res.json(ActivityNotificationService.getConversationPreference(userId, topic));
+});
+
+app.post('/notifications/conversation-preference', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  topic: {
+    required: true,
+    type: 'string',
+    minLength: 3,
+    maxLength: 120,
+    pattern: /^(coach_(?:zj|lc)_\d+|coach_\d+|p2p_\d+_\d+|grp_\d+)$/,
+  },
+  muted: { required: true, type: 'boolean' },
+}), (req, res) => {
+  const userId = toUserId(req.body.userId);
+  const topic = String(req.body.topic || '').trim();
+  res.json(ActivityNotificationService.setConversationPreference(userId, topic, Boolean(req.body.muted)));
 });
 
 app.post('/notifications/mentions/read', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
@@ -2650,6 +2840,13 @@ app.post('/messages/send',
       messageId,
       content,
     );
+    const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+      fromUserId,
+      topic,
+      messageId,
+      content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
+      participants,
+    );
     const [newMessage] = (await MessageService.getMessages(topic, 1));
     const deliveredMediaUrls = mediaUrlsForClient(req, resolvedMediaUrls);
     const deliveredMessage = newMessage
@@ -2680,15 +2877,16 @@ app.post('/messages/send',
         client_message_id: clientMessageId,
       },
     }, 'message-created');
-    await publishRealtimeEventSafely({
-      type: 'inbox_updated',
-      userIds: participants.length > 0 ? participants : [fromUserId],
-    }, 'inbox-updated');
-    if (mentionTargets.length > 0) {
+    const inboxUpdatedUsers = Array.from(new Set([
+      ...(participants.length > 0 ? participants : [fromUserId]),
+      ...mentionTargets,
+      ...activityNotificationTargets,
+    ]));
+    if (inboxUpdatedUsers.length > 0) {
       await publishRealtimeEventSafely({
         type: 'inbox_updated',
-        userIds: mentionTargets,
-      }, 'mention-inbox-updated');
+        userIds: inboxUpdatedUsers,
+      }, 'inbox-updated');
     }
 
     const coachReplyJob = buildCoachReplyJob({

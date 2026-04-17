@@ -45,13 +45,14 @@ struct ConversationView: View {
     @State private var inviteUsername = ""
     @State private var groupActionPending = false
     @State private var infoNotice = ""
-    @State private var showProfileSheet = false
+    @State private var profileSheetConversation: Conversation?
     @State private var profileLoading = false
     @State private var viewedProfile: ConversationPublicProfileResponse?
     @State private var profileReportPending = false
     @State private var animatedCoachReplies: [Int: Int] = [:]
     @State private var coachRevealWorkItems: [Int: [DispatchWorkItem]] = [:]
     @State private var coachRevealTick = 0
+    @State private var showConversationSettings = false
 
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
@@ -148,6 +149,14 @@ struct ConversationView: View {
     var body: some View {
         ZStack {
             ZYMBackgroundLayer().ignoresSafeArea()
+            NavigationLink(
+                destination: ConversationNotificationSettingsView(conversation: conversation)
+                    .environmentObject(appState),
+                isActive: $showConversationSettings
+            ) {
+                EmptyView()
+            }
+            .hidden()
 
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
@@ -163,7 +172,24 @@ struct ConversationView: View {
                                     coachId: resolvedCoachId,
                                     timeZone: displayTimeZone,
                                     revealedCoachSegmentCount: animatedCoachReplies[msg.id],
-                                    inlineTypingLabel: "\(coachTypingName) is typing..."
+                                    inlineTypingLabel: "\(coachTypingName) is typing...",
+                                    onOpenProfile: { userId, username, avatarURL in
+                                        openProfileSheet(
+                                            for: Conversation(
+                                                id: "user_\(userId)",
+                                                name: username,
+                                                isGroup: false,
+                                                isCoach: false,
+                                                coachId: nil,
+                                                coachEnabled: nil,
+                                                avatarUrl: avatarURL,
+                                                otherUserId: userId,
+                                                previewText: "",
+                                                unreadCount: 0,
+                                                mentionCount: 0
+                                            )
+                                        )
+                                    }
                                 )
                                     .zymAppear(delay: Double(min(index, 5)) * 0.02)
                             }
@@ -297,7 +323,7 @@ struct ConversationView: View {
         .toolbar {
             if !conversation.isCoach && !conversation.isGroup {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: openProfileSheet) {
+                    Button(action: { openProfileSheet() }) {
                         HStack(spacing: 8) {
                             if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
                                 AsyncImage(url: url) { phase in
@@ -339,16 +365,23 @@ struct ConversationView: View {
                     }
                 }
             }
+
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: { showConversationSettings = true }) {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundColor(Color.zymPrimary)
+                }
+            }
         }
-        .sheet(isPresented: $showProfileSheet) {
+        .sheet(item: $profileSheetConversation) { profileConversation in
             ConversationProfileSheet(
-                conversation: conversation,
-                appCoach: conversation.coachId ?? appState.selectedCoach ?? "zj",
+                conversation: profileConversation,
+                appCoach: profileConversation.coachId ?? appState.selectedCoach ?? "zj",
                 profile: viewedProfile,
                 loading: profileLoading,
-                canReportUser: !conversation.isCoach && !conversation.isGroup && (conversation.otherUserId != nil),
+                canReportUser: !profileConversation.isCoach && !profileConversation.isGroup && (profileConversation.otherUserId != nil),
                 reportPending: profileReportPending,
-                onReportUser: reportConversationUser
+                onReportUser: { reportConversationUser(for: profileConversation) }
             )
         }
         .onAppear {
@@ -838,17 +871,18 @@ struct ConversationView: View {
         authorizedDataTask(appState: appState, request: request).resume()
     }
 
-    private func openProfileSheet() {
-        guard !conversation.isGroup else { return }
-        showProfileSheet = true
+    private func openProfileSheet(for targetConversation: Conversation? = nil) {
+        let target = targetConversation ?? conversation
+        guard !target.isGroup else { return }
+        profileSheetConversation = target
 
-        if conversation.isCoach {
+        if target.isCoach {
             profileLoading = false
             viewedProfile = nil
             return
         }
 
-        guard let peerUserId = conversation.otherUserId,
+        guard let peerUserId = target.otherUserId,
               let url = apiURL("/profile/public/\(peerUserId)") else {
             profileLoading = false
             viewedProfile = nil
@@ -878,10 +912,10 @@ struct ConversationView: View {
         }.resume()
     }
 
-    private func reportConversationUser() {
+    private func reportConversationUser(for targetConversation: Conversation) {
         guard !profileReportPending,
               let reporterUserId = appState.userId,
-              let targetUserId = viewedProfile?.profile.id ?? conversation.otherUserId,
+              let targetUserId = viewedProfile?.profile.id ?? targetConversation.otherUserId,
               let url = apiURL("/moderation/report") else { return }
 
         profileReportPending = true
@@ -895,7 +929,7 @@ struct ConversationView: View {
             "targetType": "user",
             "targetId": targetUserId,
             "reason": "inappropriate_behavior",
-            "details": "Reported from iOS conversation profile (\(conversation.id))"
+            "details": "Reported from iOS conversation profile (\(targetConversation.id))"
         ])
 
         authorizedDataTask(appState: appState, request: request) { data, response, _ in
@@ -1052,6 +1086,160 @@ struct ConversationView: View {
     }
 }
 
+private struct ConversationNotificationPreferencePayload: Codable {
+    let topic: String
+    let muted: Bool
+}
+
+private struct ConversationNotificationSettingsView: View {
+    let conversation: Conversation
+
+    @EnvironmentObject private var appState: AppState
+    @State private var preference: ConversationNotificationPreferencePayload?
+    @State private var loading = false
+    @State private var saving = false
+    @State private var statusText = ""
+
+    var body: some View {
+        ZStack {
+            ZYMBackgroundLayer().ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(conversation.name)
+                            .font(.custom("Syne", size: 28))
+                            .foregroundColor(Color.zymText)
+                        Text("Choose whether this conversation should stay noisy or quiet. Your account-wide defaults still live in Profile.")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color.zymSubtext)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .zymAppear(delay: 0.03)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Chat notifications")
+                            .font(.custom("Syne", size: 20))
+                            .foregroundColor(Color.zymText)
+
+                        if loading && preference == nil {
+                            ProgressView()
+                        } else {
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Thread-level alerts")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(Color.zymText)
+                                    Text((preference?.muted ?? false)
+                                         ? "This chat still lives in your inbox, but new messages from it will stay quiet."
+                                         : "New messages from this chat will continue appearing in your notification feed.")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer(minLength: 12)
+
+                                Button(action: {
+                                    updatePreference(muted: !(preference?.muted ?? false))
+                                }) {
+                                    Text(saving ? "Saving" : ((preference?.muted ?? false) ? "Muted" : "Notify"))
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor((preference?.muted ?? false) ? Color.zymText : .white)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .background((preference?.muted ?? false) ? Color.zymSurfaceSoft : Color.zymText)
+                                        .clipShape(Capsule())
+                                }
+                                .disabled(saving || loading)
+                            }
+                            .padding(14)
+                            .background(Color.white.opacity(0.82))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+
+                        if !statusText.isEmpty {
+                            Text(statusText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymPrimary)
+                        }
+                    }
+                    .zymCard()
+                    .zymAppear(delay: 0.08)
+                }
+                .padding(14)
+            }
+        }
+        .navigationTitle("Chat Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: loadPreference)
+    }
+
+    private func loadPreference() {
+        guard let userId = appState.userId,
+              let baseURL = apiURL("/notifications/conversation-preference/\(userId)") else { return }
+
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "topic", value: conversation.id)]
+        guard let url = components?.url else { return }
+
+        loading = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async {
+                loading = false
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ConversationNotificationPreferencePayload.self, from: data) else { return }
+            DispatchQueue.main.async {
+                preference = response
+            }
+        }.resume()
+    }
+
+    private func updatePreference(muted: Bool) {
+        guard let userId = appState.userId,
+              let url = apiURL("/notifications/conversation-preference") else { return }
+
+        saving = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "topic": conversation.id,
+            "muted": muted,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                saving = false
+                if let error {
+                    statusText = error.localizedDescription
+                    return
+                }
+
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode),
+                      let data = data,
+                      let payload = try? JSONDecoder().decode(ConversationNotificationPreferencePayload.self, from: data) else {
+                    statusText = "Failed to update chat notification settings."
+                    return
+                }
+
+                preference = payload
+                statusText = muted ? "This chat is muted." : "This chat will notify again."
+            }
+        }.resume()
+    }
+}
+
 private func conversationCoachDisplayName(_ coachId: String?) -> String {
     coachId == "lc" ? "LC Coach" : "ZJ Coach"
 }
@@ -1152,6 +1340,7 @@ private struct ConversationMessageRow: View {
     let timeZone: TimeZone
     let revealedCoachSegmentCount: Int?
     let inlineTypingLabel: String
+    let onOpenProfile: ((Int, String, String?) -> Void)?
 
     private var isMine: Bool {
         message.from_user_id == currentUserId
@@ -1225,13 +1414,31 @@ private struct ConversationMessageRow: View {
                 if isMine {
                     Spacer(minLength: 40)
                 } else {
-                    ConversationAvatarBadge(
-                        isCoach: message.is_coach,
-                        coachId: coachId,
-                        avatarURL: message.avatar_url,
-                        fallbackText: avatarText
-                    )
-                    .opacity(compact ? 0 : 1)
+                    if let onOpenProfile, !message.is_coach, !compact {
+                        Button(action: {
+                            onOpenProfile(
+                                message.from_user_id,
+                                senderLabel == "You" ? conversationName : senderLabel,
+                                message.avatar_url
+                            )
+                        }) {
+                            ConversationAvatarBadge(
+                                isCoach: message.is_coach,
+                                coachId: coachId,
+                                avatarURL: message.avatar_url,
+                                fallbackText: avatarText
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        ConversationAvatarBadge(
+                            isCoach: message.is_coach,
+                            coachId: coachId,
+                            avatarURL: message.avatar_url,
+                            fallbackText: avatarText
+                        )
+                        .opacity(compact ? 0 : 1)
+                    }
                 }
 
                 VStack(alignment: isMine ? .trailing : .leading, spacing: 8) {
@@ -1672,7 +1879,7 @@ struct ConversationPublicPost: Codable, Identifiable {
     let created_at: String
 }
 
-private struct ConversationProfileSheet: View {
+struct ConversationProfileSheet: View {
     let conversation: Conversation
     let appCoach: String
     let profile: ConversationPublicProfileResponse?

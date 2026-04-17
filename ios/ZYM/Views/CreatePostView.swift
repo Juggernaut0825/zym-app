@@ -10,6 +10,37 @@ enum PostAttachmentKind {
 }
 
 private let defaultCommunityPostVisibility = "friends"
+private let defaultHotHashtags = ["gymcheck", "mealprep", "recovery", "mobility", "legday", "habits"]
+
+private func createPostHashtagSuggestions(from content: String) -> [String] {
+    let tokens = content
+        .lowercased()
+        .replacingOccurrences(of: "#[a-z0-9_]+", with: " ", options: .regularExpression)
+        .replacingOccurrences(of: "[^a-z0-9\\s]", with: " ", options: .regularExpression)
+        .components(separatedBy: .whitespacesAndNewlines)
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { $0.count >= 3 }
+
+    let counts = Dictionary(tokens.map { ($0, 1) }, uniquingKeysWith: +)
+    let keywords = counts
+        .sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            return lhs.key.count > rhs.key.count
+        }
+        .map(\.key)
+
+    return keywords.isEmpty ? defaultHotHashtags : Array(keywords.prefix(6))
+}
+
+private func appendCreatePostHashtag(_ content: String, hashtag: String) -> String {
+    let normalized = hashtag.replacingOccurrences(of: "#", with: "").lowercased()
+    guard !normalized.isEmpty else { return content }
+    if content.range(of: "(^|\\s)#\(normalized)(?=\\s|$)", options: .regularExpression) != nil {
+        return content
+    }
+    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "#\(normalized)" : "\(trimmed) #\(normalized)"
+}
 
 struct PostDraftAttachment: Identifiable {
     let id = UUID()
@@ -27,7 +58,16 @@ struct CreatePostView: View {
     @State private var selectedMedia: [PhotosPickerItem] = []
     @State private var draftAttachments: [PostDraftAttachment] = []
     @State private var isPosting = false
+    @State private var selectedLocation: SharedLocationSelectionPayload?
+    @State private var showLocationSheet = false
+    @State private var shareLocationWithNearby = true
+    @State private var composerStatusText = ""
+    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     let onPost: () -> Void
+
+    private var hashtagSuggestions: [String] {
+        createPostHashtagSuggestions(from: content)
+    }
 
     var body: some View {
         NavigationView {
@@ -46,16 +86,78 @@ struct CreatePostView: View {
                         .cornerRadius(12)
                         .lineLimit(5...10)
 
-                    PhotosPicker(selection: $selectedMedia, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
-                        HStack {
-                            Image(systemName: "photo.on.rectangle.angled")
-                            Text("Add Media")
+                    HStack(spacing: 8) {
+                        PhotosPicker(selection: $selectedMedia, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                Text("Media")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(ZYMGhostButton())
+                        .onChange(of: selectedMedia) { _, _ in
+                            loadMedia()
+                        }
+
+                        Button(action: {
+                            if let first = hashtagSuggestions.first {
+                                content = appendCreatePostHashtag(content, hashtag: first)
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Text("#").font(.system(size: 15, weight: .bold))
+                                Text("Hashtag")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(ZYMGhostButton())
+
+                        Button(action: {
+                            showLocationSheet = true
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "location.north.line")
+                                Text(selectedLocation == nil ? "Location" : "Edit")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(ZYMGhostButton())
                     }
-                    .buttonStyle(ZYMGhostButton())
-                    .onChange(of: selectedMedia) { _, _ in
-                        loadMedia()
+
+                    if let selectedLocation {
+                        HStack(spacing: 8) {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.zymPrimary)
+                            Text(selectedLocation.label)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color.zymText)
+                            Spacer()
+                            Button("Clear") {
+                                self.selectedLocation = nil
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.zymSubtext)
+                        }
+                        .padding(12)
+                        .background(Color.white.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+
+                    if !hashtagSuggestions.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(hashtagSuggestions, id: \.self) { tag in
+                                    Button(action: {
+                                        content = appendCreatePostHashtag(content, hashtag: tag)
+                                    }) {
+                                        Text("#\(tag)")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .buttonStyle(ZYMGhostButton())
+                                }
+                            }
+                        }
                     }
 
                     if !draftAttachments.isEmpty {
@@ -86,6 +188,13 @@ struct CreatePostView: View {
                         }
                     }
 
+                    if !composerStatusText.isEmpty {
+                        Text(composerStatusText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.zymPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     Spacer()
                 }
                 .padding(18)
@@ -108,6 +217,19 @@ struct CreatePostView: View {
             }
             .onDisappear {
                 clearDraftAttachments()
+            }
+            .sheet(isPresented: $showLocationSheet) {
+                PostLocationSheet(
+                    selectedLocation: selectedLocation,
+                    shareLocationWithNearby: shareLocationWithNearby,
+                    onSaved: { selection, alsoShare in
+                        selectedLocation = selection
+                        shareLocationWithNearby = alsoShare
+                        composerStatusText = "Location updated."
+                    },
+                    locationCoordinator: locationCoordinator
+                )
+                .environmentObject(appState)
             }
         }
     }
@@ -192,19 +314,28 @@ struct CreatePostView: View {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             applyAuthorizationHeader(&request, token: self.appState.token)
-            let body = [
+            var body: [String: Any] = [
                 "userId": userId,
                 "type": mediaUrls.isEmpty ? "text" : "media",
                 "content": trimmedContent,
                 "mediaUrls": mediaUrls,
                 "mediaIds": mediaIds,
                 "visibility": defaultCommunityPostVisibility,
-            ] as [String : Any]
+            ]
+            if let selectedLocation {
+                body["locationLabel"] = selectedLocation.label
+                body["locationCity"] = selectedLocation.city
+                body["locationLatitude"] = selectedLocation.latitude
+                body["locationLongitude"] = selectedLocation.longitude
+                body["locationPrecision"] = selectedLocation.precision
+            }
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             authorizedDataTask(appState: self.appState, request: request) { _, _, _ in
                 DispatchQueue.main.async {
                     self.isPosting = false
                     self.clearDraftAttachments()
+                    self.selectedLocation = nil
+                    self.composerStatusText = ""
                     self.onPost()
                     self.dismiss()
                 }
@@ -365,5 +496,260 @@ struct CreatePostView: View {
         } catch {
             return nil
         }
+    }
+}
+
+struct PostLocationSheet: View {
+    let selectedLocation: SharedLocationSelectionPayload?
+    let shareLocationWithNearby: Bool
+    let onSaved: (SharedLocationSelectionPayload?, Bool) -> Void
+    @ObservedObject var locationCoordinator: AppLocationPermissionCoordinator
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
+    @State private var query = ""
+    @State private var results: [SharedLocationSelectionPayload] = []
+    @State private var loading = false
+    @State private var saving = false
+    @State private var shareNearby = true
+    @State private var statusText = ""
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                ZYMBackgroundLayer().ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Add a city or a more precise area to this post. You can also sync it to nearby discovery.")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.zymSubtext)
+
+                    HStack(spacing: 8) {
+                        Button("Use Current City") {
+                            requestCurrentLocation(precise: false)
+                        }
+                        .buttonStyle(ZYMGhostButton())
+                        .disabled(saving)
+
+                        Button("Use Precise") {
+                            requestCurrentLocation(precise: true)
+                        }
+                        .buttonStyle(ZYMGhostButton())
+                        .disabled(saving)
+                    }
+
+                    Toggle(isOn: $shareNearby) {
+                        Text("Also use this for nearby discovery")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color.zymText)
+                    }
+                    .tint(Color.zymPrimary)
+
+                    if let selectedLocation {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(selectedLocation.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color.zymText)
+                                Text(selectedLocation.precision == "city" ? "City-level" : "Precise")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+                            Spacer()
+                            Button("Remove") {
+                                onSaved(nil, shareNearby)
+                                dismiss()
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color.zymPrimary)
+                        }
+                        .padding(12)
+                        .background(Color.white.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+
+                    TextField("Search city or neighborhood", text: $query)
+                        .padding(12)
+                        .background(Color.zymSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .onChange(of: query) { _, _ in
+                            searchLocations()
+                        }
+
+                    if loading {
+                        ProgressView()
+                    } else if query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && results.isEmpty {
+                        Text("No matching locations yet.")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(results, id: \.label) { result in
+                                Button(action: {
+                                    saveSelection(result)
+                                }) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(result.label)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(Color.zymText)
+                                        Text("\(result.city) · \(result.precision == "city" ? "City-level" : "Precise")")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.zymSubtext)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color.white.opacity(0.9))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(saving)
+                            }
+                        }
+                    }
+
+                    if !statusText.isEmpty {
+                        Text(statusText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.zymPrimary)
+                    }
+
+                    Spacer()
+                }
+                .padding(16)
+            }
+            .navigationTitle("Post Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .onAppear {
+                shareNearby = shareLocationWithNearby
+            }
+        }
+    }
+
+    private func searchLocations() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = apiURL("/location/search?q=\(encoded)") else {
+            results = []
+            loading = false
+            return
+        }
+
+        loading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async {
+                loading = false
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(LocationSearchResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                results = response.results
+            }
+        }.resume()
+    }
+
+    private func requestCurrentLocation(precise: Bool) {
+        saving = true
+        statusText = ""
+        locationCoordinator.requestCurrentCoordinate(precise: precise) { result in
+            switch result {
+            case .success(let coordinate):
+                reverseCurrentLocation(latitude: coordinate.latitude, longitude: coordinate.longitude, precise: precise)
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    saving = false
+                    statusText = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func reverseCurrentLocation(latitude: Double, longitude: Double, precise: Bool) {
+        guard let url = apiURL("/location/reverse") else {
+            saving = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "latitude": latitude,
+            "longitude": longitude,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(LocationReverseResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    saving = false
+                    statusText = "Failed to resolve this location."
+                }
+                return
+            }
+            let selection = precise ? response.precise : response.city
+            guard let selection else {
+                DispatchQueue.main.async {
+                    saving = false
+                    statusText = "Failed to resolve this location."
+                }
+                return
+            }
+            saveSelection(selection)
+        }.resume()
+    }
+
+    private func saveSelection(_ selection: SharedLocationSelectionPayload) {
+        saving = true
+        if !shareNearby {
+            DispatchQueue.main.async {
+                saving = false
+                onSaved(selection, false)
+                dismiss()
+            }
+            return
+        }
+
+        guard let userId = appState.userId,
+              let url = apiURL("/location/profile") else {
+            saving = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "locationLabel": selection.label,
+            "locationCity": selection.city,
+            "locationLatitude": selection.latitude,
+            "locationLongitude": selection.longitude,
+            "locationPrecision": selection.precision,
+            "locationShared": true,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { _, response, _ in
+            DispatchQueue.main.async {
+                saving = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode) else {
+                    statusText = "Failed to sync nearby location."
+                    return
+                }
+                onSaved(selection, true)
+                dismiss()
+            }
+        }.resume()
     }
 }

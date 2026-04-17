@@ -67,6 +67,13 @@ struct MainTabView: View {
                 hasPresentedWelcomeThisSession = false
             }
         }
+        .onChange(of: appState.requestedTabIndex) { _, nextTab in
+            guard let nextTab else { return }
+            selectedTab = nextTab
+            DispatchQueue.main.async {
+                appState.requestedTabIndex = nil
+            }
+        }
     }
 
     private func presentCoachWelcomeIfNeeded(force: Bool = false) {

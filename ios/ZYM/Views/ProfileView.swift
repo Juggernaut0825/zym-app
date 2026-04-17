@@ -14,6 +14,13 @@ struct ProfileView: View {
     @State private var revokePendingSessionId: String?
     @State private var logoutOthersPending = false
     @State private var logoutPending = false
+    @State private var notificationPreferences = ProfileNotificationPreferences(
+        messageNotificationsEnabled: true,
+        postNotificationsEnabled: true
+    )
+    @State private var notificationPreferencesLoading = false
+    @State private var notificationPreferencesPending = false
+    @State private var notificationStatusText = ""
 
     var body: some View {
         NavigationView {
@@ -138,6 +145,57 @@ struct ProfileView: View {
                             .padding(.horizontal, 2)
                             .zymAppear(delay: 0.175)
 
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Notification Settings")
+                                .font(.custom("Syne", size: 20))
+                                .foregroundColor(Color.zymText)
+
+                            Text("Set account-wide defaults here. Chat-level mute stays inside each conversation’s three-dot settings page.")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if notificationPreferencesLoading {
+                                ProgressView()
+                                    .padding(.top, 2)
+                            } else {
+                                ProfileNotificationRow(
+                                    title: "Messages",
+                                    subtitle: "Direct messages, coach chats, and groups follow this default.",
+                                    enabled: notificationPreferences.messageNotificationsEnabled,
+                                    pending: notificationPreferencesPending,
+                                    onToggle: {
+                                        updateNotificationPreferences(
+                                            messageNotificationsEnabled: !notificationPreferences.messageNotificationsEnabled,
+                                            postNotificationsEnabled: nil
+                                        )
+                                    }
+                                )
+
+                                ProfileNotificationRow(
+                                    title: "Posts",
+                                    subtitle: "Likes and comments on your community posts follow this default.",
+                                    enabled: notificationPreferences.postNotificationsEnabled,
+                                    pending: notificationPreferencesPending,
+                                    onToggle: {
+                                        updateNotificationPreferences(
+                                            messageNotificationsEnabled: nil,
+                                            postNotificationsEnabled: !notificationPreferences.postNotificationsEnabled
+                                        )
+                                    }
+                                )
+                            }
+
+                            if !notificationStatusText.isEmpty {
+                                Text(notificationStatusText)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color.zymPrimary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .zymCard()
+                        .zymAppear(delay: 0.177)
+
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
                                 .frame(maxWidth: .infinity)
@@ -167,7 +225,10 @@ struct ProfileView: View {
                 onLogoutOthers: logoutOtherSessions
             )
         }
-        .onAppear(perform: loadProfile)
+        .onAppear {
+            loadProfile()
+            loadNotificationPreferences()
+        }
     }
 
     private func loadProfile() {
@@ -180,6 +241,71 @@ struct ProfileView: View {
                   let response = try? JSONDecoder().decode(APIProfile.self, from: data) else { return }
             DispatchQueue.main.async {
                 profile = response
+            }
+        }.resume()
+    }
+
+    private func loadNotificationPreferences() {
+        guard let userId = appState.userId,
+              let url = apiURL("/notifications/preferences/\(userId)") else { return }
+
+        notificationPreferencesLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async {
+                notificationPreferencesLoading = false
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ProfileNotificationPreferences.self, from: data) else { return }
+            DispatchQueue.main.async {
+                notificationPreferences = response
+            }
+        }.resume()
+    }
+
+    private func updateNotificationPreferences(
+        messageNotificationsEnabled: Bool?,
+        postNotificationsEnabled: Bool?
+    ) {
+        guard let userId = appState.userId,
+              let url = apiURL("/notifications/preferences") else { return }
+
+        notificationPreferencesPending = true
+        notificationStatusText = ""
+
+        var payload: [String: Any] = ["userId": userId]
+        if let messageNotificationsEnabled {
+            payload["messageNotificationsEnabled"] = messageNotificationsEnabled
+        }
+        if let postNotificationsEnabled {
+            payload["postNotificationsEnabled"] = postNotificationsEnabled
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                notificationPreferencesPending = false
+                if let error {
+                    notificationStatusText = error.localizedDescription
+                    return
+                }
+
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode),
+                      let data = data,
+                      let decoded = try? JSONDecoder().decode(ProfileNotificationPreferences.self, from: data) else {
+                    notificationStatusText = parseAPIError(data) ?? "Failed to update notification settings."
+                    return
+                }
+
+                notificationPreferences = decoded
+                notificationStatusText = "Notification settings updated."
             }
         }.resume()
     }
@@ -1563,6 +1689,49 @@ private func parseAPIError(_ data: Data?) -> String? {
           let error = payload["error"] as? String,
           !error.isEmpty else { return nil }
     return error
+}
+
+private struct ProfileNotificationRow: View {
+    let title: String
+    let subtitle: String
+    let enabled: Bool
+    let pending: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.zymSubtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Button(action: onToggle) {
+                Text(pending ? "Saving" : (enabled ? "Notify" : "Muted"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(enabled ? .white : Color.zymText)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(enabled ? Color.zymText : Color.zymSurfaceSoft)
+                    .clipShape(Capsule())
+            }
+            .disabled(pending)
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+struct ProfileNotificationPreferences: Codable {
+    let messageNotificationsEnabled: Bool
+    let postNotificationsEnabled: Bool
 }
 
 struct APIProfile: Codable {

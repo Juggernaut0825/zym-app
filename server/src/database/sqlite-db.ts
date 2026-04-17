@@ -243,6 +243,15 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       fitness_goal TEXT,
       hobbies TEXT,
       timezone TEXT,
+      message_notifications_enabled INTEGER NOT NULL DEFAULT 1,
+      post_notifications_enabled INTEGER NOT NULL DEFAULT 1,
+      location_label TEXT,
+      location_city TEXT,
+      location_latitude REAL,
+      location_longitude REAL,
+      location_precision TEXT,
+      location_shared INTEGER NOT NULL DEFAULT 0,
+      location_updated_at DATETIME,
       apple_health_enabled INTEGER DEFAULT 0,
       public_uuid TEXT UNIQUE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -292,6 +301,11 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       content TEXT,
       media_urls TEXT,
       metadata TEXT,
+      location_label TEXT,
+      location_city TEXT,
+      location_latitude REAL,
+      location_longitude REAL,
+      location_precision TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -385,6 +399,29 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       snippet TEXT,
       is_read INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS activity_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      topic TEXT,
+      message_id INTEGER,
+      post_id INTEGER,
+      source_type TEXT NOT NULL,
+      source_id INTEGER NOT NULL,
+      actor_user_id INTEGER,
+      snippet TEXT,
+      is_read INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, source_type, source_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS conversation_notification_settings (
+      user_id INTEGER NOT NULL,
+      topic TEXT NOT NULL,
+      muted INTEGER NOT NULL DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, topic)
     );
 
     CREATE TABLE IF NOT EXISTS coach_outreach_events (
@@ -535,6 +572,48 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   if (!userColumns.some((column) => column.name === 'enabled_coaches')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN enabled_coaches TEXT');
   }
+  if (!userColumns.some((column) => column.name === 'message_notifications_enabled')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN message_notifications_enabled INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!userColumns.some((column) => column.name === 'post_notifications_enabled')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN post_notifications_enabled INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!userColumns.some((column) => column.name === 'location_label')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_label TEXT');
+  }
+  if (!userColumns.some((column) => column.name === 'location_city')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_city TEXT');
+  }
+  if (!userColumns.some((column) => column.name === 'location_latitude')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_latitude REAL');
+  }
+  if (!userColumns.some((column) => column.name === 'location_longitude')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_longitude REAL');
+  }
+  if (!userColumns.some((column) => column.name === 'location_precision')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_precision TEXT');
+  }
+  if (!userColumns.some((column) => column.name === 'location_shared')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_shared INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userColumns.some((column) => column.name === 'location_updated_at')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN location_updated_at DATETIME');
+  }
+  if (!postColumns.some((column) => column.name === 'location_label')) {
+    sqlite.exec('ALTER TABLE posts ADD COLUMN location_label TEXT');
+  }
+  if (!postColumns.some((column) => column.name === 'location_city')) {
+    sqlite.exec('ALTER TABLE posts ADD COLUMN location_city TEXT');
+  }
+  if (!postColumns.some((column) => column.name === 'location_latitude')) {
+    sqlite.exec('ALTER TABLE posts ADD COLUMN location_latitude REAL');
+  }
+  if (!postColumns.some((column) => column.name === 'location_longitude')) {
+    sqlite.exec('ALTER TABLE posts ADD COLUMN location_longitude REAL');
+  }
+  if (!postColumns.some((column) => column.name === 'location_precision')) {
+    sqlite.exec('ALTER TABLE posts ADD COLUMN location_precision TEXT');
+  }
 
   sqlite.exec(`
     UPDATE users
@@ -548,6 +627,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL');
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_sub ON users(apple_sub) WHERE apple_sub IS NOT NULL');
   sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_uuid ON users(public_uuid) WHERE public_uuid IS NOT NULL');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_users_location_shared_updated ON users(location_shared, location_updated_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_hash ON user_sessions(refresh_token_hash)');
@@ -561,7 +641,11 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_messages_topic_id ON messages(topic, id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_post_comments_post_id ON post_comments(post_id)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_visibility_created ON posts(visibility, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_posts_location_city_created ON posts(location_city, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_mentions_user_read ON mention_notifications(user_id, is_read, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_activity_notifications_user_read ON activity_notifications(user_id, is_read, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_activity_notifications_topic ON activity_notifications(topic, created_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_conversation_notification_settings_user_muted ON conversation_notification_settings(user_id, muted, updated_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_user_sent ON coach_outreach_events(user_id, sent_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_trigger_day ON coach_outreach_events(trigger_type, local_day, sent_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');

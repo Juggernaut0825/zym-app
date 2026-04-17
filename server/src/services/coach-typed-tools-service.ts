@@ -143,10 +143,33 @@ function normalizeKnowledgeDomains(raw: unknown): KnowledgeDomain[] {
   const normalizeOne = (value: unknown): KnowledgeDomain | null => {
     const text = safeString(value, 40).toLowerCase();
     if (!text) return null;
-    if (text === 'fitness' || text === 'training' || text === 'exercise' || text === 'workout' || text === 'lifting') {
+    if (
+      text === 'fitness'
+      || text === 'training'
+      || text === 'exercise'
+      || text === 'workout'
+      || text === 'lifting'
+      || text === 'recovery'
+      || text === 'sleep'
+      || text === 'rehab'
+      || text === 'rehabilitation'
+      || text === 'mobility'
+      || text === 'pain'
+    ) {
       return 'fitness';
     }
-    if (text === 'nutrition' || text === 'food' || text === 'diet' || text === 'meal' || text === 'meals' || text === 'macros') {
+    if (
+      text === 'nutrition'
+      || text === 'food'
+      || text === 'diet'
+      || text === 'meal'
+      || text === 'meals'
+      || text === 'macros'
+      || text === 'hydration'
+      || text === 'electrolytes'
+      || text === 'supplements'
+      || text === 'supplement'
+    ) {
       return 'nutrition';
     }
     return null;

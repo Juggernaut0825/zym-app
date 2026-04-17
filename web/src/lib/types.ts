@@ -120,6 +120,11 @@ export interface FeedPost {
   reaction_count: number;
   comment_count?: number;
   media_urls: string[];
+  location_label?: string | null;
+  location_city?: string | null;
+  location_latitude?: number | null;
+  location_longitude?: number | null;
+  location_precision?: 'city' | 'precise' | null;
   created_at: string;
 }
 
@@ -144,6 +149,56 @@ export interface MentionNotification {
   created_at: string;
   actor_user_id: number | null;
   actor_username: string | null;
+}
+
+export interface ActivityNotification {
+  id: number;
+  topic: string | null;
+  message_id: number | null;
+  post_id: number | null;
+  source_type: 'message' | 'post_comment' | 'post_reaction';
+  source_id: number;
+  snippet: string;
+  is_read: boolean;
+  created_at: string;
+  actor_user_id: number | null;
+  actor_username: string | null;
+}
+
+export interface NotificationPreferences {
+  messageNotificationsEnabled: boolean;
+  postNotificationsEnabled: boolean;
+}
+
+export interface ConversationNotificationPreference {
+  topic: string;
+  muted: boolean;
+}
+
+export interface LocationSelection {
+  label: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  precision: 'city' | 'precise';
+}
+
+export interface StoredUserLocation extends LocationSelection {
+  shared: boolean;
+  updated_at: string | null;
+}
+
+export interface NearbyUser {
+  id: number;
+  public_uuid: string | null;
+  username: string;
+  avatar_url: string | null;
+  bio: string | null;
+  fitness_goal: string | null;
+  friendship_status: 'self' | 'none' | 'pending' | 'accepted';
+  location_label: string;
+  location_city: string;
+  distance_km: number;
 }
 
 export interface AbuseReport {

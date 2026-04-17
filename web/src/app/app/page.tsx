@@ -8,11 +8,13 @@ import {
   addFriend,
   addGroupMember,
   createGroup,
+  getActivityNotifications,
   createPostComment,
   createPost,
   deletePost,
   deleteAccount,
   createAbuseReport,
+  getConversationNotificationPreference,
   getAuthSessions,
   getAbuseReports,
   getFeed,
@@ -24,13 +26,17 @@ import {
   getInbox,
   getLeaderboard,
   getMentionNotifications,
+  getNearbyUsers,
+  getNotificationPreferences,
   getSecurityEvents,
   getMessages,
   getPostComments,
   getPublicProfile,
   getProfile,
+  getStoredLocation,
   getUserPublic,
   logoutSession,
+  markActivityNotificationsRead,
   markMentionNotificationsRead,
   markMessagesRead,
   openDM,
@@ -40,9 +46,14 @@ import {
   removeGroupMember,
   resolveFriendConnectCode,
   searchUsers,
+  searchLocations,
   enableCoach,
+  reverseLocation,
   sendMessage,
   syncHealth,
+  updateConversationNotificationPreference,
+  updateNotificationPreferences,
+  updateStoredLocation,
   updatePostVisibility,
   updateProfile,
   uploadFile,
@@ -55,18 +66,24 @@ import { CoachCalendarPanel } from '@/components/chat/CoachCalendarPanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
 import { WelcomeFlow } from '@/components/onboarding/WelcomeFlow';
 import {
+  ActivityNotification,
   AppSocketEvent,
   ChatMessage,
   AuthSession,
   AbuseReport,
+  ConversationNotificationPreference,
   FeedComment,
   FeedPost,
   Friend,
   GroupMember,
   HealthMomentumResponse,
+  LocationSelection,
   LeaderboardEntry,
   MentionNotification,
+  NearbyUser,
+  NotificationPreferences,
   SecurityEvent,
+  StoredUserLocation,
   PublicProfileResponse,
   PublicUser,
   Profile,
@@ -109,10 +126,23 @@ interface Conversation {
 interface ProfileViewerState {
   open: boolean;
   loading: boolean;
+  surface: 'content-page' | 'message-pane';
   type: 'coach' | 'user';
   coachId?: 'zj' | 'lc';
   userId?: number;
   data?: PublicProfileResponse | null;
+}
+
+interface CommunityNotificationEntry {
+  key: string;
+  kind: 'activity' | 'mention';
+  title: string;
+  snippet: string;
+  icon: string;
+  is_read: boolean;
+  created_at: string;
+  activity?: ActivityNotification;
+  mention?: MentionNotification;
 }
 
 interface AbuseReportDraft {
@@ -138,6 +168,122 @@ const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 const GROUP_MEMBER_LIMIT = 500;
+const HASHTAG_STOP_WORDS = new Set([
+  'about', 'after', 'also', 'and', 'back', 'been', 'being', 'both', 'but', 'came', 'come', 'does', 'dont',
+  'even', 'feel', 'felt', 'from', 'have', 'into', 'just', 'keep', 'more', 'need', 'over', 'really', 'some',
+  'that', 'their', 'them', 'then', 'there', 'they', 'this', 'today', 'want', 'what', 'when', 'with', 'would',
+  'your', 'yours',
+]);
+
+function extractHashtagsFromText(value?: string | null): string[] {
+  const matches = String(value || '').match(/#([a-z0-9_]{2,32})/gi) || [];
+  return Array.from(new Set(matches.map((item) => item.replace(/^#/, '').toLowerCase())));
+}
+
+function extractKeywordHashtags(value: string, limit = 6): string[] {
+  const counts = new Map<string, number>();
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/#[a-z0-9_]+/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 3 && !HASHTAG_STOP_WORDS.has(item));
+
+  normalized.forEach((token) => {
+    counts.set(token, (counts.get(token) || 0) + 1);
+  });
+
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length)
+    .map(([token]) => token)
+    .slice(0, limit);
+}
+
+function appendHashtagToDraft(value: string, hashtag: string): string {
+  const normalizedTag = String(hashtag || '').trim().replace(/^#/, '').toLowerCase();
+  if (!normalizedTag) return value;
+  if (new RegExp(`(^|\\s)#${normalizedTag}(?=\\s|$)`, 'i').test(value)) {
+    return value;
+  }
+  const trimmed = value.trimEnd();
+  return `${trimmed}${trimmed ? ' ' : ''}#${normalizedTag}`;
+}
+
+function activityNotificationTitle(item: ActivityNotification): string {
+  if (item.source_type === 'message') {
+    return item.actor_username ? `${item.actor_username} sent a message` : 'New message';
+  }
+  if (item.source_type === 'post_comment') {
+    return item.actor_username ? `${item.actor_username} commented on your post` : 'New post comment';
+  }
+  return item.actor_username ? `${item.actor_username} liked your post` : 'New post like';
+}
+
+function mentionNotificationTitle(item: MentionNotification): string {
+  if (item.source_type === 'post_comment') {
+    return item.actor_username ? `${item.actor_username} mentioned you in a comment` : 'New post mention';
+  }
+  return item.actor_username ? `${item.actor_username} mentioned you in chat` : 'New chat mention';
+}
+
+function mentionNotificationIcon(item: MentionNotification): string {
+  return item.source_type === 'post_comment' ? 'alternate_email' : 'chat';
+}
+
+function formatDistanceKm(value: number): string {
+  const safe = Number(value);
+  if (!Number.isFinite(safe) || safe < 0) return '';
+  if (safe < 1) {
+    return `${Math.max(100, Math.round(safe * 1000 / 50) * 50)} m away`;
+  }
+  return `${safe.toFixed(safe >= 10 ? 0 : 1)} km away`;
+}
+
+function feedLocationLabel(post: FeedPost): string {
+  return String(post.location_label || post.location_city || '').trim();
+}
+
+function buildSearchPromptSuggestions(query: string, posts: FeedPost[], trendingTags: Array<{ tag: string; count: number }>): string[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return trendingTags.slice(0, 5).map((item) => `#${item.tag}`);
+  }
+
+  const suggestions = new Set<string>();
+
+  trendingTags
+    .filter((item) => item.tag.includes(normalizedQuery))
+    .slice(0, 4)
+    .forEach((item) => suggestions.add(`#${item.tag}`));
+
+  posts.forEach((post) => {
+    if (suggestions.size >= 8) return;
+    const hashtags = extractHashtagsFromText(post.content);
+    hashtags.forEach((tag) => {
+      if (tag.includes(normalizedQuery)) {
+        suggestions.add(`#${tag}`);
+      }
+    });
+
+    const source = [post.username, post.content].filter(Boolean).join(' ');
+    const words = source.match(/[a-z0-9#]+/gi) || [];
+    words.forEach((word, index) => {
+      const lowered = word.toLowerCase().replace(/^#/, '');
+      if (!lowered.includes(normalizedQuery)) return;
+      const phrase = words.slice(index, index + 3).join(' ').trim();
+      if (phrase.length >= normalizedQuery.length + 3) {
+        suggestions.add(phrase);
+      }
+    });
+  });
+
+  if (!suggestions.size) {
+    suggestions.add(query.trim());
+  }
+
+  return Array.from(suggestions).slice(0, 8);
+}
 const mediaFallbackExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'];
 const MESSAGE_DRAFTS_STORAGE_KEY_PREFIX = 'zym.web.messageDrafts.v2.user';
 const POST_DRAFT_STORAGE_KEY_PREFIX = 'zym.web.postDraft.v2.user';
@@ -593,15 +739,23 @@ function MessageAvatarBadge(props: {
   background: string;
   color: string;
   hidden?: boolean;
+  onClick?: () => void;
+  interactiveLabel?: string;
 }) {
-  const { avatarUrl, label, background, color, hidden = false } = props;
+  const {
+    avatarUrl,
+    label,
+    background,
+    color,
+    hidden = false,
+    onClick,
+    interactiveLabel,
+  } = props;
   const resolvedUrl = avatarUrl ? resolveApiAssetUrl(avatarUrl) : '';
-
-  return (
-    <div
-      className={`mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${hidden ? 'opacity-0' : ''}`}
-      style={{ background, color }}
-    >
+  const isInteractive = typeof onClick === 'function' && !hidden;
+  const shellClassName = `mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${hidden ? 'opacity-0' : ''}`;
+  const content = (
+    <>
       {!hidden && resolvedUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -610,6 +764,27 @@ function MessageAvatarBadge(props: {
           className="h-full w-full rounded-full object-cover"
         />
       ) : (!hidden ? label : '')}
+    </>
+  );
+
+  if (isInteractive) {
+    return (
+      <button
+        type="button"
+        className={`${shellClassName} transition hover:scale-[1.03]`}
+        style={{ background, color }}
+        onClick={onClick}
+        aria-label={interactiveLabel || `Open ${label} profile`}
+        title={interactiveLabel || `Open ${label} profile`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={shellClassName} style={{ background, color }}>
+      {content}
     </div>
   );
 }
@@ -701,6 +876,7 @@ export default function AppPage() {
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatStreamRef = useRef<HTMLDivElement | null>(null);
   const composerMenuRef = useRef<HTMLDivElement | null>(null);
+  const communityNotificationsRef = useRef<HTMLDivElement | null>(null);
   const conversationSearchRef = useRef<HTMLInputElement | null>(null);
   const messageDraftsRef = useRef<Record<string, string>>({});
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -710,6 +886,7 @@ export default function AppPage() {
   const skipTypingPulseRef = useRef(false);
   const notificationAudioContextRef = useRef<AudioContext | null>(null);
   const lastNotificationKeyRef = useRef<string>('');
+  const lastVisibleTabRef = useRef<VisibleTabKey>('messages');
 
   const [ready, setReady] = useState(false);
   const [showAppIntro, setShowAppIntro] = useState(true);
@@ -723,6 +900,8 @@ export default function AppPage() {
   const [isWideMessageLayout, setIsWideMessageLayout] = useState(false);
   const [mobileConversationListOpen, setMobileConversationListOpen] = useState(false);
   const [communityActionsOpen, setCommunityActionsOpen] = useState(false);
+  const [communityComposerOpen, setCommunityComposerOpen] = useState(false);
+  const [communityNotificationsOpen, setCommunityNotificationsOpen] = useState(false);
   const [coachPickerOpen, setCoachPickerOpen] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('messages');
@@ -791,6 +970,29 @@ export default function AppPage() {
   const [commentPendingPostId, setCommentPendingPostId] = useState<number | null>(null);
   const [mentionNotifications, setMentionNotifications] = useState<MentionNotification[]>([]);
   const [mentionsLoading, setMentionsLoading] = useState(false);
+  const [activityNotifications, setActivityNotifications] = useState<ActivityNotification[]>([]);
+  const [activityNotificationsLoading, setActivityNotificationsLoading] = useState(false);
+  const [postLocation, setPostLocation] = useState<LocationSelection | null>(null);
+  const [sharedLocation, setSharedLocation] = useState<StoredUserLocation | null>(null);
+  const [sharedLocationLoading, setSharedLocationLoading] = useState(false);
+  const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
+  const [nearbyUsersLoading, setNearbyUsersLoading] = useState(false);
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locationPickerMode, setLocationPickerMode] = useState<'post' | 'nearby'>('post');
+  const [locationSearchQuery, setLocationSearchQuery] = useState('');
+  const [locationSearchResults, setLocationSearchResults] = useState<LocationSelection[]>([]);
+  const [locationSearchLoading, setLocationSearchLoading] = useState(false);
+  const [locationPickerPending, setLocationPickerPending] = useState(false);
+  const [locationShareEnabled, setLocationShareEnabled] = useState(true);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
+    messageNotificationsEnabled: true,
+    postNotificationsEnabled: true,
+  });
+  const [notificationPreferencesPending, setNotificationPreferencesPending] = useState(false);
+  const [conversationNotificationPreference, setConversationNotificationPreference] = useState<ConversationNotificationPreference | null>(null);
+  const [conversationSettingsOpen, setConversationSettingsOpen] = useState(false);
+  const [conversationSettingsLoading, setConversationSettingsLoading] = useState(false);
+  const [conversationSettingsPending, setConversationSettingsPending] = useState(false);
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [healthMomentum, setHealthMomentum] = useState<HealthMomentumResponse | null>(null);
@@ -827,6 +1029,7 @@ export default function AppPage() {
   const [profileViewer, setProfileViewer] = useState<ProfileViewerState>({
     open: false,
     loading: false,
+    surface: 'content-page',
     type: 'coach',
     coachId: 'zj',
     data: null,
@@ -924,11 +1127,79 @@ export default function AppPage() {
     [mentionNotifications],
   );
 
+  const unreadActivityNotificationCount = useMemo(
+    () => activityNotifications.filter((item) => !item.is_read).length,
+    [activityNotifications],
+  );
+
+  const unreadCommunityNotificationCount = unreadMentionCount + unreadActivityNotificationCount;
+
+  const prioritizedCommunityNotifications = useMemo<CommunityNotificationEntry[]>(
+    () => [
+      ...activityNotifications.map((item) => ({
+        key: `activity:${item.id}`,
+        kind: 'activity' as const,
+        title: activityNotificationTitle(item),
+        snippet: item.snippet || (item.source_type === 'post_reaction' ? 'Someone liked your post.' : 'Open to view details.'),
+        icon: item.source_type === 'message'
+          ? 'mail'
+          : item.source_type === 'post_comment'
+            ? 'comment'
+            : 'favorite',
+        is_read: item.is_read,
+        created_at: item.created_at,
+        activity: item,
+      })),
+      ...mentionNotifications.map((item) => ({
+        key: `mention:${item.id}`,
+        kind: 'mention' as const,
+        title: mentionNotificationTitle(item),
+        snippet: item.snippet || 'Open to view the mention.',
+        icon: mentionNotificationIcon(item),
+        is_read: item.is_read,
+        created_at: item.created_at,
+        mention: item,
+      })),
+    ].sort((left, right) => {
+      if (left.is_read !== right.is_read) {
+        return Number(left.is_read) - Number(right.is_read);
+      }
+      return Date.parse(right.created_at || '') - Date.parse(left.created_at || '');
+    }),
+    [activityNotifications, mentionNotifications],
+  );
+
+  const trendingHashtags = useMemo(() => {
+    const counts = new Map<string, number>();
+    feed.forEach((post) => {
+      extractHashtagsFromText(post.content).forEach((tag) => {
+        counts.set(tag, (counts.get(tag) || 0) + 1);
+      });
+    });
+
+    return Array.from(counts.entries())
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([tag, count]) => ({ tag, count }))
+      .slice(0, 12);
+  }, [feed]);
+
+  const communitySearchSuggestions = useMemo(
+    () => buildSearchPromptSuggestions(communityQuery, feed, trendingHashtags),
+    [communityQuery, feed, trendingHashtags],
+  );
+
+  const composerHashtagSuggestions = useMemo(() => {
+    const keywordSuggestions = extractKeywordHashtags(postText, 6);
+    if (keywordSuggestions.length > 0) return keywordSuggestions;
+    return trendingHashtags.slice(0, 6).map((item) => item.tag);
+  }, [postText, trendingHashtags]);
+
   const filteredFeed = useMemo(() => {
     const query = communityQuery.trim().toLowerCase();
     if (!query) return feed;
     return feed.filter((post) => {
-      const haystack = [post.username, post.type, post.content].filter(Boolean).join(' ').toLowerCase();
+      const hashtags = extractHashtagsFromText(post.content).map((item) => `#${item}`);
+      const haystack = [post.username, post.type, post.content, ...hashtags].filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(query);
     });
   }, [communityQuery, feed]);
@@ -955,6 +1226,57 @@ export default function AppPage() {
       window.removeEventListener('keydown', handleEscape);
     };
   }, [postMenuOpenId]);
+
+  useEffect(() => {
+    if (!communityNotificationsOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!communityNotificationsRef.current?.contains(event.target as Node)) {
+        setCommunityNotificationsOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCommunityNotificationsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [communityNotificationsOpen]);
+
+  useEffect(() => {
+    if (!locationPickerOpen) return;
+
+    const query = locationSearchQuery.trim();
+    if (query.length < 2) {
+      setLocationSearchLoading(false);
+      setLocationSearchResults([]);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setLocationSearchLoading(true);
+          const results = await searchLocations(query);
+          setLocationSearchResults(results);
+        } catch (err: any) {
+          setError(err.message || 'Failed to search locations.');
+          setLocationSearchResults([]);
+        } finally {
+          setLocationSearchLoading(false);
+        }
+      })();
+    }, 220);
+
+    return () => window.clearTimeout(timer);
+  }, [locationPickerOpen, locationSearchQuery]);
 
   const filteredLeaderboard = useMemo(() => {
     const query = leaderboardQuery.trim().toLowerCase();
@@ -1543,6 +1865,8 @@ export default function AppPage() {
 
     if (event.type === 'inbox_updated') {
       void loadInbox(authUserIdRef.current, friendsRef.current);
+      void loadActivityNotifications(authUserIdRef.current);
+      void loadMentions(authUserIdRef.current);
       return;
     }
 
@@ -1597,11 +1921,15 @@ export default function AppPage() {
       loadFeed(auth.userId),
       loadLeaderboard(auth.userId),
       loadProfile(auth.userId),
+      loadActivityNotifications(auth.userId),
+      loadNotificationPreferences(auth.userId),
       loadAuthSessions(),
       loadSecurityEvents(auth.userId),
       loadAbuseReports(auth.userId),
       loadConnectInfo(auth.userId),
       loadMentions(auth.userId),
+      loadStoredLocation(auth.userId),
+      loadNearbyLocationUsers(auth.userId),
     ]);
   };
 
@@ -1729,6 +2057,13 @@ export default function AppPage() {
   }, [activeTopic]);
 
   useEffect(() => {
+    if (!conversationSettingsOpen) return;
+    if (!activeConversation || activeConversation.topic !== conversationNotificationPreference?.topic) {
+      setConversationSettingsOpen(false);
+    }
+  }, [activeConversation, conversationNotificationPreference?.topic, conversationSettingsOpen]);
+
+  useEffect(() => {
     authUserIdRef.current = authUserId;
     clearCoachReplyRevealQueue();
     setAnimatedCoachReplies({});
@@ -1738,6 +2073,9 @@ export default function AppPage() {
     const scopedDrafts = loadMessageDrafts(authUserId);
     messageDraftsRef.current = scopedDrafts;
     setPostText(loadPostDraft(authUserId));
+    setPostLocation(null);
+    setSharedLocation(null);
+    setNearbyUsers([]);
     if (activeTopicRef.current) {
       skipTypingPulseRef.current = true;
       setComposer(scopedDrafts[activeTopicRef.current] || '');
@@ -2220,6 +2558,60 @@ export default function AppPage() {
     }
   }
 
+  async function loadActivityNotifications(userId = authUserId) {
+    if (!userId) return;
+
+    try {
+      setActivityNotificationsLoading(true);
+      const rows = await getActivityNotifications(userId);
+      setActivityNotifications(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load notifications.');
+    } finally {
+      setActivityNotificationsLoading(false);
+    }
+  }
+
+  async function loadStoredLocation(userId = authUserId) {
+    if (!userId) return;
+
+    try {
+      setSharedLocationLoading(true);
+      const location = await getStoredLocation(userId);
+      setSharedLocation(location);
+      setLocationShareEnabled(Boolean(location?.shared));
+    } catch (err: any) {
+      setError(err.message || 'Failed to load location.');
+    } finally {
+      setSharedLocationLoading(false);
+    }
+  }
+
+  async function loadNearbyLocationUsers(userId = authUserId) {
+    if (!userId) return;
+
+    try {
+      setNearbyUsersLoading(true);
+      const rows = await getNearbyUsers(userId);
+      setNearbyUsers(rows);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load nearby users.');
+    } finally {
+      setNearbyUsersLoading(false);
+    }
+  }
+
+  async function loadNotificationPreferences(userId = authUserId) {
+    if (!userId) return;
+
+    try {
+      const result = await getNotificationPreferences(userId);
+      setNotificationPreferences(result);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load notification settings.');
+    }
+  }
+
   async function loadLeaderboard(userId = authUserId) {
     if (!userId) return;
 
@@ -2622,17 +3014,116 @@ export default function AppPage() {
         mediaUrls,
         mediaIds,
         visibility: postVisibility,
+        location: postLocation,
       });
 
       setPostText('');
       setPostFiles([]);
       setPostVisibility('friends');
+      setPostLocation(null);
+      setCommunityComposerOpen(false);
       showNotice('Post published.');
       await loadFeed();
     } catch (err: any) {
       setError(err.message || 'Failed to publish post.');
     } finally {
       setPostPending(false);
+    }
+  }
+
+  function openLocationPicker(mode: 'post' | 'nearby') {
+    setLocationPickerMode(mode);
+    setLocationPickerOpen(true);
+    setLocationSearchQuery('');
+    setLocationSearchResults([]);
+    setLocationSearchLoading(false);
+    setLocationPickerPending(false);
+    setLocationShareEnabled(mode === 'nearby' ? true : Boolean(sharedLocation?.shared));
+  }
+
+  function closeLocationPicker() {
+    setLocationPickerOpen(false);
+    setLocationSearchQuery('');
+    setLocationSearchResults([]);
+    setLocationSearchLoading(false);
+    setLocationPickerPending(false);
+  }
+
+  async function persistSharedLocation(location: LocationSelection | null, shared: boolean) {
+    const next = await updateStoredLocation({
+      userId: authUserId,
+      location,
+      locationShared: shared,
+    });
+    setSharedLocation(next);
+    if (shared && next) {
+      await loadNearbyLocationUsers(authUserId);
+    } else {
+      setNearbyUsers([]);
+    }
+  }
+
+  async function applyLocationSelection(selection: LocationSelection) {
+    try {
+      setLocationPickerPending(true);
+      if (locationPickerMode === 'nearby') {
+        await persistSharedLocation(selection, true);
+        showNotice(`Nearby discovery now uses ${selection.label}.`);
+      } else {
+        setPostLocation(selection);
+        if (locationShareEnabled) {
+          await persistSharedLocation(selection, true);
+        }
+        showNotice(`Post location set to ${selection.label}.`);
+      }
+      closeLocationPicker();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save location.');
+    } finally {
+      setLocationPickerPending(false);
+    }
+  }
+
+  async function handleUseBrowserLocation(precision: 'city' | 'precise') {
+    if (typeof window === 'undefined' || !window.navigator.geolocation) {
+      setError('Location is not supported in this browser.');
+      return;
+    }
+
+    try {
+      setLocationPickerPending(true);
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        window.navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: precision === 'precise',
+          timeout: 12_000,
+          maximumAge: 120_000,
+        });
+      });
+      const reversed = await reverseLocation(position.coords.latitude, position.coords.longitude);
+      const selection = precision === 'city' ? reversed.city : reversed.precise;
+      if (!selection) {
+        throw new Error('Unable to resolve this location yet.');
+      }
+      await applyLocationSelection(selection);
+    } catch (err: any) {
+      if (err?.code === 1) {
+        setError('Location permission was denied.');
+      } else {
+        setError(err.message || 'Failed to use your current location.');
+      }
+      setLocationPickerPending(false);
+    }
+  }
+
+  async function handleDisableNearbySharing() {
+    try {
+      setLocationPickerPending(true);
+      await persistSharedLocation(null, false);
+      showNotice('Nearby discovery is turned off.');
+      closeLocationPicker();
+    } catch (err: any) {
+      setError(err.message || 'Failed to disable nearby sharing.');
+      setLocationPickerPending(false);
     }
   }
 
@@ -2760,12 +3251,15 @@ export default function AppPage() {
     }
 
     const topic = String(notification.topic || '').trim();
+    setCommunityNotificationsOpen(false);
     if (!topic) return;
 
     if (topic.startsWith('post_')) {
       const postId = Number(topic.replace('post_', ''));
       if (Number.isInteger(postId) && postId > 0) {
         setTab('community');
+        setCommunityNotificationsOpen(false);
+        setExpandedPostIds((prev) => (prev.includes(postId) ? prev : [...prev, postId]));
         if (!expandedCommentPostIds.includes(postId)) {
           setExpandedCommentPostIds((prev) => [...prev, postId]);
         }
@@ -2776,6 +3270,129 @@ export default function AppPage() {
 
     setTab('messages');
     setActiveTopic(topic);
+  }
+
+  async function handleOpenActivityNotification(notification: ActivityNotification) {
+    try {
+      await markActivityNotificationsRead({ userId: authUserId, ids: [notification.id] });
+      setActivityNotifications((prev) => prev.map((item) => (
+        item.id === notification.id ? { ...item, is_read: true } : item
+      )));
+    } catch {
+      // Best effort only.
+    }
+
+    setCommunityNotificationsOpen(false);
+
+    if (notification.source_type === 'message' && notification.topic) {
+      setTab('messages');
+      setConversationSettingsOpen(false);
+      setActiveTopic(notification.topic);
+      return;
+    }
+
+    if (notification.post_id) {
+      setTab('community');
+      setExpandedPostIds((prev) => (prev.includes(notification.post_id as number) ? prev : [...prev, notification.post_id as number]));
+      if (notification.source_type === 'post_comment') {
+        setExpandedCommentPostIds((prev) => (
+          prev.includes(notification.post_id as number) ? prev : [...prev, notification.post_id as number]
+        ));
+        await loadPostComments(notification.post_id);
+      }
+    }
+  }
+
+  async function handleMarkAllActivityNotificationsRead() {
+    try {
+      await markActivityNotificationsRead({ userId: authUserId });
+      setActivityNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+    } catch (err: any) {
+      setError(err.message || 'Failed to mark notifications as read.');
+    }
+  }
+
+  async function handleOpenCommunityNotification(entry: CommunityNotificationEntry) {
+    if (entry.kind === 'mention' && entry.mention) {
+      await handleOpenMention(entry.mention);
+      return;
+    }
+    if (entry.activity) {
+      await handleOpenActivityNotification(entry.activity);
+    }
+  }
+
+  async function handleMarkAllCommunityNotificationsRead() {
+    try {
+      const tasks: Promise<void>[] = [];
+      if (unreadActivityNotificationCount > 0) {
+        tasks.push(markActivityNotificationsRead({ userId: authUserId }));
+      }
+      if (unreadMentionCount > 0) {
+        tasks.push(markMentionNotificationsRead({ userId: authUserId }));
+      }
+      await Promise.all(tasks);
+      setActivityNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+      setMentionNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+    } catch (err: any) {
+      setError(err.message || 'Failed to mark notifications as read.');
+    }
+  }
+
+  async function handleUpdateNotificationPreferences(patch: Partial<NotificationPreferences>) {
+    try {
+      setNotificationPreferencesPending(true);
+      const next = await updateNotificationPreferences({
+        userId: authUserId,
+        messageNotificationsEnabled: patch.messageNotificationsEnabled,
+        postNotificationsEnabled: patch.postNotificationsEnabled,
+      });
+      setNotificationPreferences(next);
+      showNotice('Notification settings updated.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update notification settings.');
+    } finally {
+      setNotificationPreferencesPending(false);
+    }
+  }
+
+  async function openConversationSettings() {
+    if (!activeConversation || !authUserId) return;
+
+    setConversationSettingsOpen(true);
+    setConversationSettingsLoading(true);
+    setConversationNotificationPreference({
+      topic: activeConversation.topic,
+      muted: false,
+    });
+
+    try {
+      const result = await getConversationNotificationPreference(authUserId, activeConversation.topic);
+      setConversationNotificationPreference(result);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load conversation settings.');
+    } finally {
+      setConversationSettingsLoading(false);
+    }
+  }
+
+  async function handleUpdateConversationNotificationPreference(nextMuted: boolean) {
+    if (!activeConversation || !authUserId) return;
+
+    try {
+      setConversationSettingsPending(true);
+      const result = await updateConversationNotificationPreference({
+        userId: authUserId,
+        topic: activeConversation.topic,
+        muted: nextMuted,
+      });
+      setConversationNotificationPreference(result);
+      showNotice(nextMuted ? 'This chat is muted.' : 'This chat will notify again.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update chat notification settings.');
+    } finally {
+      setConversationSettingsPending(false);
+    }
   }
 
   async function handleMarkAllMentionsRead() {
@@ -2912,6 +3529,13 @@ export default function AppPage() {
     }
   }
 
+  function closeProfileViewer() {
+    setProfileViewer((prev) => ({ ...prev, open: false }));
+    if (profileViewer.surface === 'message-pane' && !activeConversation && !isWideMessageLayout) {
+      setMobileConversationListOpen(true);
+    }
+  }
+
   async function openConversationProfile() {
     if (!activeConversation) return;
 
@@ -2919,6 +3543,7 @@ export default function AppPage() {
       setProfileViewer({
         open: true,
         loading: false,
+        surface: 'message-pane',
         type: 'coach',
         coachId: activeConversation.coachId || activeConversationCoach,
         data: null,
@@ -2935,6 +3560,7 @@ export default function AppPage() {
     setProfileViewer({
       open: true,
       loading: true,
+      surface: 'message-pane',
       type: 'user',
       userId: targetUserId,
       data: null,
@@ -2945,6 +3571,35 @@ export default function AppPage() {
       setProfileViewer({
         open: true,
         loading: false,
+        surface: 'message-pane',
+        type: 'user',
+        userId: targetUserId,
+        data,
+      });
+    } catch (err: any) {
+      setProfileViewer((prev) => ({ ...prev, loading: false, data: null }));
+      setError(err.message || 'Failed to load profile.');
+    }
+  }
+
+  async function openPublicProfile(targetUserId: number, surface: ProfileViewerState['surface'] = 'content-page') {
+    if (!targetUserId) return;
+
+    setProfileViewer({
+      open: true,
+      loading: true,
+      surface,
+      type: 'user',
+      userId: targetUserId,
+      data: null,
+    });
+
+    try {
+      const data = await getPublicProfile(targetUserId);
+      setProfileViewer({
+        open: true,
+        loading: false,
+        surface,
         type: 'user',
         userId: targetUserId,
         data,
@@ -3087,6 +3742,14 @@ export default function AppPage() {
     : activeConversationCoach);
   const createGroupButtonClass = groupCoachEnabled === 'none' ? 'btn btn-ghost' : coachButtonClass(groupCoachEnabled);
   const selectedTabLabel = tabs.find((item) => item.key === activeTab)?.label || 'Message';
+  const showingMessageProfilePane = profileViewer.open && profileViewer.surface === 'message-pane';
+
+  useEffect(() => {
+    if (lastVisibleTabRef.current === activeTab) return;
+    lastVisibleTabRef.current = activeTab;
+    setProfileViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
+  }, [activeTab]);
+
   const topLeaderboardMetric = Math.max(
     ...filteredLeaderboard.map((entry) => (
       leaderboardMetric === 'steps'
@@ -3122,9 +3785,9 @@ export default function AppPage() {
             <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
             <input
               ref={searchRef}
-              className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition sm:pl-9 sm:pr-4 sm:text-sm"
+              className="w-full rounded-full border border-transparent bg-slate-100/85 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition focus:bg-white sm:pl-9 sm:pr-4 sm:text-sm"
               style={{
-                borderColor: neutralTheme.borderColor,
+                borderColor: 'transparent',
                 boxShadow: 'none',
               }}
               value={searchValue || ''}
@@ -3162,8 +3825,8 @@ export default function AppPage() {
           <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
           <input
             ref={conversationSearchRef}
-            className="w-full rounded-full border border-white/60 bg-white/60 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition sm:pl-9 sm:pr-4 sm:text-sm"
-            style={{ borderColor: selectedCoachTheme.borderColor }}
+            className="w-full rounded-full border border-transparent bg-slate-100/85 py-2 pl-8 pr-3 text-[13px] text-slate-700 outline-none transition focus:bg-white sm:pl-9 sm:pr-4 sm:text-sm"
+            style={{ borderColor: 'transparent' }}
             value={conversationQuery}
             onChange={(event) => setConversationQuery(event.target.value)}
             placeholder="Search conversation..."
@@ -3175,10 +3838,9 @@ export default function AppPage() {
         <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-2.5 sm:gap-3 xl:flex xl:w-[320px]`}>
           <button
             type="button"
-            className="flex items-center justify-center gap-2 rounded-[18px] border border-white/60 bg-white/55 px-3 py-2.5 text-[13px] font-semibold transition hover:bg-white/75 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm"
+            className="flex items-center justify-center gap-2 rounded-[18px] bg-white/72 px-3 py-2.5 text-[13px] font-semibold shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition hover:bg-white/90 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm"
             style={{
               color: selectedCoachTheme.ink,
-              borderColor: selectedCoachTheme.borderColor,
             }}
             onClick={openCreateGroupDialog}
           >
@@ -3187,7 +3849,7 @@ export default function AppPage() {
           </button>
           <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1 sm:gap-3">
             {filteredConversations.length === 0 ? (
-              <div className="rounded-[22px] border border-dashed border-slate-300/80 bg-white/25 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
+              <div className="rounded-[22px] bg-slate-100/70 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
                 No conversations matched this search.
               </div>
             ) : null}
@@ -3196,6 +3858,12 @@ export default function AppPage() {
                 key={conversation.topic}
                 item={conversation}
                 active={activeTopic === conversation.topic}
+                onOpenProfile={(userId) => {
+                  if (!isWideMessageLayout) {
+                    setMobileConversationListOpen(false);
+                  }
+                  void openPublicProfile(userId, 'message-pane');
+                }}
                 onSelect={(topic) => {
                   setActiveTopic(topic);
                   if (!isWideMessageLayout) {
@@ -3210,70 +3878,151 @@ export default function AppPage() {
           </div>
         </section>
 
-	        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[22px] border border-white/60 bg-white/35 backdrop-blur-xl sm:rounded-[28px] xl:flex`}>
-	          <header className="flex items-center justify-between gap-2.5 rounded-t-[22px] border-b border-slate-200/50 bg-white/25 px-3.5 py-2.5 sm:gap-3 sm:rounded-t-[28px] sm:px-5 sm:py-3 md:px-6">
-	            <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-              {showChatListBackButton ? (
-                <button
-                  type="button"
-                  className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
-                  onClick={() => setMobileConversationListOpen(true)}
-                  aria-label="Back to chats"
-	                >
-	                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
-	                </button>
-	              ) : null}
-	              <button
-	                type="button"
-	                className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
-	                style={{
-	                  background: activeConversation?.type === 'coach'
-	                    ? activeCoachAvatarTone.background
-	                    : 'rgba(255,255,255,0.75)',
-	                  color: activeConversation?.type === 'coach' ? activeCoachAvatarTone.text : neutralTheme.ink,
-	                }}
-	                onClick={() => void openConversationProfile()}
-	                disabled={!activeConversation || activeConversation.type === 'group'}
-	                title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
-	              >
-	                {activeConversation?.avatarUrl ? (
-	                  // eslint-disable-next-line @next/next/no-img-element
-	                  <img
-	                    src={resolveApiAssetUrl(activeConversation.avatarUrl)}
-	                    alt={activeConversation.name}
-	                    style={{
-	                      width: isWideMessageLayout ? 40 : 34,
-	                      height: isWideMessageLayout ? 40 : 34,
-	                      borderRadius: isWideMessageLayout ? 14 : 12,
-	                      objectFit: 'cover',
-	                    }}
-	                  />
-	                ) : (
-	                  <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
-	                )}
-	              </button>
-	              <div className="min-w-0">
-	                <div className="flex min-w-0 items-center gap-2">
-	                  <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
-	                    {activeConversation?.name || 'Select a chat'}
-	                  </h2>
-	                </div>
-	              </div>
-	            </div>
+	        <section className={`${showConversationPane ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col rounded-[26px] bg-white/40 backdrop-blur-2xl sm:rounded-[32px] xl:flex`}>
+            {!showingMessageProfilePane ? (
+	          <header className="flex items-center justify-between gap-2.5 rounded-t-[26px] bg-white/22 px-3.5 py-2.5 sm:gap-3 sm:rounded-t-[32px] sm:px-5 sm:py-3 md:px-6">
+	            {conversationSettingsOpen ? (
+                <div className="flex min-w-0 items-center gap-3">
+                  <button
+                    type="button"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
+                    onClick={() => setConversationSettingsOpen(false)}
+                    aria-label="Back to chat"
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
+                  </button>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-[11px]">Settings</p>
+                    <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
+                      {activeConversation?.name || 'Chat'}
+                    </h2>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                  {showChatListBackButton ? (
+                    <button
+                      type="button"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-white/80 text-slate-500 transition hover:bg-white sm:size-10 sm:rounded-[14px]"
+                      onClick={() => setMobileConversationListOpen(true)}
+                      aria-label="Back to chats"
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-[12px] sm:size-10 sm:rounded-[14px]"
+                    style={{
+                      background: activeConversation?.type === 'coach'
+                        ? activeCoachAvatarTone.background
+                        : 'rgba(255,255,255,0.75)',
+                      color: activeConversation?.type === 'coach' ? activeCoachAvatarTone.text : neutralTheme.ink,
+                    }}
+                    onClick={() => void openConversationProfile()}
+                    disabled={!activeConversation || activeConversation.type === 'group'}
+                    title={activeConversation && activeConversation.type !== 'group' ? 'Open profile' : 'Profile unavailable'}
+                  >
+                    {activeConversation?.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveApiAssetUrl(activeConversation.avatarUrl)}
+                        alt={activeConversation.name}
+                        style={{
+                          width: isWideMessageLayout ? 40 : 34,
+                          height: isWideMessageLayout ? 40 : 34,
+                          borderRadius: isWideMessageLayout ? 14 : 12,
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : (
+                      <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
+                    )}
+                  </button>
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h2 className="truncate text-[1.05rem] font-bold text-slate-900 sm:text-xl">
+                        {activeConversation?.name || 'Select a chat'}
+                      </h2>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-            {activeConversation?.type === 'group' ? (
+            {!conversationSettingsOpen && activeConversation ? (
               <button
                 type="button"
                 className="flex size-9 shrink-0 items-center justify-center rounded-[12px] text-slate-500 transition hover:bg-slate-100/85 sm:size-10"
-                aria-label="Open group settings"
-                onClick={() => setGroupSettingsOpen(true)}
+                aria-label="Open chat settings"
+                onClick={() => void openConversationSettings()}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 18 }}>more_horiz</span>
               </button>
             ) : null}
           </header>
+            ) : null}
 
-          <>
+          {showingMessageProfilePane ? (
+            renderProfileViewerPage('message-pane')
+          ) : conversationSettingsOpen ? (
+            <div className="flex-1 overflow-y-auto px-3.5 py-4 sm:px-5 sm:py-5 md:px-6">
+              <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+                <section className="rounded-[24px] bg-white/78 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.06)] sm:p-5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Notifications</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">Control this chat’s alerts</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                    Keep the conversation in your inbox, but decide whether new messages from this thread should reach your notification feed.
+                  </p>
+                  <div className="mt-5 flex items-center justify-between gap-4 rounded-[20px] bg-slate-50/85 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Chat notifications</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {conversationNotificationPreference?.muted
+                          ? 'Muted for this conversation only.'
+                          : 'You will be notified when this chat gets a new message.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={`inline-flex items-center rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+                        conversationNotificationPreference?.muted
+                          ? 'bg-slate-200 text-slate-600'
+                          : 'bg-slate-900 text-white'
+                      }`}
+                      disabled={conversationSettingsLoading || conversationSettingsPending}
+                      onClick={() => void handleUpdateConversationNotificationPreference(!(conversationNotificationPreference?.muted))}
+                    >
+                      {conversationSettingsLoading
+                        ? 'Loading'
+                        : conversationSettingsPending
+                          ? 'Saving'
+                          : conversationNotificationPreference?.muted
+                            ? 'Muted'
+                            : 'Notify'}
+                    </button>
+                  </div>
+                </section>
+
+                {activeConversation?.type === 'group' ? (
+                  <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.05)] sm:p-5">
+                    <h4 className="text-base font-semibold text-slate-900">Group tools</h4>
+                    <p className="mt-1 text-sm text-slate-500">Member management stays available here while notifications live in the same settings flow.</p>
+                    <button
+                      type="button"
+                      className="btn btn-ghost mt-4"
+                      onClick={() => {
+                        setConversationSettingsOpen(false);
+                        setGroupSettingsOpen(true);
+                      }}
+                    >
+                      Manage group members
+                    </button>
+                  </section>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <>
             <div ref={chatStreamRef} className="flex-1 overflow-y-auto px-3.5 py-3.5 sm:px-5 sm:py-5 md:px-6">
                 {messages.map((message, index) => {
                   const mine = message.from_user_id === authUserId;
@@ -3318,13 +4067,19 @@ export default function AppPage() {
 
                       <div className={`flex gap-2.5 sm:gap-3 ${mine ? 'justify-end' : 'justify-start'} ${compact ? 'mt-1.5 sm:mt-2' : ''}`}>
                         {!mine ? (
-                          <MessageAvatarBadge
-                            avatarUrl={counterpartyAvatarUrl}
-                            label={avatarText}
-                            background={message.is_coach ? activeCoachAvatarTone.background : 'rgba(148,163,184,0.16)'}
-                            color={message.is_coach ? activeCoachAvatarTone.text : 'rgb(71 85 105)'}
-                            hidden={compact}
-                          />
+                      <MessageAvatarBadge
+                        avatarUrl={counterpartyAvatarUrl}
+                        label={avatarText}
+                        background={message.is_coach ? activeCoachAvatarTone.background : 'rgba(148,163,184,0.16)'}
+                        color={message.is_coach ? activeCoachAvatarTone.text : 'rgb(71 85 105)'}
+                        hidden={compact}
+                        onClick={!compact && !message.is_coach && message.from_user_id > 0
+                          ? () => {
+                            void openPublicProfile(message.from_user_id, 'message-pane');
+                          }
+                          : undefined}
+                        interactiveLabel={!message.is_coach ? `Open ${counterpartyName} profile` : undefined}
+                      />
                         ) : null}
 
                         <article className={`max-w-[88%] sm:max-w-[82%] ${mine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
@@ -3354,11 +4109,11 @@ export default function AppPage() {
                                 if (!mediaUrl) return null;
                                 return (
                                   <button
-                                    key={mediaUrl}
-                                    type="button"
-                                    className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[18px] border border-white/70 bg-white/85 shadow-sm transition hover:-translate-y-0.5 sm:h-32 sm:w-32 sm:rounded-[22px] md:h-36 md:w-36"
-                                    onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
-                                  >
+                                  key={mediaUrl}
+                                  type="button"
+                                  className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[18px] bg-white/92 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 sm:h-32 sm:w-32 sm:rounded-[22px] md:h-36 md:w-36"
+                                  onClick={() => openMediaLightbox(mediaUrl, `${senderLabel} attachment`)}
+                                >
                                     {isVideoUrl(mediaUrl) ? (
                                       <>
                                         <video
@@ -3391,13 +4146,13 @@ export default function AppPage() {
                               key={`${message.id}-segment-${segmentIndex}`}
                               className={`rounded-[18px] px-3 py-2.5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 ${
                                 mine
-                                  ? 'rounded-tr-md border border-white/80 bg-white/80 text-slate-800'
+                                  ? 'rounded-tr-md bg-white/92 text-slate-800 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'
                                   : 'rounded-tl-md text-white'
                               } ${segmentIndex > 0 ? 'mt-2' : ''}`}
                               style={!mine ? (
                                 {
                                   background: neutralTheme.solidBubble,
-                                  boxShadow: '0 16px 30px rgba(15,23,42,0.16)',
+                                  boxShadow: '0 12px 26px rgba(15,23,42,0.14)',
                                 }
                               ) : undefined}
                             >
@@ -3430,7 +4185,7 @@ export default function AppPage() {
 
               </div>
 
-            <footer className="chat-footer-safe border-t border-slate-200/50 bg-white/35 px-3 py-3 sm:px-5 sm:py-4 md:px-6">
+            <footer className="chat-footer-safe border-t border-slate-200/40 bg-white/30 px-3 py-3 sm:px-5 sm:py-4 md:px-6">
                 <MediaPreviewGrid
                   items={attachmentPreviews}
                   onRemove={(index) => removeAttachmentAt(index, setAttachments)}
@@ -3440,10 +4195,10 @@ export default function AppPage() {
                   showVideoControls={false}
                 />
 
-	                <div className="mt-2.5 flex items-end gap-2 rounded-[20px] border border-white/60 bg-white/65 p-2.5 sm:mt-3 sm:gap-3 sm:rounded-[24px] sm:p-3">
+	                <div className="mt-2.5 flex items-end gap-2 rounded-[22px] bg-white/82 p-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.05)] sm:mt-3 sm:gap-3 sm:rounded-[26px] sm:p-3">
                   <div ref={composerMenuRef} className="relative">
                     <button
-                      className="flex size-10 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
+                      className="flex size-10 items-center justify-center rounded-[16px] bg-slate-100/90 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
                       type="button"
                       onClick={() => setComposerActionsOpen((prev) => !prev)}
                       aria-label="Open attachment actions"
@@ -3451,7 +4206,7 @@ export default function AppPage() {
                       <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add_circle</span>
                     </button>
                     {composerActionsOpen ? (
-                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-10 flex min-w-[220px] flex-col gap-2 rounded-[18px] border border-white/70 bg-white/95 p-3 shadow-xl sm:bottom-[calc(100%+12px)] sm:min-w-[240px] sm:rounded-[22px]">
+                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-10 flex min-w-[220px] flex-col gap-2 rounded-[18px] bg-white/96 p-3 shadow-[0_18px_42px_rgba(15,23,42,0.14)] sm:bottom-[calc(100%+12px)] sm:min-w-[240px] sm:rounded-[22px]">
                         <label className="btn btn-ghost flex-col items-start gap-0.5" style={{ cursor: 'pointer', justifyContent: 'flex-start' }}>
                           <span>Photo / Video</span>
                           <span className="text-xs font-normal text-slate-400">Up to 50MB each</span>
@@ -3512,7 +4267,7 @@ export default function AppPage() {
                       </button>
                     ) : null}
 	                    <button
-	                      className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-slate-100 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
+	                      className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-slate-100/90 text-slate-500 transition hover:bg-slate-200 sm:size-11 sm:rounded-2xl"
 	                      disabled={pendingSend || !isOnline || composerTooLong}
 	                      onClick={() => void handleSendMessage()}
 	                    >
@@ -3533,114 +4288,491 @@ export default function AppPage() {
 	                ) : null}
 	                {!isOnline ? <p className="mt-1 text-xs text-[color:var(--danger)]">Reconnect to send messages and media.</p> : null}
 	            </footer>
-          </>
+            </>
+          )}
         </section>
       </div>
     </div>
   );
   };
 
-  const renderCommunityPage = () => (
-    <div className="flex h-full flex-col">
-      {renderAppHeader(
-        'Community Feed',
-        '',
-        communityQuery,
-        setCommunityQuery,
-        'Search community posts...',
-        undefined,
-        <div className="relative">
-          <button
-            type="button"
-            className="flex size-8 items-center justify-center rounded-full bg-white/60 text-slate-600 transition hover:bg-white sm:size-9"
-            onClick={() => setCommunityActionsOpen((prev) => !prev)}
-            title={communityActionsOpen ? 'Close actions' : 'Open actions'}
-          >
-            <span
-              className="material-symbols-outlined transition"
-              style={{
-                fontSize: 18,
-                transform: communityActionsOpen ? 'rotate(45deg)' : 'rotate(0deg)',
-              }}
-            >
-              add
-            </span>
-          </button>
-          {communityActionsOpen ? (
-            <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[180px] flex-col gap-1.5 rounded-[18px] border border-white/70 bg-[rgba(17,24,39,0.92)] p-2.5 text-white shadow-xl backdrop-blur-xl">
-              <button
-                type="button"
-                className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
-                onClick={() => {
-                  setCommunityActionsOpen(false);
-                  router.push('/friends');
-                }}
-              >
-                Add Friends
-              </button>
-              <button
-                type="button"
-                className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
-                onClick={() => {
-                  setCommunityActionsOpen(false);
-                  setCoachPickerOpen(true);
-                }}
-              >
-                Add Coaches
-              </button>
-            </div>
-          ) : null}
-        </div>,
-      )}
+  const renderProfileViewerPage = (surface: ProfileViewerState['surface']) => {
+    const embedded = surface === 'message-pane';
+    const viewerProfile = profileViewer.data?.profile;
+    const viewerPosts = profileViewer.data?.recent_posts || [];
+    const viewerHealth = profileViewer.data?.today_health;
 
-      <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="min-h-0 overflow-y-auto pr-1">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
-            <section className="rounded-[22px] border border-white/70 bg-white/55 p-4 shadow-[0_24px_60px_rgba(105,121,247,0.06)] backdrop-blur-xl sm:rounded-[30px] sm:p-5">
-              <div className="flex gap-3 sm:gap-4">
+    return (
+      <div
+        className={embedded
+          ? 'flex h-full min-h-0 flex-col'
+          : 'absolute inset-0 z-20 flex min-h-0 flex-col bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(255,255,255,0.98))] backdrop-blur-xl'}
+      >
+        <div className={`${embedded ? 'border-b border-slate-200/45 bg-white/22 px-3.5 py-2.5 sm:px-5 sm:py-3 md:px-6' : 'px-4 py-4 sm:px-6 sm:py-5'}`}>
+          <div className="mx-auto flex w-full max-w-4xl items-center gap-3">
+            <button
+              type="button"
+              className="flex size-9 shrink-0 items-center justify-center rounded-[14px] bg-white/82 text-slate-500 shadow-[0_10px_28px_rgba(15,23,42,0.06)] transition hover:bg-white sm:size-10"
+              onClick={closeProfileViewer}
+              aria-label="Back"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_back</span>
+            </button>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 sm:text-[11px]">Profile</p>
+              <h2 className="truncate text-[1.02rem] font-semibold text-slate-900 sm:text-[1.2rem]">
+                {profileViewer.type === 'coach'
+                  ? coachDisplayName(profileViewer.coachId || 'zj')
+                  : viewerProfile?.username || 'User'}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        <div className={`${embedded ? 'min-h-0 flex-1 overflow-y-auto px-3.5 py-4 sm:px-5 sm:py-5 md:px-6' : 'min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6 sm:pb-8'}`}>
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 sm:gap-6">
+            {profileViewer.loading ? (
+              <div className="rounded-[28px] bg-white/66 px-5 py-8 text-sm text-slate-500 shadow-[0_20px_48px_rgba(15,23,42,0.05)]">
+                Loading profile...
+              </div>
+            ) : null}
+
+            {!profileViewer.loading && profileViewer.type === 'coach' ? (
+              <section className="overflow-hidden rounded-[30px] bg-white/68 shadow-[0_24px_60px_rgba(15,23,42,0.07)]">
                 <div
-                  className="flex size-10 shrink-0 items-center justify-center rounded-full text-base font-semibold sm:size-12 sm:text-lg"
+                  className="px-5 py-10 sm:px-8"
                   style={{
-                    background: neutralTheme.accentBackground,
-                    color: neutralTheme.ink,
+                    background: `linear-gradient(135deg, ${coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').softBackground}, rgba(255,255,255,0.94))`,
                   }}
                 >
-                  {profileDraft.avatar_url || profile?.avatar_url || feed.find((post) => post.user_id === authUserId)?.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={resolveApiAssetUrl(
-                        profileDraft.avatar_url
-                        || profile?.avatar_url
-                        || feed.find((post) => post.user_id === authUserId)?.avatar_url
-                        || '',
-                      )}
-                      alt={authUsername || profile?.username || 'Your avatar'}
-                      className="h-full w-full rounded-full object-cover"
-                    />
-                  ) : (
-                    avatarInitial(authUsername || profile?.username || 'U')
-                  )}
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').ink }}>
+                    AI Coach
+                  </p>
+                  <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-slate-900">
+                    {coachDisplayName(profileViewer.coachId || 'zj')}
+                  </h3>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
+                    {coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').description}
+                  </p>
+                  <p className="mt-5 text-sm text-slate-500">
+                    Supports photo analysis, training feedback, profile planning, and progress guidance in the same conversation flow.
+                  </p>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <textarea
-                    className="min-h-[84px] w-full resize-none border-0 bg-transparent p-0 text-[14px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 sm:min-h-[110px] sm:text-base"
-                    value={postText}
-                    placeholder="What's on your mind?"
-                    onChange={(event) => setPostText(event.target.value)}
-                  />
-                  <div className="mt-3 flex flex-col gap-2.5 border-t border-slate-200/60 pt-3 sm:mt-4 sm:gap-3 sm:pt-4">
-                    <div className="flex flex-wrap items-center gap-2">
+              </section>
+            ) : null}
+
+            {!profileViewer.loading && profileViewer.type === 'user' && viewerProfile ? (
+              <>
+                <section className="overflow-hidden rounded-[32px] bg-white/72 shadow-[0_24px_60px_rgba(15,23,42,0.07)]">
+                  <div className="relative">
+                    {viewerProfile.background_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveApiAssetUrl(viewerProfile.background_url)}
+                        alt={`${viewerProfile.username} background`}
+                        className="h-[190px] w-full object-cover sm:h-[240px]"
+                      />
+                    ) : (
+                      <div className="h-[190px] w-full bg-[linear-gradient(135deg,rgba(241,245,249,0.92),rgba(226,232,240,0.66))] sm:h-[240px]" />
+                    )}
+
+                    <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.9))]" />
+                  </div>
+
+                  <div className="relative px-5 pb-5 sm:px-8 sm:pb-7">
+                    <div className="-mt-10 flex flex-col gap-4 sm:-mt-14 sm:flex-row sm:items-end sm:justify-between">
+                      <div className="flex min-w-0 items-end gap-4">
+                        {viewerProfile.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={resolveApiAssetUrl(viewerProfile.avatar_url)}
+                            alt={viewerProfile.username}
+                            className="size-20 rounded-[26px] object-cover shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:size-24 sm:rounded-[30px]"
+                          />
+                        ) : (
+                          <div
+                            className="grid size-20 place-items-center rounded-[26px] text-xl font-semibold text-white shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:size-24 sm:rounded-[30px] sm:text-2xl"
+                            style={{ background: neutralTheme.gradient }}
+                          >
+                            {avatarInitial(viewerProfile.username)}
+                          </div>
+                        )}
+
+                        <div className="min-w-0 pb-1">
+                          <h3 className="truncate text-[1.7rem] font-semibold tracking-tight text-slate-900 sm:text-[2.1rem]">
+                            {viewerProfile.username}
+                          </h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {viewerProfile.fitness_goal || viewerProfile.bio || 'No intro yet.'}
+                          </p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                            <span>User ID {viewerProfile.id}</span>
+                            <span>•</span>
+                            <span>{profileViewer.data?.isFriend ? 'Friend' : 'Community member'}</span>
+                            {viewerProfile.enabled_coaches?.length ? (
+                              <>
+                                <span>•</span>
+                                <span>{viewerProfile.enabled_coaches.length} coach chat{viewerProfile.enabled_coaches.length > 1 ? 's' : ''}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      {viewerProfile.id !== authUserId ? (
+                        <button
+                          className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                          type="button"
+                          onClick={() => {
+                            openAbuseReportDialog(
+                              'user',
+                              viewerProfile.id,
+                              'inappropriate_behavior',
+                              `Reported user ${viewerProfile.username} from profile viewer`,
+                            );
+                          }}
+                        >
+                          Report
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(240px,0.7fr)] sm:gap-4">
+                  <div className="rounded-[28px] bg-white/66 px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.05)] sm:px-6">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">About</p>
+                    <div className="mt-4 grid gap-4 text-sm leading-7 text-slate-600">
+                      <div>
+                        <p className="font-semibold text-slate-900">Bio</p>
+                        <p className="mt-1">{viewerProfile.bio || 'No bio yet.'}</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">Fitness goal</p>
+                        <p className="mt-1">{viewerProfile.fitness_goal || 'Not set.'}</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">Hobbies</p>
+                        <p className="mt-1">{viewerProfile.hobbies || 'Not set.'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[28px] bg-white/66 px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.05)] sm:px-6">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Today</p>
+                    <div className="mt-4 text-sm leading-7 text-slate-600">
+                      {viewerHealth ? (
+                        <>
+                          <p><span className="font-semibold text-slate-900">{viewerHealth.steps}</span> steps</p>
+                          <p><span className="font-semibold text-slate-900">{viewerHealth.calories_burned}</span> cal burned</p>
+                          <p><span className="font-semibold text-slate-900">{viewerHealth.active_minutes}</span> active minutes</p>
+                        </>
+                      ) : (
+                        <p>No synced health data today.</p>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-[28px] bg-white/66 px-5 py-5 shadow-[0_18px_42px_rgba(15,23,42,0.05)] sm:px-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Posts</p>
+                      <h4 className="mt-1 text-lg font-semibold text-slate-900">Recent public posts</h4>
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{viewerPosts.length}</span>
+                  </div>
+
+                  {viewerPosts.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">No public posts yet.</p>
+                  ) : (
+                    <div className="mt-4 grid gap-4">
+                      {viewerPosts.map((post) => (
+                        <article key={post.id} className="rounded-[24px] bg-white/82 px-4 py-4 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+                          {post.content ? (
+                            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{post.content}</p>
+                          ) : null}
+                          {post.media_urls.length > 0 ? (
+                            <div className="post-media-grid mt-3">
+                              {post.media_urls.map((url) => {
+                                const mediaUrl = resolveApiAssetUrl(url);
+                                if (!mediaUrl) return null;
+                                return (
+                                  <button
+                                    key={mediaUrl}
+                                    type="button"
+                                    className="post-media-item"
+                                    onClick={() => openMediaLightbox(mediaUrl, `${viewerProfile.username}'s post media`)}
+                                  >
+                                    {isVideoUrl(mediaUrl) ? (
+                                      <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
+                                    ) : (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={mediaUrl} alt="post media" style={{ width: '100%', maxHeight: 180, objectFit: 'cover' }} />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                          <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            {formatTime(post.created_at)} · {post.reaction_count} like{post.reaction_count === 1 ? '' : 's'}
+                          </p>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </>
+            ) : null}
+
+            {!profileViewer.loading && profileViewer.type === 'user' && !viewerProfile ? (
+              <div className="rounded-[28px] bg-white/66 px-5 py-8 text-sm text-slate-500 shadow-[0_20px_48px_rgba(15,23,42,0.05)]">
+                Profile unavailable.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCommunityPage = () => {
+    const hasPostDraft = postText.trim().length > 0 || postFiles.length > 0 || Boolean(postLocation);
+
+    return (
+      <div className="flex h-full flex-col">
+        {renderAppHeader(
+          'Community Feed',
+          '',
+          communityQuery,
+          setCommunityQuery,
+          'Search community posts...',
+          undefined,
+          <div className="flex items-center gap-2">
+            <div ref={communityNotificationsRef} className="relative">
+              <button
+                type="button"
+                className="relative flex size-8 items-center justify-center rounded-full bg-white/70 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition hover:bg-white sm:size-9"
+                onClick={() => setCommunityNotificationsOpen((prev) => !prev)}
+                title={communityNotificationsOpen ? 'Close notifications' : 'Open notifications'}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>notifications</span>
+                {unreadCommunityNotificationCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-[#ef4444] px-1 text-[9px] font-bold text-white">
+                    {Math.min(unreadCommunityNotificationCount, 9)}
+                  </span>
+                ) : null}
+              </button>
+              {communityNotificationsOpen ? (
+                <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex w-[320px] max-w-[calc(100vw-2rem)] flex-col gap-3 rounded-[22px] bg-white/96 p-3 shadow-[0_24px_60px_rgba(15,23,42,0.14)] backdrop-blur-xl">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Unread</p>
+                      <h3 className="text-sm font-semibold text-slate-900">Latest notifications</h3>
+                    </div>
+                    {unreadCommunityNotificationCount > 0 ? (
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-slate-500 transition hover:text-slate-900"
+                        onClick={() => void handleMarkAllCommunityNotificationsRead()}
+                      >
+                        Mark all read
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex max-h-[360px] flex-col gap-2 overflow-y-auto pr-1">
+                    {activityNotificationsLoading || mentionsLoading ? (
+                      <p className="text-sm text-slate-500">Loading notifications...</p>
+                    ) : null}
+                    {!activityNotificationsLoading && !mentionsLoading && prioritizedCommunityNotifications.length === 0 ? (
+                      <p className="text-sm leading-6 text-slate-500">No notifications yet. Mentions, messages, likes, and comments will land here.</p>
+                    ) : null}
+                    {prioritizedCommunityNotifications.slice(0, 10).map((notification) => (
+                      <button
+                        key={notification.key}
+                        type="button"
+                        className={`rounded-[18px] px-3 py-3 text-left transition ${
+                          notification.is_read ? 'bg-slate-50/70' : 'bg-slate-100'
+                        } hover:bg-slate-100`}
+                        onClick={() => void handleOpenCommunityNotification(notification)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 gap-2.5">
+                            <span className="material-symbols-outlined mt-0.5 text-slate-400" style={{ fontSize: 18 }}>
+                              {notification.icon}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-semibold text-slate-900 sm:text-sm">{notification.title}</p>
+                              <p className="mt-1 text-[12px] leading-5 text-slate-500">{notification.snippet}</p>
+                            </div>
+                          </div>
+                          {!notification.is_read ? (
+                            <span className="mt-1 inline-flex size-2.5 shrink-0 rounded-full bg-[#ef4444]" />
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-[11px] uppercase tracking-[0.14em] text-slate-400">{formatTime(notification.created_at)}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                className="flex size-8 items-center justify-center rounded-full bg-white/70 text-slate-600 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition hover:bg-white sm:size-9"
+                onClick={() => setCommunityActionsOpen((prev) => !prev)}
+                title={communityActionsOpen ? 'Close actions' : 'Open actions'}
+              >
+                <span
+                  className="material-symbols-outlined transition"
+                  style={{
+                    fontSize: 18,
+                    transform: communityActionsOpen ? 'rotate(45deg)' : 'rotate(0deg)',
+                  }}
+                >
+                  add
+                </span>
+              </button>
+              {communityActionsOpen ? (
+                <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[180px] flex-col gap-1.5 rounded-[18px] bg-[rgba(17,24,39,0.92)] p-2.5 text-white shadow-xl backdrop-blur-xl">
+                  <button
+                    type="button"
+                    className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
+                    onClick={() => {
+                      setCommunityActionsOpen(false);
+                      router.push('/friends');
+                    }}
+                  >
+                    Add Friends
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
+                    onClick={() => {
+                      setCommunityActionsOpen(false);
+                      setCoachPickerOpen(true);
+                    }}
+                  >
+                    Add Coaches
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>,
+        )}
+
+        {communityQuery.trim() ? (
+          <div className="px-3 pb-0 pt-3 sm:px-4 md:px-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-wrap gap-2">
+              {communitySearchSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-medium text-slate-600 transition hover:bg-slate-200 sm:text-[13px]"
+                  onClick={() => setCommunityQuery(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="min-h-0 overflow-y-auto pr-1">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
+              <section className="rounded-[24px] bg-white/62 p-4 shadow-[0_22px_54px_rgba(15,23,42,0.06)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                    <div
+                      className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-base font-semibold sm:size-12 sm:text-lg"
+                      style={{
+                        background: neutralTheme.accentBackground,
+                        color: neutralTheme.ink,
+                      }}
+                    >
+                      {profileDraft.avatar_url || profile?.avatar_url || feed.find((post) => post.user_id === authUserId)?.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={resolveApiAssetUrl(
+                            profileDraft.avatar_url
+                            || profile?.avatar_url
+                            || feed.find((post) => post.user_id === authUserId)?.avatar_url
+                            || '',
+                          )}
+                          alt={authUsername || profile?.username || 'Your avatar'}
+                          className="h-full w-full rounded-full object-cover"
+                        />
+                      ) : (
+                        avatarInitial(authUsername || profile?.username || 'U')
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{hasPostDraft ? 'Continue your draft' : 'Create something small'}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {hasPostDraft
+                          ? `${postText.trim() ? `${postText.trim().length} characters` : 'Draft ready'}${postFiles.length > 0 ? ` · ${postFiles.length} file(s)` : ''}`
+                          : 'Keep the feed open until you actually want to post.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white shadow-[0_14px_30px_rgba(15,23,42,0.14)] transition hover:scale-[1.02]"
+                    onClick={() => setCommunityComposerOpen((prev) => !prev)}
+                    aria-label={communityComposerOpen ? 'Collapse composer' : 'Open composer'}
+                  >
+                    <span
+                      className="material-symbols-outlined transition"
+                      style={{ fontSize: 22, transform: communityComposerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
+                    >
+                      add
+                    </span>
+                  </button>
+                </div>
+
+                {communityComposerOpen ? (
+                  <div className="mt-4 border-t border-slate-200/55 pt-4">
+                    <textarea
+                      className="min-h-[88px] w-full resize-none rounded-[20px] bg-slate-50/80 px-4 py-3 text-[14px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 sm:text-base"
+                      value={postText}
+                      placeholder="What's on your mind?"
+                      onChange={(event) => setPostText(event.target.value)}
+                    />
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2.5">
                       <label
-                        className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-[13px] font-medium transition sm:px-4 sm:py-2 sm:text-sm"
-                        style={{
-                          background: neutralTheme.accentBackground,
-                          color: neutralTheme.ink,
-                        }}
+                        className="flex cursor-pointer items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
                       >
                         <span className="material-symbols-outlined text-base sm:text-lg">image</span>
                         Add media
                         <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
                       </label>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => {
+                          const nextTag = composerHashtagSuggestions[0];
+                          if (nextTag) {
+                            setPostText((prev) => appendHashtagToDraft(prev, nextTag));
+                          }
+                        }}
+                      >
+                        <span className="text-sm font-bold">#</span>
+                        Suggest hashtag
+                      </button>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => openLocationPicker('post')}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>near_me</span>
+                        {postLocation ? 'Edit location' : 'Add location'}
+                      </button>
                       <span className="text-xs text-slate-500">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
                       {postFiles.length > 0 ? (
                         <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} type="button" onClick={() => setPostFiles([])}>
@@ -3648,14 +4780,42 @@ export default function AppPage() {
                         </button>
                       ) : null}
                     </div>
-                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+
+                    {composerHashtagSuggestions.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {composerHashtagSuggestions.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            className="rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition hover:bg-slate-50 sm:text-[13px]"
+                            onClick={() => setPostText((prev) => appendHashtagToDraft(prev, tag))}
+                          >
+                            #{tag}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {postLocation ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 shadow-[0_8px_18px_rgba(15,23,42,0.06)]">
+                          <span className="material-symbols-outlined" style={{ fontSize: 15 }}>place</span>
+                          {postLocation.label}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[12px] font-semibold text-slate-400 transition hover:text-slate-700"
+                          onClick={() => setPostLocation(null)}
+                        >
+                          Clear location
+                        </button>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
                       <label className="relative flex w-full min-w-0 items-center sm:min-w-[170px] sm:w-auto">
                         <select
-                          className="w-full appearance-none rounded-full border border-white/70 bg-white/80 px-4 py-2 pr-10 text-[13px] font-medium text-slate-700 outline-none transition sm:py-2.5 sm:text-sm"
-                          style={{
-                            borderColor: selectedCoachTheme.borderColor,
-                            color: selectedCoachTheme.ink,
-                          }}
+                          className="w-full appearance-none rounded-full border border-transparent bg-slate-100/90 px-4 py-2 pr-10 text-[13px] font-medium text-slate-700 outline-none transition sm:py-2.5 sm:text-sm"
                           value={postVisibility}
                           onChange={(event) => setPostVisibility(event.target.value as 'public' | 'friends')}
                           aria-label="Post visibility"
@@ -3670,251 +4830,570 @@ export default function AppPage() {
                           expand_more
                         </span>
                       </label>
-                      <button className={`${selectedCoachButtonClass} self-start sm:self-auto`} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
-                        {postPending ? 'Posting...' : 'Post'}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => setCommunityComposerOpen(false)}
+                        >
+                          Collapse
+                        </button>
+                        <button className={`${selectedCoachButtonClass} self-start sm:self-auto`} disabled={postPending || !isOnline} onClick={() => void handleCreatePost()}>
+                          {postPending ? 'Posting...' : 'Post'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <MediaPreviewGrid
+                      items={postFilePreviews}
+                      onRemove={(index) => removeAttachmentAt(index, setPostFiles)}
+                      wrapperClassName="media-grid-preview"
+                      itemClassName="media-thumb"
+                    />
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="xl:hidden rounded-[22px] bg-white/44 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Nearby</p>
+                    <h3 className="mt-1 text-base font-semibold text-slate-900">People around you</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-500">
+                      {sharedLocation
+                        ? `Using ${sharedLocation.label} for nearby discovery.`
+                        : 'Turn on location sharing to discover nearby members.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                    onClick={() => openLocationPicker('nearby')}
+                  >
+                    {sharedLocation ? 'Update' : 'Enable'}
+                  </button>
+                </div>
+                {sharedLocationLoading || nearbyUsersLoading ? (
+                  <p className="mt-3 text-sm text-slate-500">Loading nearby members...</p>
+                ) : null}
+                {!sharedLocationLoading && !nearbyUsersLoading && sharedLocation && nearbyUsers.length > 0 ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {nearbyUsers.slice(0, 4).map((user) => (
+                      <button
+                        key={`nearby-mobile-${user.id}`}
+                        type="button"
+                        className="flex items-center justify-between rounded-[18px] bg-white/72 px-3 py-2.5 text-left transition hover:bg-white"
+                        onClick={() => void openPublicProfile(user.id)}
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{user.username}</p>
+                          <p className="text-xs text-slate-500">{user.location_city}</p>
+                        </div>
+                        <span className="text-xs font-semibold text-slate-400">{formatDistanceKm(user.distance_km)}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              {feedLoading ? (
+                <section className="rounded-[22px] bg-white/45 p-4 backdrop-blur-xl sm:rounded-[30px] sm:p-5">
+                  <div className="feed-skeleton" />
+                  <div className="feed-skeleton" />
+                </section>
+              ) : null}
+
+              {filteredFeed.map((post) => {
+                const postHashtags = extractHashtagsFromText(post.content);
+                const postLocationLabel = feedLocationLabel(post);
+                return (
+                  <article key={post.id} className="rounded-[24px] bg-white/42 p-4 backdrop-blur-xl transition hover:bg-white/56 sm:rounded-[30px] sm:p-5">
+                    <header className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        className="flex min-w-0 items-center gap-3 text-left transition hover:opacity-90"
+                        onClick={() => void openPublicProfile(post.user_id)}
+                        aria-label={`Open ${post.username} profile`}
+                      >
+                        <div
+                          className="flex size-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold sm:size-11"
+                          style={{
+                            background: neutralTheme.accentBackground,
+                            color: neutralTheme.ink,
+                          }}
+                        >
+                          {post.avatar_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={resolveApiAssetUrl(post.avatar_url)}
+                              alt={post.username}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          ) : (
+                            avatarInitial(post.username)
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="truncate text-[13px] text-slate-900 sm:text-sm">{post.username}</strong>
+                            <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
+                            {postLocationLabel ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                                <span className="material-symbols-outlined" style={{ fontSize: 13 }}>place</span>
+                                {postLocationLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </button>
+                      <div className="relative" ref={postMenuOpenId === post.id ? postMenuRef : null}>
+                        <button
+                          className="rounded-full p-1 text-slate-400 transition hover:bg-white/70 hover:text-slate-600"
+                          type="button"
+                          aria-label="Open post actions"
+                          onClick={() => setPostMenuOpenId((current) => (current === post.id ? null : post.id))}
+                        >
+                          <span className="material-symbols-outlined">more_horiz</span>
+                        </button>
+                        {postMenuOpenId === post.id ? (
+                          <div className="absolute right-0 top-[calc(100%+10px)] z-20 min-w-[220px] rounded-[22px] bg-white/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
+                            {post.user_id === authUserId ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                                  onClick={() => openPostVisibilityDialog(post)}
+                                >
+                                  <span>Change scope</span>
+                                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    {post.visibility === 'public' ? 'To friends' : 'To public'}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-[color:var(--danger)] transition hover:bg-[rgba(239,68,68,0.06)]"
+                                  onClick={() => openPostDeleteDialog(post)}
+                                >
+                                  <span>Delete</span>
+                                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                                </button>
+                              </>
+                            ) : (
+                              <div className="px-3 py-2 text-sm leading-6 text-slate-500">
+                                Only the author can change scope or delete this post.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    </header>
+
+                    {post.content ? (
+                      <>
+                        <p className="mt-3 whitespace-pre-wrap text-[13px] leading-6 text-slate-700 sm:mt-4 sm:text-sm sm:leading-7">
+                          {expandedPostIds.includes(post.id) || post.content.length <= 180
+                            ? post.content
+                            : `${post.content.slice(0, 180)}...`}
+                        </p>
+                        {postHashtags.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {postHashtags.map((tag) => (
+                              <button
+                                key={`${post.id}-${tag}`}
+                                type="button"
+                                className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600 transition hover:bg-slate-200"
+                                onClick={() => setCommunityQuery(`#${tag}`)}
+                              >
+                                #{tag}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        {post.content.length > 180 ? (
+                          <button className="mt-2 text-[13px] font-semibold sm:text-sm" style={{ color: selectedCoachTheme.ink }} onClick={() => togglePostExpanded(post.id)}>
+                            {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+
+                    {post.media_urls?.length > 0 ? (
+                      <div className="mt-3 grid gap-2.5 sm:mt-4 sm:gap-3 md:grid-cols-2">
+                        {post.media_urls.map((url) => {
+                          const mediaUrl = resolveApiAssetUrl(url);
+                          if (!mediaUrl) return null;
+                          return (
+                            <button
+                              key={mediaUrl}
+                              type="button"
+                              className="overflow-hidden rounded-[18px] bg-white/60 shadow-[0_14px_30px_rgba(15,23,42,0.06)] sm:rounded-[22px]"
+                              onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
+                            >
+                              {isVideoUrl(mediaUrl) ? (
+                                <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 220 }} />
+                              ) : (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
+                      <button
+                        className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => void handleReact(post.id)}
+                      >
+                        Like {post.reaction_count || 0}
+                      </button>
+                      <button
+                        className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => void togglePostComments(post.id)}
+                      >
+                        Comments {post.comment_count || 0}
+                      </button>
+                      <button
+                        className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => togglePostExpanded(post.id)}
+                      >
+                        {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
+                      </button>
+                      <button
+                        className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
+                        onClick={() => openAbuseReportDialog('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
+                      >
+                        Report
                       </button>
                     </div>
-                  </div>
-                </div>
-              </div>
 
-              <MediaPreviewGrid
-                items={postFilePreviews}
-                onRemove={(index) => removeAttachmentAt(index, setPostFiles)}
-                wrapperClassName="media-grid-preview"
-                itemClassName="media-thumb"
-              />
+                    {expandedCommentPostIds.includes(post.id) ? (
+                      <section className="mt-3 rounded-[18px] bg-white/62 p-3 sm:mt-4 sm:rounded-[22px] sm:p-4">
+                        <div className="space-y-3">
+                          {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
+                          {(postCommentsById[post.id] || []).map((comment) => (
+                            <article key={comment.id} className="rounded-[18px] bg-white/86 px-3 py-2.5 sm:rounded-2xl sm:px-4 sm:py-3">
+                              <div className="flex items-start gap-3">
+                                <button
+                                  type="button"
+                                  className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold transition hover:opacity-90 sm:size-9"
+                                  style={{
+                                    background: neutralTheme.accentBackground,
+                                    color: neutralTheme.ink,
+                                  }}
+                                  onClick={() => void openPublicProfile(comment.user_id)}
+                                  aria-label={`Open ${comment.username} profile`}
+                                >
+                                  {comment.avatar_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={resolveApiAssetUrl(comment.avatar_url)}
+                                      alt={comment.username}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    />
+                                  ) : (
+                                    avatarInitial(comment.username)
+                                  )}
+                                </button>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                                    <button
+                                      type="button"
+                                      className="truncate text-left text-[13px] font-semibold text-slate-700 transition hover:text-slate-900 sm:text-sm"
+                                      onClick={() => void openPublicProfile(comment.user_id)}
+                                    >
+                                      {comment.username}
+                                    </button>
+                                    <span>{formatTime(comment.created_at)}</span>
+                                  </div>
+                                  <p className="mt-1.5 text-[13px] leading-5 text-slate-600 sm:mt-2 sm:text-sm">{comment.content}</p>
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                          {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
+                            <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 flex flex-col gap-2.5 sm:mt-4 md:flex-row">
+                          <input
+                            className="input-shell text-[14px]"
+                            placeholder="Write a comment..."
+                            value={commentDraftByPostId[post.id] || ''}
+                            onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void handleCreatePostComment(post.id);
+                              }
+                            }}
+                          />
+                          <button
+                            className={`${selectedCoachButtonClass} self-start md:self-auto`}
+                            type="button"
+                            disabled={commentPendingPostId === post.id}
+                            onClick={() => void handleCreatePostComment(post.id)}
+                          >
+                            {commentPendingPostId === post.id ? 'Posting...' : 'Reply'}
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
+                  </article>
+                );
+              })}
+
+              {!feedLoading && filteredFeed.length === 0 ? (
+                <div className="rounded-[22px] bg-slate-100/70 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
+                  No community posts matched your search.
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
+            <section className="rounded-[24px] bg-white/58 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trending</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">Real hashtags from the feed</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Tap one to filter the community with actual tags people are already using.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {trendingHashtags.length > 0 ? trendingHashtags.map((item) => (
+                  <button
+                    key={item.tag}
+                    type="button"
+                    className="rounded-full bg-slate-100 px-3 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                    onClick={() => setCommunityQuery(`#${item.tag}`)}
+                  >
+                    #{item.tag} <span className="ml-1 text-slate-400">{item.count}</span>
+                  </button>
+                )) : (
+                  <p className="text-sm text-slate-500">No hashtags have been posted yet.</p>
+                )}
+              </div>
             </section>
 
-            {feedLoading ? (
-              <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[30px] sm:p-5">
-                <div className="feed-skeleton" />
-                <div className="feed-skeleton" />
-              </section>
-            ) : null}
+            <section className="rounded-[24px] bg-white/52 p-4 backdrop-blur-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Nearby</p>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">People around you</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                    {sharedLocation
+                      ? `Discover members near ${sharedLocation.label}.`
+                      : 'Share a location to discover nearby members without making the page feel crowded.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                  onClick={() => openLocationPicker('nearby')}
+                >
+                  {sharedLocation ? 'Update' : 'Enable'}
+                </button>
+              </div>
 
-            {filteredFeed.map((post) => (
-              <article key={post.id} className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl transition hover:bg-white/55 sm:rounded-[30px] sm:p-5">
-                <header className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="flex size-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold sm:size-11"
-                      style={{
-                        background: neutralTheme.accentBackground,
-                        color: neutralTheme.ink,
-                      }}
-                    >
-                      {post.avatar_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={resolveApiAssetUrl(post.avatar_url)}
-                          alt={post.username}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        avatarInitial(post.username)
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <strong className="text-[13px] text-slate-900 sm:text-sm">{post.username}</strong>
-                        <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
-                      </div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.18em]" style={{ color: selectedCoachTheme.ink }}>{post.type}</p>
-                    </div>
-                  </div>
-                  <div className="relative" ref={postMenuOpenId === post.id ? postMenuRef : null}>
-                    <button
-                      className="rounded-full p-1 text-slate-400 transition hover:bg-white/70 hover:text-slate-600"
-                      type="button"
-                      aria-label="Open post actions"
-                      onClick={() => setPostMenuOpenId((current) => (current === post.id ? null : post.id))}
-                    >
-                      <span className="material-symbols-outlined">more_horiz</span>
-                    </button>
-                    {postMenuOpenId === post.id ? (
-                      <div className="absolute right-0 top-[calc(100%+10px)] z-20 min-w-[220px] rounded-[22px] border border-white/80 bg-white/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
-                        {post.user_id === authUserId ? (
-                          <>
-                            <button
-                              type="button"
-                              className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                              onClick={() => openPostVisibilityDialog(post)}
-                            >
-                              <span>Change scope</span>
-                              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                {post.visibility === 'public' ? 'To friends' : 'To public'}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-sm text-[color:var(--danger)] transition hover:bg-[rgba(239,68,68,0.06)]"
-                              onClick={() => openPostDeleteDialog(post)}
-                            >
-                              <span>Delete</span>
-                              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
-                            </button>
-                          </>
-                        ) : (
-                          <div className="px-3 py-2 text-sm leading-6 text-slate-500">
-                            Only the author can change scope or delete this post.
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                </header>
-
-                {post.content ? (
-                  <>
-                    <p className="mt-3 whitespace-pre-wrap text-[13px] leading-6 text-slate-700 sm:mt-4 sm:text-sm sm:leading-7">
-                      {expandedPostIds.includes(post.id) || post.content.length <= 180
-                        ? post.content
-                        : `${post.content.slice(0, 180)}...`}
+              {sharedLocation ? (
+                <div className="mt-3 flex items-center justify-between rounded-[18px] bg-white/74 px-3 py-2.5">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{sharedLocation.label}</p>
+                    <p className="text-xs text-slate-500">
+                      {sharedLocation.precision === 'city' ? 'City-level sharing' : 'Precise sharing'}
                     </p>
-                    {post.content.length > 180 ? (
-                      <button className="mt-2 text-[13px] font-semibold sm:text-sm" style={{ color: selectedCoachTheme.ink }} onClick={() => togglePostExpanded(post.id)}>
-                        {expandedPostIds.includes(post.id) ? 'Collapse' : 'Read more'}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {post.media_urls?.length > 0 ? (
-                  <div className="mt-3 grid gap-2.5 sm:mt-4 sm:gap-3 md:grid-cols-2">
-                    {post.media_urls.map((url) => {
-                      const mediaUrl = resolveApiAssetUrl(url);
-                      if (!mediaUrl) return null;
-                      return (
-                        <button
-                          key={mediaUrl}
-                          type="button"
-                          className="overflow-hidden rounded-[18px] border border-white/70 bg-white/40 sm:rounded-[22px]"
-                          onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
-                        >
-                          {isVideoUrl(mediaUrl) ? (
-                            <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 220 }} />
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={mediaUrl} alt="feed media" style={{ width: '100%', maxHeight: 220, objectFit: 'cover' }} />
-                          )}
-                        </button>
-                      );
-                    })}
                   </div>
-                ) : null}
-
-                <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
                   <button
-                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
-                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
-                    onClick={() => void handleReact(post.id)}
+                    type="button"
+                    className="text-[12px] font-semibold text-slate-400 transition hover:text-slate-700"
+                    onClick={() => openLocationPicker('nearby')}
                   >
-                    Like {post.reaction_count || 0}
-                  </button>
-                  <button
-                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
-                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
-                    onClick={() => void togglePostComments(post.id)}
-                  >
-                    Comments {post.comment_count || 0}
-                  </button>
-                  <button
-                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
-                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
-                    onClick={() => togglePostExpanded(post.id)}
-                  >
-                    {expandedPostIds.includes(post.id) ? 'Hide detail' : 'Detail'}
-                  </button>
-                  <button
-                    className="rounded-full bg-white/70 px-3 py-1.5 text-[13px] text-slate-600 transition sm:px-4 sm:py-2 sm:text-sm"
-                    style={{ border: `1px solid ${selectedCoachTheme.borderColor}` }}
-                    onClick={() => openAbuseReportDialog('post', post.id, 'spam_or_harassment', `Reported from feed post #${post.id}`)}
-                  >
-                    Report
+                    Edit
                   </button>
                 </div>
+              ) : null}
 
-                {expandedCommentPostIds.includes(post.id) ? (
-                  <section className="mt-3 rounded-[18px] border border-white/70 bg-white/55 p-3 sm:mt-4 sm:rounded-[22px] sm:p-4">
-                    <div className="space-y-3">
-                      {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
-                      {(postCommentsById[post.id] || []).map((comment) => (
-                        <article key={comment.id} className="rounded-[18px] border border-slate-200/70 bg-white/80 px-3 py-2.5 sm:rounded-2xl sm:px-4 sm:py-3">
-                          <div className="flex items-start gap-3">
-                            <div
-                              className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[13px] font-semibold sm:size-9"
-                              style={{
-                                background: neutralTheme.accentBackground,
-                                color: neutralTheme.ink,
-                              }}
-                            >
-                              {comment.avatar_url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={resolveApiAssetUrl(comment.avatar_url)}
-                                  alt={comment.username}
-                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                />
-                              ) : (
-                                avatarInitial(comment.username)
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                                <strong className="text-[13px] text-slate-700 sm:text-sm">{comment.username}</strong>
-                                <span>{formatTime(comment.created_at)}</span>
-                              </div>
-                              <p className="mt-1.5 text-[13px] leading-5 text-slate-600 sm:mt-2 sm:text-sm">{comment.content}</p>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                      {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
-                        <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
-                      ) : null}
-                    </div>
+              {sharedLocationLoading || nearbyUsersLoading ? (
+                <p className="mt-4 text-sm text-slate-500">Loading nearby members...</p>
+              ) : null}
 
-                    <div className="mt-3 flex flex-col gap-2.5 sm:mt-4 md:flex-row">
-                      <input
-                        className="input-shell text-[14px]"
-                        placeholder="Write a comment..."
-                        value={commentDraftByPostId[post.id] || ''}
-                        onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            void handleCreatePostComment(post.id);
-                          }
-                        }}
-                      />
-                      <button
-                        className={`${selectedCoachButtonClass} self-start md:self-auto`}
-                        type="button"
-                        disabled={commentPendingPostId === post.id}
-                        onClick={() => void handleCreatePostComment(post.id)}
-                      >
-                        {commentPendingPostId === post.id ? 'Posting...' : 'Reply'}
-                      </button>
-                    </div>
-                  </section>
-                ) : null}
-              </article>
-            ))}
+              {!sharedLocationLoading && !nearbyUsersLoading && sharedLocation && nearbyUsers.length === 0 ? (
+                <p className="mt-4 text-sm leading-6 text-slate-500">No one nearby yet. Keep sharing your city and this list will populate as the local community grows.</p>
+              ) : null}
 
-            {!feedLoading && filteredFeed.length === 0 ? (
-              <div className="rounded-[22px] border border-dashed border-slate-300/80 bg-white/25 p-4 text-[13px] text-slate-500 sm:rounded-[28px] sm:p-5 sm:text-sm">
-                No community posts matched your search.
+              {!sharedLocationLoading && !nearbyUsersLoading && nearbyUsers.length > 0 ? (
+                <div className="mt-4 flex flex-col gap-2.5">
+                  {nearbyUsers.slice(0, 6).map((user) => (
+                    <button
+                      key={`nearby-${user.id}`}
+                      type="button"
+                      className="flex items-center justify-between rounded-[18px] bg-white/74 px-3 py-3 text-left transition hover:bg-white"
+                      onClick={() => void openPublicProfile(user.id)}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{user.username}</p>
+                        <p className="truncate text-xs text-slate-500">{user.location_city}</p>
+                      </div>
+                      <span className="shrink-0 text-xs font-semibold text-slate-400">{formatDistanceKm(user.distance_km)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <section className="rounded-[24px] bg-white/52 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.04)] backdrop-blur-xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Search prompts</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">Prompted discovery</h3>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {communitySearchSuggestions.slice(0, 6).map((suggestion) => (
+                  <button
+                    key={`sidebar-${suggestion}`}
+                    type="button"
+                    className="rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition hover:bg-slate-50"
+                    onClick={() => setCommunityQuery(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
               </div>
-            ) : null}
-          </div>
-        </section>
+            </section>
+          </aside>
+        </div>
 
-        <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
-        </aside>
+        {locationPickerOpen ? (
+          <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(15,23,42,0.18)] p-3 backdrop-blur-[2px] sm:items-center sm:p-6">
+            <div className="w-full max-w-lg rounded-[28px] bg-white/96 p-4 shadow-[0_28px_80px_rgba(15,23,42,0.18)] backdrop-blur-xl sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    {locationPickerMode === 'nearby' ? 'Nearby users' : 'Post location'}
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">
+                    {locationPickerMode === 'nearby' ? 'Choose a shared location' : 'Attach a location'}
+                  </h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    {locationPickerMode === 'nearby'
+                      ? 'Use your city or a more precise area so the nearby people rail stays useful without feeling noisy.'
+                      : 'Pick a location for this post. You can also sync it to nearby discovery.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex size-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                  onClick={closeLocationPicker}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-full bg-slate-100 px-3 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                  disabled={locationPickerPending}
+                  onClick={() => void handleUseBrowserLocation('city')}
+                >
+                  Use current city
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full bg-slate-100 px-3 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                  disabled={locationPickerPending}
+                  onClick={() => void handleUseBrowserLocation('precise')}
+                >
+                  Use precise location
+                </button>
+                {sharedLocation ? (
+                  <button
+                    type="button"
+                    className="rounded-full bg-slate-100 px-3 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-200"
+                    disabled={locationPickerPending}
+                    onClick={() => void applyLocationSelection(sharedLocation)}
+                  >
+                    Use saved: {sharedLocation.label}
+                  </button>
+                ) : null}
+              </div>
+
+              {locationPickerMode === 'post' ? (
+                <label className="mt-4 flex items-center gap-3 rounded-[18px] bg-slate-50/90 px-3 py-3 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={locationShareEnabled}
+                    onChange={(event) => setLocationShareEnabled(event.target.checked)}
+                  />
+                  Also use this location for nearby discovery
+                </label>
+              ) : null}
+
+              <label className="relative mt-4 block">
+                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
+                <input
+                  className="w-full rounded-full bg-slate-100/90 py-2.5 pl-9 pr-4 text-sm text-slate-700 outline-none transition focus:bg-white"
+                  value={locationSearchQuery}
+                  onChange={(event) => setLocationSearchQuery(event.target.value)}
+                  placeholder="Search city, neighborhood, or gym area"
+                />
+              </label>
+
+              <div className="mt-4 flex max-h-[280px] flex-col gap-2 overflow-y-auto pr-1">
+                {locationSearchLoading ? <p className="text-sm text-slate-500">Searching locations...</p> : null}
+                {!locationSearchLoading && locationSearchQuery.trim().length >= 2 && locationSearchResults.length === 0 ? (
+                  <p className="text-sm text-slate-500">No matching locations yet. Try a broader city name.</p>
+                ) : null}
+                {!locationSearchLoading && locationSearchQuery.trim().length < 2 && locationPickerMode === 'nearby' && sharedLocation ? (
+                  <p className="text-sm text-slate-500">Your saved location is ready. Search if you want to switch places.</p>
+                ) : null}
+                {locationSearchResults.map((result) => (
+                  <button
+                    key={`${result.label}-${result.latitude}-${result.longitude}`}
+                    type="button"
+                    className="rounded-[18px] bg-slate-50/90 px-3 py-3 text-left transition hover:bg-slate-100"
+                    disabled={locationPickerPending}
+                    onClick={() => void applyLocationSelection(result)}
+                  >
+                    <p className="text-sm font-semibold text-slate-900">{result.label}</p>
+                    <p className="mt-1 text-xs text-slate-500">{result.city} · {result.precision === 'city' ? 'City-level' : 'Precise'}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                {locationPickerMode === 'nearby' && sharedLocation ? (
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-slate-400 transition hover:text-slate-700"
+                    disabled={locationPickerPending}
+                    onClick={() => void handleDisableNearbySharing()}
+                  >
+                    Turn off nearby discovery
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400">
+                    {locationPickerPending ? 'Saving location...' : 'Choose a result to continue.'}
+                  </span>
+                )}
+                {locationPickerMode === 'post' && postLocation ? (
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-slate-400 transition hover:text-slate-700"
+                    onClick={() => {
+                      setPostLocation(null);
+                      closeLocationPicker();
+                    }}
+                  >
+                    Remove post location
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderCalendarPage = () => (
     <div className="flex h-full flex-col">
@@ -3928,7 +5407,7 @@ export default function AppPage() {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden p-4 md:p-6">
-        <section className="min-h-0 flex-1 overflow-hidden rounded-[32px] border border-white/70 bg-white/45 backdrop-blur-xl">
+        <section className="min-h-0 flex-1 overflow-hidden rounded-[32px] bg-white/38 backdrop-blur-xl">
           <CoachCalendarPanel
             userId={authUserId}
             active={ready && authUserId > 0}
@@ -3949,8 +5428,8 @@ export default function AppPage() {
       </header>
 
       <div className="flex flex-col gap-3 p-3 sm:gap-6 sm:p-4 md:p-6">
-        <section className="rounded-[24px] border border-white/70 bg-white/50 p-4 backdrop-blur-xl sm:rounded-[32px] sm:p-5 md:p-8">
-          <div className="mb-5 overflow-hidden rounded-[22px] border border-white/70 bg-white/60 sm:mb-8 sm:rounded-[28px]">
+        <section className="rounded-[24px] bg-white/42 p-4 backdrop-blur-xl sm:rounded-[32px] sm:p-5 md:p-8">
+          <div className="mb-5 overflow-hidden rounded-[22px] bg-white/58 sm:mb-8 sm:rounded-[28px]">
             {profileDraft.background_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -4023,15 +5502,15 @@ export default function AppPage() {
               </div>
 
               <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3 sm:grid-cols-3">
-                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
+                <article className="rounded-[18px] bg-white/72 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Bio</label>
                   <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.bio || 'Not set'}</p>
                 </article>
-                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
+                <article className="rounded-[18px] bg-white/72 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Fitness Goal</label>
                   <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.fitness_goal || 'Not set'}</p>
                 </article>
-                <article className="rounded-[18px] border border-white/70 bg-white/70 p-3 sm:rounded-2xl sm:p-4">
+                <article className="rounded-[18px] bg-white/72 p-3 sm:rounded-2xl sm:p-4">
                   <label className="text-xs font-semibold text-slate-500">Hobbies</label>
                   <p className="mt-1.5 text-[13px] text-slate-800 sm:mt-2 sm:text-sm">{profile?.hobbies || 'Not set'}</p>
                 </article>
@@ -4041,7 +5520,7 @@ export default function AppPage() {
         </section>
 
         <div className="grid gap-3 sm:gap-6 lg:grid-cols-2">
-          <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+          <section className="rounded-[22px] bg-white/38 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
             <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Edit Profile</h2>
             <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Changes sync to iOS and web for the same account.</p>
             <div className="mt-4 grid gap-2.5 sm:mt-5 sm:gap-3">
@@ -4069,7 +5548,7 @@ export default function AppPage() {
               </div>
             </section>
 
-          <section className="rounded-[22px] border border-white/70 bg-white/45 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+          <section className="rounded-[22px] bg-white/38 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
             <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Coach Chats</h2>
             <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Enable or open coaches from the Community `+` menu. Each coach keeps a separate conversation history.</p>
             <div className="mt-4 flex flex-wrap gap-2.5 sm:mt-5">
@@ -4095,6 +5574,51 @@ export default function AppPage() {
             </div>
           </section>
         </div>
+
+        <section className="rounded-[22px] bg-white/52 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+          <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Notification Settings</h2>
+          <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Set account-wide defaults here. Chat-level mute is available from the three-dot menu inside each conversation.</p>
+          <div className="mt-4 grid gap-3 sm:mt-5">
+            <div className="flex items-center justify-between gap-4 rounded-[20px] bg-slate-50/85 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Messages</p>
+                <p className="mt-1 text-xs text-slate-500">Notify for direct, coach, and group messages by default.</p>
+              </div>
+              <button
+                type="button"
+                className={`inline-flex items-center rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+                  notificationPreferences.messageNotificationsEnabled ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'
+                }`}
+                disabled={notificationPreferencesPending}
+                onClick={() => void handleUpdateNotificationPreferences({
+                  messageNotificationsEnabled: !notificationPreferences.messageNotificationsEnabled,
+                })}
+              >
+                {notificationPreferencesPending ? 'Saving' : notificationPreferences.messageNotificationsEnabled ? 'Notify' : 'Muted'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-[20px] bg-slate-50/85 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Posts</p>
+                <p className="mt-1 text-xs text-slate-500">Control likes and comments on your community posts.</p>
+              </div>
+              <button
+                type="button"
+                className={`inline-flex items-center rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+                  notificationPreferences.postNotificationsEnabled ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'
+                }`}
+                disabled={notificationPreferencesPending}
+                onClick={() => void handleUpdateNotificationPreferences({
+                  postNotificationsEnabled: !notificationPreferences.postNotificationsEnabled,
+                })}
+              >
+                {notificationPreferencesPending ? 'Saving' : notificationPreferences.postNotificationsEnabled ? 'Notify' : 'Muted'}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="rounded-[22px] border border-[rgba(239,68,68,0.18)] bg-white/55 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -4218,6 +5742,7 @@ export default function AppPage() {
             {activeTab === 'community' ? renderCommunityPage() : null}
             {activeTab === 'calendar' ? renderCalendarPage() : null}
             {activeTab === 'profile' ? renderProfilePage() : null}
+            {profileViewer.open && profileViewer.surface === 'content-page' ? renderProfileViewerPage('content-page') : null}
         </section>
 
         <nav className="mobile-bottom-nav md:hidden" aria-label="Primary">
@@ -4306,175 +5831,6 @@ export default function AppPage() {
                 );
               })}
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {profileViewer.open ? (
-        <div
-          className="zym-fade profile-viewer-overlay"
-          onClick={() => setProfileViewer((prev) => ({ ...prev, open: false }))}
-        >
-          <div className="surface-card profile-viewer-modal" onClick={(event) => event.stopPropagation()}>
-            <header className="profile-viewer-header">
-              <h3 style={{ fontSize: 24 }}>
-                {profileViewer.type === 'coach' ? coachDisplayName(profileViewer.coachId || 'zj') : 'Profile'}
-              </h3>
-              <button
-                className="btn btn-ghost"
-                type="button"
-                onClick={() => setProfileViewer((prev) => ({ ...prev, open: false }))}
-              >
-                Close
-              </button>
-            </header>
-
-            {profileViewer.loading ? (
-              <p className="entity-sub" style={{ marginTop: 16 }}>Loading profile...</p>
-            ) : null}
-
-            {!profileViewer.loading && profileViewer.type === 'coach' ? (
-              <section className="profile-viewer-section">
-                <div
-                  className="flow-card flow-card-soft form-grid"
-                  style={{
-                    background: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').softBackground,
-                    borderColor: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').borderColor,
-                  }}
-                >
-                  <strong style={{ fontSize: 18 }}>{coachDisplayName(profileViewer.coachId || 'zj')}</strong>
-                  <p style={{ color: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').ink, lineHeight: 1.5 }}>
-                    {coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').description}
-                  </p>
-                  <p style={{ color: 'var(--ink-500)', fontSize: 13 }}>
-                    Supports: nutrition photo analysis, training feedback, profile planning, and progress guidance.
-                  </p>
-                </div>
-              </section>
-            ) : null}
-
-            {!profileViewer.loading && profileViewer.type === 'user' && profileViewer.data ? (
-              <section className="profile-viewer-section">
-                <div className="profile-viewer-hero">
-                  {profileViewer.data.profile.background_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={resolveApiAssetUrl(profileViewer.data.profile.background_url)} alt="background" style={{ width: '100%', height: 170, objectFit: 'cover' }} />
-                  ) : (
-                    <div style={{ width: '100%', height: 170, background: 'linear-gradient(120deg, rgba(242,138,58,0.16), rgba(108,124,246,0.18))' }} />
-                  )}
-                </div>
-
-                <div className="profile-viewer-userline">
-                  {profileViewer.data.profile.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={resolveApiAssetUrl(profileViewer.data.profile.avatar_url)}
-                      alt={profileViewer.data.profile.username}
-                      style={{ width: 66, height: 66, borderRadius: 18, objectFit: 'cover', border: '1px solid var(--line)' }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: 66,
-                        height: 66,
-                        borderRadius: 18,
-                        background: neutralTheme.gradient,
-                        color: '#fff',
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontWeight: 700,
-                        fontSize: 20,
-                      }}
-                    >
-                      {avatarInitial(profileViewer.data.profile.username)}
-                    </div>
-                  )}
-                  <div>
-                    <h4 style={{ fontSize: 24 }}>{profileViewer.data.profile.username}</h4>
-                    <p className="entity-sub">User ID: {profileViewer.data.profile.id}</p>
-                    <p className="entity-sub">
-                      Coach chats: {profileViewer.data.profile.enabled_coaches?.length || 0}
-                    </p>
-                  </div>
-                </div>
-
-                {profileViewer.data.profile.id !== authUserId ? (
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => {
-                      const targetId = profileViewer.data?.profile.id;
-                      const username = profileViewer.data?.profile.username || 'user';
-                      if (!targetId) return;
-                      openAbuseReportDialog(
-                        'user',
-                        targetId,
-                        'inappropriate_behavior',
-                        `Reported user ${username} from profile viewer`,
-                      );
-                    }}
-                  >
-                    Report user
-                  </button>
-                ) : null}
-
-                <div className="flow-card flow-card-soft form-grid">
-                  <p><strong>Bio:</strong> {profileViewer.data.profile.bio || 'No bio yet.'}</p>
-                  <p><strong>Goal:</strong> {profileViewer.data.profile.fitness_goal || 'Not set'}</p>
-                  <p><strong>Hobbies:</strong> {profileViewer.data.profile.hobbies || 'Not set'}</p>
-                </div>
-
-                <div className="flow-card flow-card-soft">
-                  <strong>Today&apos;s Health Sync</strong>
-                  {profileViewer.data.today_health ? (
-                    <p style={{ marginTop: 6, color: 'var(--ink-700)' }}>
-                      {profileViewer.data.today_health.steps} steps · {profileViewer.data.today_health.calories_burned} cal
-                    </p>
-                  ) : (
-                    <p style={{ marginTop: 6, color: 'var(--ink-500)' }}>No synced health data today.</p>
-                  )}
-                </div>
-
-                <div className="flow-card flow-card-soft form-grid">
-                  <strong>Recent Posts</strong>
-                  {profileViewer.data.recent_posts.length === 0 ? (
-                    <p style={{ color: 'var(--ink-500)', fontSize: 13 }}>No public posts yet.</p>
-                  ) : (
-                    profileViewer.data.recent_posts.map((post) => (
-                      <article key={post.id} className="feed-post-card">
-                        {post.content ? <p style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{post.content}</p> : null}
-                        {post.media_urls.length > 0 ? (
-                          <div className="post-media-grid" style={{ marginTop: 8 }}>
-                            {post.media_urls.map((url) => {
-                              const mediaUrl = resolveApiAssetUrl(url);
-                              if (!mediaUrl) return null;
-                              return (
-                                <button
-                                  key={mediaUrl}
-                                  type="button"
-                                  className="post-media-item"
-                                  onClick={() => openMediaLightbox(mediaUrl, `${profileViewer.data?.profile.username}'s post media`)}
-                                >
-                                  {isVideoUrl(mediaUrl) ? (
-                                    <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
-                                  ) : (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={mediaUrl} alt="post media" style={{ width: '100%', maxHeight: 180, objectFit: 'cover' }} />
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                        <p className="entity-sub" style={{ marginTop: 6 }}>
-                          {formatTime(post.created_at)} · Likes: {post.reaction_count}
-                        </p>
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
-            ) : null}
           </div>
         </div>
       ) : null}

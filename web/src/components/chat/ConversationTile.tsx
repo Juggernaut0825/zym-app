@@ -13,6 +13,7 @@ export interface ConversationTileItem {
   unreadCount?: number;
   mentionCount?: number;
   avatarUrl?: string | null;
+  userId?: number;
   coachId?: 'zj' | 'lc';
 }
 
@@ -20,6 +21,7 @@ interface ConversationTileProps {
   item: ConversationTileItem;
   active: boolean;
   onSelect: (topic: string) => void;
+  onOpenProfile?: (userId: number) => void;
   resolveAssetUrl: (value: string) => string;
   displayNameFromTopic: (topic: string) => string;
   avatarInitial: (value: string) => string;
@@ -29,6 +31,7 @@ function ConversationTileComponent({
   item,
   active,
   onSelect,
+  onOpenProfile,
   resolveAssetUrl,
   displayNameFromTopic,
   avatarInitial,
@@ -40,37 +43,68 @@ function ConversationTileComponent({
   const badgeTone = 'bg-slate-100 text-slate-500';
   const avatarTone = item.type === 'coach'
     ? (coachId === 'lc' ? 'bg-[rgba(242,138,58,0.14)] text-[color:var(--coach-lc)]' : 'bg-[rgba(105,121,247,0.14)] text-[color:var(--coach-zj)]')
-    : 'bg-white text-slate-700';
-  const activeTone = 'border-[rgba(71,85,105,0.18)] bg-[rgba(71,85,105,0.08)] shadow-[0_14px_30px_rgba(15,23,42,0.10)]';
+    : 'bg-[rgba(255,255,255,0.72)] text-slate-700';
+  const activeTone = 'bg-[rgba(15,23,42,0.06)] shadow-[0_10px_24px_rgba(15,23,42,0.06)]';
   const badgeLabel = item.type === 'coach' ? 'COACH' : item.type.toUpperCase();
+  const canOpenProfile = item.type === 'dm' && typeof item.userId === 'number' && item.userId > 0 && !!onOpenProfile;
+
   return (
     <button
       type="button"
       onClick={() => onSelect(item.topic)}
-      className={`w-full rounded-[18px] border px-3 py-2.5 text-left transition sm:rounded-[22px] sm:px-4 sm:py-3 ${
+      className={`w-full rounded-[20px] px-3 py-2.5 text-left transition sm:rounded-[24px] sm:px-4 sm:py-3 ${
         active
           ? activeTone
-          : 'border-white/70 bg-white/55 hover:bg-white/70'
+          : 'bg-transparent hover:bg-white/55'
       }`}
     >
       <div className="flex items-center gap-3">
-        <div className="relative shrink-0">
-          {item.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={resolveAssetUrl(item.avatarUrl)}
-              alt={name}
-              style={{ width: 36, height: 36, borderRadius: 13, objectFit: 'cover', border: '1px solid rgba(221, 216, 207, 0.88)' }}
-            />
-          ) : (
-            <div className={`flex size-9 items-center justify-center rounded-[12px] border border-white/70 text-[13px] font-semibold sm:size-10 sm:rounded-[14px] sm:text-sm ${avatarTone}`}>
-              {avatarInitial(name)}
-            </div>
-          )}
-          {hasUnread ? (
-            <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-[#ef4444] ring-2 ring-white sm:size-3" aria-hidden="true" />
-          ) : null}
-        </div>
+        {canOpenProfile ? (
+          <button
+            type="button"
+            className="relative shrink-0 rounded-[14px] transition hover:scale-[1.02]"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenProfile?.(item.userId as number);
+            }}
+            aria-label={`Open ${name}'s profile`}
+            title={`Open ${name}'s profile`}
+          >
+            {item.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolveAssetUrl(item.avatarUrl)}
+                alt={name}
+                style={{ width: 36, height: 36, borderRadius: 14, objectFit: 'cover' }}
+              />
+            ) : (
+              <div className={`flex size-9 items-center justify-center rounded-[13px] text-[13px] font-semibold sm:size-10 sm:rounded-[15px] sm:text-sm ${avatarTone}`}>
+                {avatarInitial(name)}
+              </div>
+            )}
+            {hasUnread ? (
+              <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-[#ef4444] ring-2 ring-[rgba(255,255,255,0.85)] sm:size-3" aria-hidden="true" />
+            ) : null}
+          </button>
+        ) : (
+          <div className="relative shrink-0">
+            {item.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolveAssetUrl(item.avatarUrl)}
+                alt={name}
+                style={{ width: 36, height: 36, borderRadius: 14, objectFit: 'cover' }}
+              />
+            ) : (
+              <div className={`flex size-9 items-center justify-center rounded-[13px] text-[13px] font-semibold sm:size-10 sm:rounded-[15px] sm:text-sm ${avatarTone}`}>
+                {avatarInitial(name)}
+              </div>
+            )}
+            {hasUnread ? (
+              <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-[#ef4444] ring-2 ring-[rgba(255,255,255,0.85)] sm:size-3" aria-hidden="true" />
+            ) : null}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2.5 sm:gap-3">
             <div className="min-w-0">

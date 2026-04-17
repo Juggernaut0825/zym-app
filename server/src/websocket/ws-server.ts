@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { AuthService } from '../services/auth-service.js';
+import { ActivityNotificationService } from '../services/activity-notification-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
 import { MessageService } from '../services/message-service.js';
 import {
@@ -425,6 +426,14 @@ export class WSServer {
         messageId,
         content,
       );
+      const participants = await MessageService.getTopicParticipants(topic);
+      const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+        userId,
+        topic,
+        messageId,
+        content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
+        participants,
+      );
       const [created] = await MessageService.getMessages(topic, 1);
       this.broadcastMessage(topic, created || {
         id: messageId,
@@ -436,10 +445,13 @@ export class WSServer {
         created_at: new Date().toISOString(),
       });
 
-      const participants = await MessageService.getTopicParticipants(topic);
-      this.notifyInboxUpdated(participants.length > 0 ? participants : [userId]);
-      if (mentionTargets.length > 0) {
-        this.notifyInboxUpdated(mentionTargets);
+      const recipientsToRefresh = Array.from(new Set([
+        ...(participants.length > 0 ? participants : [userId]),
+        ...mentionTargets,
+        ...activityNotificationTargets,
+      ]));
+      if (recipientsToRefresh.length > 0) {
+        this.notifyInboxUpdated(recipientsToRefresh);
       }
 
       const coachReplyJob = buildCoachReplyJob({

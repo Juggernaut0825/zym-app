@@ -1,6 +1,7 @@
 import SwiftUI
 import Foundation
 import Security
+import CoreLocation
 
 private let fallbackAPIBaseURL = "http://localhost:3001"
 private let fallbackWSBaseURL = "ws://localhost:8080"
@@ -85,6 +86,144 @@ func authorizedDataTask(
         request: request,
         retryOnUnauthorized: retryOnUnauthorized
     ) { _, _, _ in }
+}
+
+struct MentionNotificationPayload: Codable, Identifiable {
+    let id: Int
+    let topic: String?
+    let message_id: Int?
+    let source_type: String
+    let source_id: Int
+    let snippet: String
+    var is_read: Bool
+    let created_at: String
+    let actor_user_id: Int?
+    let actor_username: String?
+}
+
+struct MentionNotificationsResponse: Codable {
+    let mentions: [MentionNotificationPayload]
+}
+
+struct SharedLocationSelectionPayload: Codable, Equatable {
+    let label: String
+    let city: String
+    let latitude: Double
+    let longitude: Double
+    let precision: String
+}
+
+struct StoredUserLocationPayload: Codable, Equatable {
+    let label: String
+    let city: String
+    let latitude: Double
+    let longitude: Double
+    let precision: String
+    let shared: Bool
+    let updated_at: String?
+}
+
+struct StoredLocationResponse: Codable {
+    let location: StoredUserLocationPayload?
+}
+
+struct LocationSearchResponse: Codable {
+    let results: [SharedLocationSelectionPayload]
+}
+
+struct LocationReverseResponse: Codable {
+    let city: SharedLocationSelectionPayload?
+    let precise: SharedLocationSelectionPayload?
+}
+
+struct NearbyUserPayload: Codable, Identifiable {
+    let id: Int
+    let public_uuid: String?
+    let username: String
+    let avatar_url: String?
+    let bio: String?
+    let fitness_goal: String?
+    let friendship_status: String
+    let location_label: String
+    let location_city: String
+    let distance_km: Double
+}
+
+struct NearbyUsersResponse: Codable {
+    let users: [NearbyUserPayload]
+}
+
+enum AppLocationPermissionError: LocalizedError {
+    case denied
+    case unavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .denied:
+            return "Location permission was denied."
+        case .unavailable:
+            return "Unable to determine your location right now."
+        }
+    }
+}
+
+final class AppLocationPermissionCoordinator: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var pendingCompletion: ((Result<CLLocationCoordinate2D, Error>) -> Void)?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    func requestCurrentCoordinate(precise: Bool, completion: @escaping (Result<CLLocationCoordinate2D, Error>) -> Void) {
+        pendingCompletion = completion
+        manager.desiredAccuracy = precise ? kCLLocationAccuracyNearestTenMeters : kCLLocationAccuracyThreeKilometers
+
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .denied, .restricted:
+            pendingCompletion = nil
+            completion(.failure(AppLocationPermissionError.denied))
+        @unknown default:
+            pendingCompletion = nil
+            completion(.failure(AppLocationPermissionError.unavailable))
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            let completion = pendingCompletion
+            pendingCompletion = nil
+            completion?(.failure(AppLocationPermissionError.denied))
+        default:
+            break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let coordinate = locations.last?.coordinate else {
+            let completion = pendingCompletion
+            pendingCompletion = nil
+            completion?(.failure(AppLocationPermissionError.unavailable))
+            return
+        }
+        let completion = pendingCompletion
+        pendingCompletion = nil
+        completion?(.success(coordinate))
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        let completion = pendingCompletion
+        pendingCompletion = nil
+        completion?(.failure(error))
+    }
 }
 
 private enum AppKeychain {
@@ -186,6 +325,8 @@ class AppState: ObservableObject {
     @Published var timezone: String? {
         didSet { persistSessionIfNeeded() }
     }
+
+    @Published var requestedTabIndex: Int?
 
     init() {
         restoreSession()

@@ -17,13 +17,39 @@ export class CommunityService {
     content: string,
     mediaUrls: string[] = [],
     visibility: 'private' | 'friends' | 'public' = 'friends',
+    location?: {
+      label: string;
+      city: string;
+      latitude: number;
+      longitude: number;
+      precision: 'city' | 'precise';
+    } | null,
   ) {
-    const result = getDB().prepare('INSERT INTO posts (user_id, type, visibility, content, media_urls) VALUES (?, ?, ?, ?, ?)').run(
+    const result = getDB().prepare(`
+      INSERT INTO posts (
+        user_id,
+        type,
+        visibility,
+        content,
+        media_urls,
+        location_label,
+        location_city,
+        location_latitude,
+        location_longitude,
+        location_precision
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
       userId,
       type,
       visibility,
       content,
       mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
+      location?.label || null,
+      location?.city || null,
+      location?.latitude ?? null,
+      location?.longitude ?? null,
+      location?.precision || null,
     );
     return Number(result.lastInsertRowid);
   }
@@ -52,15 +78,21 @@ export class CommunityService {
     return posts.map((post) => ({
       ...post,
       media_urls: parseMediaUrls(post.media_urls),
+      location_label: post.location_label || null,
+      location_city: post.location_city || null,
+      location_latitude: Number.isFinite(Number(post.location_latitude)) ? Number(post.location_latitude) : null,
+      location_longitude: Number.isFinite(Number(post.location_longitude)) ? Number(post.location_longitude) : null,
+      location_precision: post.location_precision || null,
     }));
   }
 
   static reactToPost(postId: number, userId: number, reactionType: string) {
-    getDB().prepare('INSERT OR REPLACE INTO post_reactions (post_id, user_id, reaction_type) VALUES (?, ?, ?)').run(
+    const result = getDB().prepare('INSERT OR REPLACE INTO post_reactions (post_id, user_id, reaction_type) VALUES (?, ?, ?)').run(
       postId,
       userId,
       reactionType,
     );
+    return Number(result.lastInsertRowid);
   }
 
   static addComment(postId: number, userId: number, content: string) {
@@ -93,8 +125,21 @@ export class CommunityService {
 
   static getPostById(postId: number) {
     return getDB()
-      .prepare('SELECT id, user_id, visibility FROM posts WHERE id = ?')
-      .get(postId) as { id?: number; user_id?: number; visibility?: string } | undefined;
+      .prepare(`
+        SELECT id, user_id, visibility, location_label, location_city, location_latitude, location_longitude, location_precision
+        FROM posts
+        WHERE id = ?
+      `)
+      .get(postId) as {
+        id?: number;
+        user_id?: number;
+        visibility?: string;
+        location_label?: string | null;
+        location_city?: string | null;
+        location_latitude?: number | null;
+        location_longitude?: number | null;
+        location_precision?: string | null;
+      } | undefined;
   }
 
   static updatePostVisibility(postId: number, userId: number, visibility: 'private' | 'friends' | 'public') {

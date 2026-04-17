@@ -1,11 +1,13 @@
 import { API_BASE_URL, resolveApiAssetUrl } from './config';
 import { clearAuth, getAuth, setAuthTokens } from './auth-storage';
 import {
+  ActivityNotification,
   AbuseReport,
   AuthSession,
   CoachRecordsResponse,
   FeedComment,
   ChatMessage,
+  ConversationNotificationPreference,
   FeedResponse,
   FriendsResponse,
   GroupMember,
@@ -13,11 +15,15 @@ import {
   HealthMomentumResponse,
   InboxResponse,
   LeaderboardResponse,
+  LocationSelection,
   MentionNotification,
+  NearbyUser,
+  NotificationPreferences,
   PublicProfileResponse,
   PublicUser,
   Profile,
   SecurityEvent,
+  StoredUserLocation,
   RequestsResponse,
   UserSummary,
 } from './types';
@@ -542,10 +548,18 @@ export async function createPost(payload: {
   mediaUrls: string[];
   mediaIds?: string[];
   visibility?: PostVisibility;
+  location?: LocationSelection | null;
 }): Promise<void> {
   await request('/community/post', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      locationLabel: payload.location?.label,
+      locationCity: payload.location?.city,
+      locationLatitude: payload.location?.latitude,
+      locationLongitude: payload.location?.longitude,
+      locationPrecision: payload.location?.precision,
+    }),
   });
 }
 
@@ -598,6 +612,21 @@ export async function getMentionNotifications(userId: number): Promise<MentionNo
   return response.mentions;
 }
 
+export async function getActivityNotifications(userId: number): Promise<ActivityNotification[]> {
+  const response = await request<{ notifications: ActivityNotification[] }>(`/notifications/feed/${userId}`);
+  return response.notifications;
+}
+
+export async function markActivityNotificationsRead(payload: {
+  userId: number;
+  ids?: number[];
+}): Promise<void> {
+  await request('/notifications/feed/read', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function markMentionNotificationsRead(payload: {
   userId: number;
   ids?: number[];
@@ -606,6 +635,87 @@ export async function markMentionNotificationsRead(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function getNotificationPreferences(userId: number): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>(`/notifications/preferences/${userId}`);
+}
+
+export async function updateNotificationPreferences(payload: {
+  userId: number;
+  messageNotificationsEnabled?: boolean;
+  postNotificationsEnabled?: boolean;
+}): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>('/notifications/preferences', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getConversationNotificationPreference(
+  userId: number,
+  topic: string,
+): Promise<ConversationNotificationPreference> {
+  const search = new URLSearchParams({ topic });
+  return request<ConversationNotificationPreference>(`/notifications/conversation-preference/${userId}?${search.toString()}`);
+}
+
+export async function updateConversationNotificationPreference(payload: {
+  userId: number;
+  topic: string;
+  muted: boolean;
+}): Promise<ConversationNotificationPreference> {
+  return request<ConversationNotificationPreference>('/notifications/conversation-preference', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function searchLocations(query: string): Promise<LocationSelection[]> {
+  const normalized = String(query || '').trim();
+  if (!normalized) return [];
+  const response = await request<{ results: LocationSelection[] }>(`/location/search?q=${encodeURIComponent(normalized)}`);
+  return response.results;
+}
+
+export async function reverseLocation(latitude: number, longitude: number): Promise<{
+  city: LocationSelection | null;
+  precise: LocationSelection | null;
+}> {
+  return request('/location/reverse', {
+    method: 'POST',
+    body: JSON.stringify({ latitude, longitude }),
+  });
+}
+
+export async function getStoredLocation(userId: number): Promise<StoredUserLocation | null> {
+  const response = await request<{ location: StoredUserLocation | null }>(`/location/profile/${userId}`);
+  return response.location;
+}
+
+export async function updateStoredLocation(payload: {
+  userId: number;
+  location?: LocationSelection | null;
+  locationShared?: boolean;
+}): Promise<StoredUserLocation | null> {
+  const response = await request<{ location: StoredUserLocation | null }>('/location/profile', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: payload.userId,
+      locationLabel: payload.location?.label,
+      locationCity: payload.location?.city,
+      locationLatitude: payload.location?.latitude,
+      locationLongitude: payload.location?.longitude,
+      locationPrecision: payload.location?.precision,
+      locationShared: payload.locationShared,
+    }),
+  });
+  return response.location;
+}
+
+export async function getNearbyUsers(userId: number): Promise<NearbyUser[]> {
+  const response = await request<{ users: NearbyUser[] }>(`/location/nearby/${userId}`);
+  return response.users;
 }
 
 export async function getLeaderboard(userId: number): Promise<LeaderboardResponse> {
