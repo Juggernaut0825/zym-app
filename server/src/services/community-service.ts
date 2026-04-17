@@ -58,7 +58,16 @@ export class CommunityService {
     const posts = getDB().prepare(`
       SELECT p.*, u.username, u.avatar_url,
         (SELECT COUNT(*) FROM post_reactions WHERE post_id = p.id) as reaction_count,
-        (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count
+        (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count,
+        CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM post_reactions pr
+            WHERE pr.post_id = p.id
+              AND pr.user_id = ?
+          ) THEN 1
+          ELSE 0
+        END as viewer_has_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id
       WHERE p.visibility = 'public'
@@ -73,11 +82,12 @@ export class CommunityService {
          )
       ORDER BY p.created_at DESC
       LIMIT 60
-    `).all(userId, userId, userId) as any[];
+    `).all(userId, userId, userId, userId) as any[];
 
     return posts.map((post) => ({
       ...post,
       media_urls: parseMediaUrls(post.media_urls),
+      viewer_has_liked: Number(post.viewer_has_liked || 0) === 1,
       location_label: post.location_label || null,
       location_city: post.location_city || null,
       location_latitude: Number.isFinite(Number(post.location_latitude)) ? Number(post.location_latitude) : null,
@@ -86,13 +96,42 @@ export class CommunityService {
     }));
   }
 
-  static reactToPost(postId: number, userId: number, reactionType: string) {
-    const result = getDB().prepare('INSERT OR REPLACE INTO post_reactions (post_id, user_id, reaction_type) VALUES (?, ?, ?)').run(
-      postId,
-      userId,
-      reactionType,
-    );
-    return Number(result.lastInsertRowid);
+  static togglePostReaction(postId: number, userId: number, reactionType: string) {
+    const existing = getDB()
+      .prepare('SELECT id FROM post_reactions WHERE post_id = ? AND user_id = ?')
+      .get(postId, userId) as { id?: number } | undefined;
+
+    if (existing?.id) {
+      getDB()
+        .prepare('DELETE FROM post_reactions WHERE id = ?')
+        .run(existing.id);
+      return {
+        reacted: false,
+        reactionId: null,
+        reactionCount: this.getReactionCount(postId),
+      };
+    }
+
+    const result = getDB()
+      .prepare('INSERT INTO post_reactions (post_id, user_id, reaction_type) VALUES (?, ?, ?)')
+      .run(
+        postId,
+        userId,
+        reactionType,
+      );
+
+    return {
+      reacted: true,
+      reactionId: Number(result.lastInsertRowid),
+      reactionCount: this.getReactionCount(postId),
+    };
+  }
+
+  static getReactionCount(postId: number): number {
+    const row = getDB()
+      .prepare('SELECT COUNT(*) as count FROM post_reactions WHERE post_id = ?')
+      .get(postId) as { count?: number } | undefined;
+    return Number(row?.count || 0);
   }
 
   static addComment(postId: number, userId: number, content: string) {

@@ -1,6 +1,28 @@
 import SwiftUI
 import AVKit
 
+private func feedExtractHashtags(from content: String?) -> [String] {
+    guard let content, !content.isEmpty else { return [] }
+    let nsContent = content as NSString
+    let regex = try? NSRegularExpression(pattern: "#([A-Za-z0-9_]+)")
+    let matches = regex?.matches(in: content, range: NSRange(location: 0, length: nsContent.length)) ?? []
+    return matches.compactMap { match in
+        guard match.numberOfRanges > 1 else { return nil }
+        return nsContent.substring(with: match.range(at: 1)).lowercased()
+    }
+}
+
+private func feedVisibilityLabel(_ visibility: String?) -> String {
+    switch (visibility ?? "friends").lowercased() {
+    case "public":
+        return "Public"
+    case "private":
+        return "Only me"
+    default:
+        return "Friends"
+    }
+}
+
 struct FeedView: View {
     @State private var posts: [Post] = []
     @State private var showCreatePost = false
@@ -24,6 +46,23 @@ struct FeedView: View {
     @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     @EnvironmentObject var appState: AppState
 
+    private var trendingItems: [(tag: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        posts.forEach { post in
+            feedExtractHashtags(from: post.content).forEach { tag in
+                counts[tag, default: 0] += 1
+            }
+        }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .map { ($0.key, $0.value) }
+            .prefix(8)
+            .map { $0 }
+    }
+
     private var unreadNotificationCount: Int {
         activityNotifications.filter { !$0.is_read }.count + mentionNotifications.filter { !$0.is_read }.count
     }
@@ -46,7 +85,7 @@ struct FeedView: View {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
-                    LazyVStack(spacing: 10) {
+                    LazyVStack(spacing: 16) {
                         NearbyUsersStrip(
                             location: sharedLocation,
                             nearbyUsers: nearbyUsers,
@@ -59,6 +98,11 @@ struct FeedView: View {
                             }
                         )
                         .zymAppear(delay: 0.01)
+
+                        TrendingStrip(
+                            items: trendingItems
+                        )
+                        .zymAppear(delay: 0.02)
 
                         ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
                             PostCard(
@@ -200,6 +244,14 @@ struct FeedView: View {
                     post: post,
                     isReacting: reactingIds.contains(post.id),
                     onReact: { reactToPost(postId: post.id) },
+                    onVisibilitySaved: { postId, visibility in
+                        if let index = posts.firstIndex(where: { $0.id == postId }) {
+                            posts[index].visibility = visibility
+                            if selectedPost?.id == postId {
+                                selectedPost = posts[index]
+                            }
+                        }
+                    },
                     onOpenProfile: { userId, username, avatarURL in
                         openPublicProfile(userId: userId, username: username, avatarURL: avatarURL)
                     }
@@ -229,6 +281,10 @@ struct FeedView: View {
                   let response = try? JSONDecoder().decode(FeedResponse.self, from: data) else { return }
             DispatchQueue.main.async {
                 posts = response.feed
+                if let selectedPost,
+                   let refreshed = response.feed.first(where: { $0.id == selectedPost.id }) {
+                    self.selectedPost = refreshed
+                }
                 if let pendingOpenPostId,
                    let matchingPost = response.feed.first(where: { $0.id == pendingOpenPostId }) {
                     selectedPost = matchingPost
@@ -554,11 +610,10 @@ struct FeedView: View {
               let userId = appState.userId else { return }
         if reactingIds.contains(postId) { return }
 
+        guard let currentPost = posts.first(where: { $0.id == postId }) else { return }
         reactingIds.insert(postId)
-        if let index = posts.firstIndex(where: { $0.id == postId }) {
-            let current = posts[index].reaction_count ?? 0
-            posts[index].reaction_count = current + 1
-        }
+        let currentlyLiked = currentPost.viewer_has_liked ?? false
+        updatePostState(postId: postId, liked: !currentlyLiked, reactionCount: max(0, (currentPost.reaction_count ?? 0) + (currentlyLiked ? -1 : 1)))
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -567,12 +622,29 @@ struct FeedView: View {
         let body = ["postId": postId, "userId": userId, "reactionType": "like"] as [String : Any]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        authorizedDataTask(appState: appState, request: request) { _, _, _ in
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
             DispatchQueue.main.async {
                 reactingIds.remove(postId)
-                loadFeed()
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode),
+                      let data = data,
+                      let payload = try? JSONDecoder().decode(PostReactionToggleResponse.self, from: data) else {
+                    updatePostState(postId: postId, liked: currentlyLiked, reactionCount: currentPost.reaction_count ?? 0)
+                    return
+                }
+                updatePostState(postId: postId, liked: payload.reacted, reactionCount: payload.reactionCount)
             }
         }.resume()
+    }
+
+    func updatePostState(postId: Int, liked: Bool, reactionCount: Int) {
+        if let index = posts.firstIndex(where: { $0.id == postId }) {
+            posts[index].viewer_has_liked = liked
+            posts[index].reaction_count = reactionCount
+            if let currentSelection = selectedPost, currentSelection.id == postId {
+                selectedPost = posts[index]
+            }
+        }
     }
 }
 
@@ -584,6 +656,8 @@ struct PostCard: View {
     let onReact: () -> Void
 
     var body: some View {
+        let isLiked = post.viewer_has_liked ?? false
+
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button {
@@ -629,6 +703,9 @@ struct PostCard: View {
                                 Text(post.type)
                                     .font(.caption)
                                     .foregroundColor(Color.zymSubtext)
+                                Text("· \(feedVisibilityLabel(post.visibility))")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(Color.zymSubtext)
                                 if let label = post.location_label ?? post.location_city, !label.isEmpty {
                                     Image(systemName: "location.fill")
                                         .font(.system(size: 9))
@@ -666,11 +743,16 @@ struct PostCard: View {
             HStack(spacing: 8) {
                 Button(action: onReact) {
                     HStack(spacing: 6) {
-                        Image(systemName: "heart.fill")
+                        Image(systemName: isLiked ? "heart.fill" : "heart")
                         Text("\(post.reaction_count ?? 0)")
                     }
                 }
-                .buttonStyle(ZYMGhostButton())
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isLiked ? Color.red : Color.zymText)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(isLiked ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.75))
+                .clipShape(Capsule())
                 .disabled(isReacting)
 
                 Text("Comments \(post.comment_count ?? 0) · Open details")
@@ -851,10 +933,56 @@ private struct NearbyUsersStrip: View {
     }
 }
 
+private struct TrendingStrip: View {
+    let items: [(tag: String, count: Int)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Trending")
+                        .font(.custom("Syne", size: 18))
+                        .foregroundColor(Color.zymText)
+                    Text("Real tags people are using in the feed right now.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.zymSubtext)
+                }
+                Spacer()
+            }
+
+            if items.isEmpty {
+                Text("No post tags yet.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { entry in
+                            let item = entry.element
+                            HStack(spacing: 5) {
+                                Text("#\(item.tag)")
+                                Text("\(item.count)")
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.zymSurfaceSoft.opacity(0.92))
+                            .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 struct FeedPostDetailSheet: View {
     let post: Post
     let isReacting: Bool
     let onReact: () -> Void
+    let onVisibilitySaved: (Int, String) -> Void
     let onOpenProfile: ((Int, String, String?) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
@@ -862,13 +990,37 @@ struct FeedPostDetailSheet: View {
     @State private var commentDraft = ""
     @State private var commentsLoading = false
     @State private var commentPending = false
+    @State private var visibility: String
+    @State private var visibilityPending = false
+    @State private var statusText = ""
+
+    init(
+        post: Post,
+        isReacting: Bool,
+        onReact: @escaping () -> Void,
+        onVisibilitySaved: @escaping (Int, String) -> Void,
+        onOpenProfile: ((Int, String, String?) -> Void)?
+    ) {
+        self.post = post
+        self.isReacting = isReacting
+        self.onReact = onReact
+        self.onVisibilitySaved = onVisibilitySaved
+        self.onOpenProfile = onOpenProfile
+        _visibility = State(initialValue: post.visibility ?? "friends")
+    }
+
+    private var isOwnPost: Bool {
+        post.user_id == (appState.userId ?? -1)
+    }
 
     var body: some View {
+        let isLiked = post.viewer_has_liked ?? false
+
         NavigationView {
             ZStack {
                 ZYMBackgroundLayer().ignoresSafeArea()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top, spacing: 10) {
                             Button {
                                 onOpenProfile?(post.user_id, post.username ?? "User", post.avatar_url)
@@ -911,9 +1063,14 @@ struct FeedPostDetailSheet: View {
                             }
                             .buttonStyle(.plain)
                             Spacer()
-                            Text(post.type)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color.zymSubtext)
+                            VStack(alignment: .trailing, spacing: 6) {
+                                Text(post.type)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(Color.zymSubtext)
+                                Text(feedVisibilityLabel(visibility))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
                         }
 
                         if let content = post.content, !content.isEmpty {
@@ -937,14 +1094,46 @@ struct FeedPostDetailSheet: View {
                             FeedMediaPreviewGrid(mediaUrls: mediaUrls)
                         }
 
-                        Button(action: onReact) {
-                            HStack {
-                                Image(systemName: "heart.fill")
-                                Text("Like · \(post.reaction_count ?? 0)")
+                        HStack(spacing: 10) {
+                            Button(action: onReact) {
+                                HStack(spacing: 7) {
+                                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                                    Text("\(post.reaction_count ?? 0)")
+                                }
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(isLiked ? Color.red : Color.zymText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(isLiked ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.8))
+                            .clipShape(Capsule())
+                            .disabled(isReacting)
+
+                            if isOwnPost {
+                                Menu {
+                                    Button("Friends only") { updateVisibility("friends") }
+                                    Button("Public") { updateVisibility("public") }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "globe")
+                                        Text(visibilityPending ? "Saving..." : feedVisibilityLabel(visibility))
+                                    }
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(Color.zymText)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                                    .background(Color.zymSurfaceSoft.opacity(0.8))
+                                    .clipShape(Capsule())
+                                }
+                                .disabled(visibilityPending)
                             }
                         }
-                        .buttonStyle(ZYMPrimaryButton())
-                        .disabled(isReacting)
+
+                        if !statusText.isEmpty {
+                            Text(statusText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymPrimary)
+                        }
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -1024,16 +1213,12 @@ struct FeedPostDetailSheet: View {
                             HStack(spacing: 8) {
                                 TextField("Write a comment...", text: $commentDraft)
                                     .padding(10)
-                                    .background(Color.zymSurface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Color.zymLine, lineWidth: 1)
-                                    )
-                                    .cornerRadius(10)
+                                    .background(Color.zymSurfaceSoft.opacity(0.7))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 Button(action: addComment) {
                                     Text(commentPending ? "..." : "Send")
                                 }
-                                .buttonStyle(ZYMPrimaryButton())
+                                .buttonStyle(ZYMGhostButton())
                                 .disabled(commentPending || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
@@ -1050,6 +1235,40 @@ struct FeedPostDetailSheet: View {
                 }
             }
         }
+    }
+
+    private func updateVisibility(_ nextVisibility: String) {
+        guard !visibilityPending,
+              nextVisibility != visibility,
+              let userId = appState.userId,
+              let url = apiURL("/community/post/visibility") else { return }
+
+        visibilityPending = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "postId": post.id,
+            "visibility": nextVisibility,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                visibilityPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode) else {
+                    statusText = parseAPIErrorMessage(from: data) ?? "Failed to update privacy."
+                    return
+                }
+                visibility = nextVisibility
+                statusText = "Privacy updated."
+                onVisibilitySaved(post.id, nextVisibility)
+            }
+        }.resume()
     }
 
     private func loadComments() {
@@ -1477,6 +1696,8 @@ struct Post: Identifiable, Codable {
     let id: Int
     let user_id: Int
     let type: String
+    var visibility: String?
+    var viewer_has_liked: Bool?
     let content: String?
     let username: String?
     let avatar_url: String?
@@ -1493,6 +1714,12 @@ struct Post: Identifiable, Codable {
 
 struct FeedResponse: Codable {
     let feed: [Post]
+}
+
+struct PostReactionToggleResponse: Codable {
+    let success: Bool
+    let reacted: Bool
+    let reactionCount: Int
 }
 
 struct FeedComment: Codable, Identifiable {

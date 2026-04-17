@@ -2259,14 +2259,16 @@ app.post('/community/react',
       return res.status(404).json({ error: 'Post not found.' });
     }
 
-    const reactionId = CommunityService.reactToPost(postId, userId, String(req.body.reactionType || 'like'));
-    const notificationUsers = ActivityNotificationService.createPostReactionNotification({
-      postId,
-      reactionId,
-      postOwnerId: Number(post.user_id || 0),
-      actorUserId: userId,
-      snippet: 'liked your post',
-    });
+    const reactionResult = CommunityService.togglePostReaction(postId, userId, String(req.body.reactionType || 'like'));
+    const notificationUsers = reactionResult.reacted && reactionResult.reactionId
+      ? ActivityNotificationService.createPostReactionNotification({
+        postId,
+        reactionId: reactionResult.reactionId,
+        postOwnerId: Number(post.user_id || 0),
+        actorUserId: userId,
+        snippet: 'liked your post',
+      })
+      : [];
 
     if (notificationUsers.length > 0) {
       await publishRealtimeEventSafely({
@@ -2275,7 +2277,11 @@ app.post('/community/react',
       }, 'community-reaction-notifications');
     }
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      reacted: reactionResult.reacted,
+      reactionCount: reactionResult.reactionCount,
+    });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

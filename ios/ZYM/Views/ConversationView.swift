@@ -259,12 +259,8 @@ struct ConversationView: View {
 
                         TextField("", text: $newMessage)
                             .padding(12)
-                            .background(Color.zymSurface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(messageTooLong ? Color.red.opacity(0.7) : Color.zymLine, lineWidth: 1)
-                            )
-                            .cornerRadius(12)
+                            .background(messageTooLong ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.82))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .accessibilityLabel("Message")
 
                         if conversation.isGroup && groupCoachEnabled {
@@ -308,13 +304,7 @@ struct ConversationView: View {
                 }
                 .padding(.bottom, 10)
                 .padding(.top, 6)
-                .background(Color.zymSurface)
-                .overlay(
-                    Rectangle()
-                        .fill(Color.zymLine)
-                        .frame(height: 1),
-                    alignment: .top
-                )
+                .background(Color.zymSurface.opacity(0.96))
             }
         }
         .navigationTitle(conversation.name)
@@ -1551,13 +1541,9 @@ private struct ConversationSegmentBubble: View {
         ConversationMarkdownText(content: content, isMine: isMine)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(isMine ? Color.white.opacity(0.94) : Color.zymBubbleDark)
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isMine ? Color.zymLine : Color.clear, lineWidth: 1)
-            )
+            .background(isMine ? Color.zymSurfaceSoft.opacity(0.92) : Color.zymBubbleDark)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: isMine ? Color.black.opacity(0.04) : Color.black.opacity(0.12), radius: 16, x: 0, y: 8)
+            .shadow(color: isMine ? Color.black.opacity(0.03) : Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
     }
 }
 
@@ -1711,12 +1697,8 @@ struct TypingIndicatorPill: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Color.white.opacity(0.96))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.zymLine.opacity(0.9), lineWidth: 1)
-        )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 6)
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.82).repeatForever(autoreverses: true)) {
                 pulse = true

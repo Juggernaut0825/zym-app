@@ -22,6 +22,7 @@ import {
   PublicProfileResponse,
   PublicUser,
   Profile,
+  PostReactionResponse,
   SecurityEvent,
   StoredUserLocation,
   RequestsResponse,
@@ -584,8 +585,8 @@ export async function deletePost(payload: {
   });
 }
 
-export async function reactToPost(postId: number, userId: number, reactionType = 'like'): Promise<void> {
-  await request('/community/react', {
+export async function reactToPost(postId: number, userId: number, reactionType = 'like'): Promise<PostReactionResponse> {
+  return request<PostReactionResponse>('/community/react', {
     method: 'POST',
     body: JSON.stringify({ postId, userId, reactionType }),
   });

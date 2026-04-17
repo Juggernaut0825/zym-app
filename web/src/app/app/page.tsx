@@ -968,6 +968,8 @@ export default function AppPage() {
   const [commentDraftByPostId, setCommentDraftByPostId] = useState<Record<number, string>>({});
   const [commentLoadingPostIds, setCommentLoadingPostIds] = useState<number[]>([]);
   const [commentPendingPostId, setCommentPendingPostId] = useState<number | null>(null);
+  const [reactingPostIds, setReactingPostIds] = useState<number[]>([]);
+  const reactingPostIdsRef = useRef<Set<number>>(new Set());
   const [mentionNotifications, setMentionNotifications] = useState<MentionNotification[]>([]);
   const [mentionsLoading, setMentionsLoading] = useState(false);
   const [activityNotifications, setActivityNotifications] = useState<ActivityNotification[]>([]);
@@ -3128,11 +3130,49 @@ export default function AppPage() {
   }
 
   async function handleReact(postId: number) {
+    const snapshot = feed.find((post) => post.id === postId);
+    if (!snapshot || reactingPostIdsRef.current.has(postId)) return;
+
+    const optimisticReacted = !snapshot.viewer_has_liked;
+    const optimisticReactionCount = Math.max(0, Number(snapshot.reaction_count || 0) + (optimisticReacted ? 1 : -1));
+
     try {
-      await reactToPost(postId, authUserId, 'like');
-      await loadFeed();
+      reactingPostIdsRef.current.add(postId);
+      setReactingPostIds((prev) => [...prev, postId]);
+      setFeed((prev) => prev.map((post) => (
+        post.id === postId
+          ? {
+            ...post,
+            viewer_has_liked: optimisticReacted,
+            reaction_count: optimisticReactionCount,
+          }
+          : post
+      )));
+
+      const response = await reactToPost(postId, authUserId, 'like');
+      setFeed((prev) => prev.map((post) => (
+        post.id === postId
+          ? {
+            ...post,
+            viewer_has_liked: response.reacted,
+            reaction_count: response.reactionCount,
+          }
+          : post
+      )));
     } catch (err: any) {
+      setFeed((prev) => prev.map((post) => (
+        post.id === postId
+          ? {
+            ...post,
+            viewer_has_liked: snapshot.viewer_has_liked,
+            reaction_count: snapshot.reaction_count,
+          }
+          : post
+      )));
       setError(err.message || 'Failed to react to post.');
+    } finally {
+      reactingPostIdsRef.current.delete(postId);
+      setReactingPostIds((prev) => prev.filter((id) => id !== postId));
     }
   }
 
@@ -3772,6 +3812,8 @@ export default function AppPage() {
     onSearchChange?: (value: string) => void,
     searchPlaceholder?: string,
     searchRef?: { current: HTMLInputElement | null },
+    searchSuggestions?: string[],
+    onSearchSuggestionSelect?: (value: string) => void,
     trailing?: JSX.Element,
   ) => (
     <header className="flex flex-col gap-2.5 border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:gap-4 sm:px-5 sm:py-3 md:flex-row md:items-center md:justify-between md:px-8">
@@ -3794,6 +3836,23 @@ export default function AppPage() {
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder={searchPlaceholder || 'Search'}
             />
+            {searchSuggestions && searchSuggestions.length > 0 && onSearchSuggestionSelect ? (
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 overflow-hidden rounded-[20px] bg-white/95 shadow-[0_16px_38px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+                {searchSuggestions.slice(0, 5).map((suggestion, index) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-left text-[13px] text-slate-700 transition hover:bg-slate-50 sm:text-sm ${
+                      index !== 0 ? 'border-t border-slate-100' : ''
+                    }`}
+                    onClick={() => onSearchSuggestionSelect(suggestion)}
+                  >
+                    <span className="material-symbols-outlined text-slate-300" style={{ fontSize: 16 }}>search</span>
+                    <span>{suggestion}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </label>
         ) : null}
         {trailing ? <div className="flex items-center gap-2">{trailing}</div> : null}
@@ -4549,6 +4608,8 @@ export default function AppPage() {
           setCommunityQuery,
           'Search community posts...',
           undefined,
+          communityQuery.trim() ? communitySearchSuggestions : undefined,
+          setCommunityQuery,
           <div className="flex items-center gap-2">
             <div ref={communityNotificationsRef} className="relative">
               <button
@@ -4664,23 +4725,6 @@ export default function AppPage() {
             </div>
           </div>,
         )}
-
-        {communityQuery.trim() ? (
-          <div className="px-3 pb-0 pt-3 sm:px-4 md:px-6">
-            <div className="mx-auto flex w-full max-w-3xl flex-wrap gap-2">
-              {communitySearchSuggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-medium text-slate-600 transition hover:bg-slate-200 sm:text-[13px]"
-                  onClick={() => setCommunityQuery(suggestion)}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
 
         <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <section className="min-h-0 overflow-y-auto pr-1">
@@ -5046,10 +5090,18 @@ export default function AppPage() {
 
                     <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
                       <button
-                        className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
+                        className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[13px] transition sm:px-4 sm:py-2 sm:text-sm ${
+                          post.viewer_has_liked
+                            ? 'bg-[rgba(239,68,68,0.08)] text-[#ef4444]'
+                            : 'bg-white/80 text-slate-600 hover:bg-white'
+                        }`}
+                        disabled={reactingPostIds.includes(post.id)}
                         onClick={() => void handleReact(post.id)}
                       >
-                        Like {post.reaction_count || 0}
+                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>
+                          {post.viewer_has_liked ? 'favorite' : 'favorite_border'}
+                        </span>
+                        {post.reaction_count || 0}
                       </button>
                       <button
                         className="rounded-full bg-white/80 px-3 py-1.5 text-[13px] text-slate-600 transition hover:bg-white sm:px-4 sm:py-2 sm:text-sm"
@@ -5159,8 +5211,8 @@ export default function AppPage() {
           <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
             <section className="rounded-[24px] bg-white/58 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trending</p>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">Real hashtags from the feed</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Tap one to filter the community with actual tags people are already using.</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">What people are actually using</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Tap one to filter the feed with real tags already showing up in posts.</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {trendingHashtags.length > 0 ? trendingHashtags.map((item) => (
                   <button
@@ -5243,22 +5295,6 @@ export default function AppPage() {
               ) : null}
             </section>
 
-            <section className="rounded-[24px] bg-white/52 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.04)] backdrop-blur-xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Search prompts</p>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">Prompted discovery</h3>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {communitySearchSuggestions.slice(0, 6).map((suggestion) => (
-                  <button
-                    key={`sidebar-${suggestion}`}
-                    type="button"
-                    className="rounded-full bg-white px-3 py-1.5 text-[12px] font-semibold text-slate-600 shadow-[0_8px_18px_rgba(15,23,42,0.06)] transition hover:bg-slate-50"
-                    onClick={() => setCommunityQuery(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </section>
           </aside>
         </div>
 

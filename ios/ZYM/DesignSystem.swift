@@ -44,20 +44,12 @@ extension Animation {
 struct ZYMCard: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(14)
+            .padding(12)
             .background(
-                LinearGradient(
-                    colors: [Color.white.opacity(0.96), Color.zymBackgroundSoft.opacity(0.94)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.zymLine, lineWidth: 1)
+                Color.white.opacity(0.9)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 10)
+            .shadow(color: Color.black.opacity(0.035), radius: 12, x: 0, y: 5)
     }
 }
 
@@ -116,11 +108,7 @@ struct ZYMGhostButton: ButtonStyle {
             .foregroundColor(Color.zymText)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .background(Color.white.opacity(configuration.isPressed ? 0.88 : 0.78))
-            .overlay(
-                RoundedRectangle(cornerRadius: 11)
-                    .stroke(Color.zymLine, lineWidth: 1)
-            )
+            .background(Color.zymSurfaceSoft.opacity(configuration.isPressed ? 0.94 : 0.82))
             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }

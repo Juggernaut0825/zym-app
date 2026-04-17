@@ -169,10 +169,6 @@ struct CalendarView: View {
         selectedRecord?.health
     }
 
-    private var recentDays: [String] {
-        calendarRecentDays(count: 14, endingAt: effectiveDay)
-    }
-
     private var progressDays: [String] {
         calendarRecentDays(count: max(14, progressRange), endingAt: effectiveDay)
     }
@@ -194,8 +190,7 @@ struct CalendarView: View {
                         headerCard
                         statGrid
                         trendCard
-                        recentDaysCard
-                        summaryGrid
+                        dailyOverviewCard
                         checkInCard
                         mealsCard
                         trainingCard
@@ -245,7 +240,7 @@ struct CalendarView: View {
                     Text("Progress, meals, training, and Apple Health")
                         .font(.custom("Syne", size: 24))
                         .foregroundColor(Color.zymText)
-                    Text("Today stays front and center, while the date picker and recent-day strip let you inspect history without leaving the page.")
+                    Text("Use the date picker to jump between days. Everything below updates around the day you actually selected.")
                         .font(.system(size: 13))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -341,90 +336,43 @@ struct CalendarView: View {
         .zymCard()
     }
 
-    private var recentDaysCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("RECENT DAYS")
+    private var dailyOverviewCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("DAY OVERVIEW")
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(Color.zymSubtext)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(recentDays, id: \.self) { day in
-                        let record = records?.records.first(where: { $0.day == day })
-                        let isSelected = day == effectiveDay
-                        Button {
-                            if let nextDate = calendarDate(from: day) {
-                                selectedDate = nextDate
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(calendarShortDay(day))
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(isSelected ? .white.opacity(0.82) : Color.zymSubtext)
-                                Text(record?.check_in?.weight_kg.map { "\($0)kg" } ?? "--")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(isSelected ? .white : Color.zymText)
-                                HStack(spacing: 4) {
-                                    Circle().fill(record?.check_in == nil ? Color.gray.opacity(0.25) : (isSelected ? Color.white : Color.zymText)).frame(width: 7, height: 7)
-                                    Circle().fill((record?.meals.isEmpty == false) ? (isSelected ? Color.white.opacity(0.8) : Color.orange) : Color.gray.opacity(0.25)).frame(width: 7, height: 7)
-                                    Circle().fill((record?.training.isEmpty == false) ? (isSelected ? Color.white.opacity(0.65) : Color.green) : Color.gray.opacity(0.25)).frame(width: 7, height: 7)
-                                    Circle().fill(record?.health == nil ? Color.gray.opacity(0.25) : (isSelected ? Color.white.opacity(0.5) : Color.blue)).frame(width: 7, height: 7)
-                                }
-                            }
-                            .frame(width: 92, alignment: .leading)
-                            .padding(12)
-                            .background(isSelected ? Color.zymText : Color.zymSurfaceSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+            Text(calendarFormattedDay(effectiveDay))
+                .font(.custom("Syne", size: 22))
+                .foregroundColor(Color.zymText)
+
+            VStack(spacing: 10) {
+                calendarOverviewRow(
+                    title: "Check-in",
+                    detail: "Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg")) · Body fat \(calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%"))"
+                )
+                calendarOverviewRow(
+                    title: "Activity",
+                    detail: "Steps \(selectedHealth.map { String($0.steps) } ?? "--") · Calories \(selectedHealth.map { "\($0.calories_burned) kcal" } ?? "--") · Active \(selectedHealth.map { String($0.active_minutes) } ?? "--") min"
+                )
+                calendarOverviewRow(
+                    title: "Meals",
+                    detail: "\(selectedMeals.count) logged · Intake \(Int((selectedRecord?.total_intake ?? 0).rounded())) kcal"
+                )
+                calendarOverviewRow(
+                    title: "Training",
+                    detail: "\(selectedTraining.count) entries · Estimated work \(Int((selectedRecord?.total_burned ?? 0).rounded())) kcal"
+                )
+            }
+
+            if let notes = selectedRecord?.check_in?.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
             }
         }
         .zymCard()
-    }
-
-    private var summaryGrid: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                calendarSummaryCard(
-                    title: "Check-in",
-                    lines: [
-                        "Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg"))",
-                        "Body fat \(calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%"))",
-                        selectedRecord?.check_in?.notes ?? "No daily note saved."
-                    ]
-                )
-                calendarSummaryCard(
-                    title: "Activity",
-                    lines: [
-                        "Steps \(selectedHealth.map { String($0.steps) } ?? "--")",
-                        "Calories \(selectedHealth.map { "\($0.calories_burned) kcal" } ?? "--")",
-                        "Active minutes \(selectedHealth.map { String($0.active_minutes) } ?? "--")"
-                    ]
-                )
-            }
-
-            HStack(spacing: 10) {
-                calendarSummaryCard(
-                    title: "Meals",
-                    lines: [
-                        "\(selectedMeals.count) logged",
-                        "Intake \(Int((selectedRecord?.total_intake ?? 0).rounded())) kcal",
-                        "Target \(calendarMetric(records?.profile.daily_target, suffix: " kcal"))"
-                    ]
-                )
-                calendarSummaryCard(
-                    title: "Training",
-                    lines: [
-                        "\(selectedTraining.count) entries",
-                        "Estimated work \(Int((selectedRecord?.total_burned ?? 0).rounded())) kcal",
-                        selectedTraining.isEmpty ? "Nothing logged yet" : "Entries stay editable below"
-                    ]
-                )
-            }
-        }
     }
 
     private var checkInCard: some View {
@@ -442,11 +390,7 @@ struct CalendarView: View {
             TextEditor(text: $checkInDraft.notes)
                 .frame(minHeight: 110)
                 .padding(10)
-                .background(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.zymLine, lineWidth: 1)
-                )
+                .background(Color.zymSurfaceSoft.opacity(0.76))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             HStack {
@@ -501,7 +445,7 @@ struct CalendarView: View {
                             .font(.system(size: 13))
                             .foregroundColor(Color.zymSubtext)
                     }
-                    .zymCard()
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -545,7 +489,7 @@ struct CalendarView: View {
                                 .foregroundColor(Color.zymSubtext)
                         }
                     }
-                    .zymCard()
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -569,24 +513,6 @@ struct CalendarView: View {
         .zymCard()
     }
 
-    private func calendarSummaryCard(title: String, lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.2)
-                .foregroundColor(Color.zymSubtext)
-            ForEach(lines, id: \.self) { line in
-                Text(line)
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymText)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .zymCard()
-    }
-
     private func calendarEmptyState(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13))
@@ -600,12 +526,22 @@ struct CalendarView: View {
         TextField(title, text: text)
             .keyboardType(keyboard)
             .padding(12)
-            .background(Color.white)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.zymLine, lineWidth: 1)
-            )
+            .background(Color.zymSurfaceSoft.opacity(0.76))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func calendarOverviewRow(title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.zymText)
+                .frame(width: 66, alignment: .leading)
+            Text(detail)
+                .font(.system(size: 13))
+                .foregroundColor(Color.zymSubtext)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 2)
     }
 
     private func resetCheckInDraft() {

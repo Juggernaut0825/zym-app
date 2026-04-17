@@ -58,6 +58,7 @@ struct CreatePostView: View {
     @State private var selectedMedia: [PhotosPickerItem] = []
     @State private var draftAttachments: [PostDraftAttachment] = []
     @State private var isPosting = false
+    @State private var visibility = defaultCommunityPostVisibility
     @State private var selectedLocation: SharedLocationSelectionPayload?
     @State private var showLocationSheet = false
     @State private var shareLocationWithNearby = true
@@ -78,12 +79,8 @@ struct CreatePostView: View {
                     TextField("What's on your mind?", text: $content, axis: .vertical)
                         .foregroundColor(Color.zymText)
                         .padding(12)
-                        .background(Color.zymSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.zymLine, lineWidth: 1)
-                        )
-                        .cornerRadius(12)
+                        .background(Color.zymSurfaceSoft.opacity(0.8))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .lineLimit(5...10)
 
                     HStack(spacing: 8) {
@@ -122,6 +119,22 @@ struct CreatePostView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(ZYMGhostButton())
+
+                        Menu {
+                            Button("Friends only") {
+                                visibility = "friends"
+                            }
+                            Button("Public") {
+                                visibility = "public"
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: visibility == "public" ? "globe" : "person.2.fill")
+                                Text(visibility == "public" ? "Public" : "Friends")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(ZYMGhostButton())
                     }
 
                     if let selectedLocation {
@@ -140,7 +153,7 @@ struct CreatePostView: View {
                             .foregroundColor(Color.zymSubtext)
                         }
                         .padding(12)
-                        .background(Color.white.opacity(0.9))
+                        .background(Color.zymSurfaceSoft.opacity(0.7))
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
 
@@ -194,6 +207,11 @@ struct CreatePostView: View {
                             .foregroundColor(Color.zymPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    Text(visibility == "public" ? "This post will be visible to everyone." : "This post will be visible to friends only.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.zymSubtext)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer()
                 }
@@ -320,7 +338,7 @@ struct CreatePostView: View {
                 "content": trimmedContent,
                 "mediaUrls": mediaUrls,
                 "mediaIds": mediaIds,
-                "visibility": defaultCommunityPostVisibility,
+                "visibility": visibility,
             ]
             if let selectedLocation {
                 body["locationLabel"] = selectedLocation.label
@@ -393,7 +411,7 @@ struct CreatePostView: View {
             "contentType": attachment.contentType,
             "sizeBytes": attachment.data.count,
             "source": "ios_community_post",
-            "visibility": defaultCommunityPostVisibility,
+            "visibility": visibility,
         ])
 
         authorizedDataTask(appState: appState, request: request) { data, _, _ in
@@ -454,7 +472,7 @@ struct CreatePostView: View {
         body.append("ios_community_post\r\n".data(using: .utf8)!)
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"visibility\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(defaultCommunityPostVisibility)\r\n".data(using: .utf8)!)
+        body.append("\(visibility)\r\n".data(using: .utf8)!)
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(attachment.filename)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: \(attachment.contentType)\r\n\r\n".data(using: .utf8)!)

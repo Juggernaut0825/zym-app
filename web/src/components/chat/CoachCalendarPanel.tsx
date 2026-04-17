@@ -222,7 +222,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
   const selectedHealth = selectedDayRecord?.health || null;
   const selectedMeals = selectedDayRecord?.meals || [];
   const selectedTraining = selectedDayRecord?.training || [];
-  const recentDays = useMemo(() => buildRecentDays(14, effectiveDay), [effectiveDay]);
   const progressDays = useMemo(() => buildRecentDays(progressRange, effectiveDay), [effectiveDay, progressRange]);
 
   const progressSeries = useMemo(() => progressDays.map((day, index, allDays) => {
@@ -381,7 +380,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Calendar</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Progress, meals, training, and health in one place</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              Defaulting to today keeps the page useful at a glance, while the date picker and recent-day strip make it easy to inspect history without leaving the dashboard.
+              Use the date picker to jump between days. The rest of the page stays anchored around the date you actually selected.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -409,7 +408,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
           <div className="space-y-6">
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {stats.map((card) => (
-                <article key={card.label} className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)]">
+                <article key={card.label} className="rounded-[24px] bg-white/86 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{card.label}</p>
                   <p className="mt-2 text-2xl font-semibold text-slate-900">{card.value}</p>
                   <p className="mt-2 text-sm leading-6 text-slate-500">{card.detail}</p>
@@ -417,7 +416,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
               ))}
             </section>
 
-            <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_20px_48px_rgba(15,23,42,0.04)]">
+            <section className="rounded-[28px] bg-white/88 p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Trend</p>
@@ -449,7 +448,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                     </div>
                   ) : (
                     <>
-                      <div className="rounded-[24px] border border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] p-4">
+                      <div className="rounded-[24px] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] p-4">
                         <svg viewBox="0 0 640 240" className="h-[240px] w-full overflow-visible">
                           {[0, 1, 2, 3].map((tick) => (
                             <line
@@ -496,7 +495,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                   )}
                 </div>
 
-                <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/75 p-4">
+                <div className="rounded-[24px] bg-slate-50/75 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Coach interpretation</p>
                   <p className="mt-3 text-lg font-semibold text-slate-900">{records?.progress?.statusLabel || 'Need more signal before calling the trend.'}</p>
                   <p className="mt-2 text-sm leading-7 text-slate-600">
@@ -518,113 +517,53 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <section className="rounded-[28px] bg-white/88 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">History</p>
-                  <h3 className="mt-1 text-xl font-semibold text-slate-900">Jump through recent days without losing the overview</h3>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Selected day</p>
+                  <h3 className="mt-1 text-xl font-semibold text-slate-900">{formatDay(effectiveDay)}</h3>
                 </div>
-                <p className="text-sm text-slate-500">Selected: {formatDay(effectiveDay)}</p>
+                <p className="text-sm text-slate-500">One cleaner summary instead of separate history cards.</p>
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-                {recentDays.map((day) => {
-                  const record = dayLookup.get(day);
-                  const active = day === effectiveDay;
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => setSelectedDay(day)}
-                      className={`rounded-[20px] border p-3 text-left transition ${active ? 'border-slate-900 bg-slate-900 text-white shadow-[0_16px_30px_rgba(15,23,42,0.12)]' : 'border-slate-200 bg-slate-50 hover:bg-white'}`}
-                    >
-                      <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${active ? 'text-slate-200' : 'text-slate-400'}`}>{formatChartDay(day)}</p>
-                      <p className={`mt-2 text-base font-semibold ${active ? 'text-white' : 'text-slate-900'}`}>
-                        {typeof record?.check_in?.weight_kg === 'number' ? `${record.check_in.weight_kg}kg` : '--'}
-                      </p>
-                      <div className="mt-3 flex items-center gap-1.5">
-                        <span className={`h-2.5 w-2.5 rounded-full ${(record?.check_in ? (active ? 'bg-white' : 'bg-slate-900') : 'bg-slate-300')}`} />
-                        <span className={`h-2.5 w-2.5 rounded-full ${((record?.meals?.length || 0) > 0 ? (active ? 'bg-white/80' : 'bg-amber-500') : 'bg-slate-300')}`} />
-                        <span className={`h-2.5 w-2.5 rounded-full ${((record?.training?.length || 0) > 0 ? (active ? 'bg-white/65' : 'bg-emerald-500') : 'bg-slate-300')}`} />
-                        <span className={`h-2.5 w-2.5 rounded-full ${(record?.health ? (active ? 'bg-white/50' : 'bg-sky-500') : 'bg-slate-300')}`} />
-                      </div>
-                    </button>
-                  );
-                })}
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Check-in</p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      Weight {formatNullableMetric(selectedCheckIn?.weight_kg, ' kg')} · Body fat {formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Activity</p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      Steps {typeof selectedHealth?.steps === 'number' ? selectedHealth.steps : '--'} · Calories {typeof selectedHealth?.calories_burned === 'number' ? `${selectedHealth.calories_burned} kcal` : '--'} · Active {typeof selectedHealth?.active_minutes === 'number' ? selectedHealth.active_minutes : '--'} min
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Meals</p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {selectedMeals.length} logged · Intake {Math.round(selectedDayRecord?.total_intake || 0)} kcal · Target {formatNullableMetric(records?.profile?.daily_target as number | null | undefined, ' kcal')}
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Training</p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {selectedTraining.length} entries · Estimated work {Math.round(selectedDayRecord?.total_burned || 0)} kcal
+                    </p>
+                  </div>
+                </div>
               </div>
+
+              {selectedCheckIn?.notes ? (
+                <p className="mt-4 text-sm leading-7 text-slate-500">{selectedCheckIn.notes}</p>
+              ) : null}
             </section>
 
-            <section className="grid gap-4 xl:grid-cols-4">
-              <article className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)] xl:col-span-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Check-in</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">{formatDay(effectiveDay)}</p>
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Weight</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedCheckIn?.weight_kg, ' kg')}</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Body Fat</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Note</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">{selectedCheckIn?.notes || 'No daily note saved.'}</p>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)] xl:col-span-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Activity</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">{selectedHealth?.synced_at ? 'Apple Health synced' : 'No synced activity yet'}</p>
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Steps</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{typeof selectedHealth?.steps === 'number' ? selectedHealth.steps : '--'}</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Calories</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{typeof selectedHealth?.calories_burned === 'number' ? `${selectedHealth.calories_burned} kcal` : '--'}</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Active Minutes</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{typeof selectedHealth?.active_minutes === 'number' ? selectedHealth.active_minutes : '--'}</p>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)] xl:col-span-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Meals</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">{selectedMeals.length} logged</p>
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Total Intake</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{Math.round(selectedDayRecord?.total_intake || 0)} kcal</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Daily Target</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(records?.profile?.daily_target as number | null | undefined, ' kcal')}</p>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.04)] xl:col-span-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Training</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">{selectedTraining.length} entries</p>
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Estimated Work</p>
-                    <p className="mt-1 text-base font-semibold text-slate-900">{Math.round(selectedDayRecord?.total_burned || 0)} kcal</p>
-                  </div>
-                  <div className="rounded-[18px] bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Status</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">{selectedTraining.length ? 'Logged and editable below' : 'Nothing logged yet'}</p>
-                  </div>
-                </div>
-              </article>
-            </section>
-
-            <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+            <section className="rounded-[28px] bg-white/88 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Quick check-in</p>
@@ -683,7 +622,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-2">
-              <article className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <article className="rounded-[28px] bg-white/88 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Meals</p>
@@ -693,7 +632,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                 </div>
 
                 {selectedMeals.length ? (
-                  <div className="mt-4 divide-y divide-slate-200/70 rounded-[24px] border border-slate-200/70 bg-white px-5">
+                  <div className="mt-4 divide-y divide-slate-200/60 rounded-[24px] bg-slate-50/55 px-5">
                     {selectedMeals.map((meal, index) => (
                       <article key={meal.id} className="py-4">
                         <div className="flex items-start justify-between gap-4">
@@ -725,7 +664,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                 )}
               </article>
 
-              <article className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <article className="rounded-[28px] bg-white/88 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
                 <div className="flex items-end justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Training</p>
@@ -735,7 +674,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                 </div>
 
                 {selectedTraining.length ? (
-                  <div className="mt-4 divide-y divide-slate-200/70 rounded-[24px] border border-slate-200/70 bg-white px-5">
+                  <div className="mt-4 divide-y divide-slate-200/60 rounded-[24px] bg-slate-50/55 px-5">
                     {selectedTraining.map((entry, index) => (
                       <article key={entry.id} className="py-4">
                         <div className="flex items-start justify-between gap-4">

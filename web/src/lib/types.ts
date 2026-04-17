@@ -114,6 +114,7 @@ export interface FeedPost {
   user_id: number;
   type: string;
   visibility?: 'private' | 'friends' | 'public';
+  viewer_has_liked?: boolean;
   content: string | null;
   username: string;
   avatar_url: string | null;
@@ -226,6 +227,12 @@ export interface SecurityEvent {
 
 export interface FeedResponse {
   feed: FeedPost[];
+}
+
+export interface PostReactionResponse {
+  success: boolean;
+  reacted: boolean;
+  reactionCount: number;
 }
 
 export interface LeaderboardEntry {
