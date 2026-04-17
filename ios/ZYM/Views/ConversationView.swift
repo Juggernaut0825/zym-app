@@ -49,6 +49,7 @@ struct ConversationView: View {
     @State private var profileLoading = false
     @State private var viewedProfile: ConversationPublicProfileResponse?
     @State private var profileReportPending = false
+    @State private var profileActionPending = false
     @State private var animatedCoachReplies: [Int: Int] = [:]
     @State private var coachRevealWorkItems: [Int: [DispatchWorkItem]] = [:]
     @State private var coachRevealTick = 0
@@ -171,6 +172,7 @@ struct ConversationView: View {
                                     conversationIsCoach: conversation.isCoach,
                                     coachId: resolvedCoachId,
                                     timeZone: displayTimeZone,
+                                    bubbleTheme: conversationBubbleThemePreset(id: appState.conversationBubbleThemeId(for: conversation.id)),
                                     revealedCoachSegmentCount: animatedCoachReplies[msg.id],
                                     inlineTypingLabel: "\(coachTypingName) is typing...",
                                     onOpenProfile: { userId, username, avatarURL in
@@ -369,6 +371,12 @@ struct ConversationView: View {
                 appCoach: profileConversation.coachId ?? appState.selectedCoach ?? "zj",
                 profile: viewedProfile,
                 loading: profileLoading,
+                primaryActionLabel: profilePrimaryActionLabel(),
+                primaryActionEnabled: profilePrimaryActionEnabled(),
+                primaryActionPending: profileActionPending,
+                onPrimaryAction: {
+                    handleProfilePrimaryAction(for: profileConversation)
+                },
                 canReportUser: !profileConversation.isCoach && !profileConversation.isGroup && (profileConversation.otherUserId != nil),
                 reportPending: profileReportPending,
                 onReportUser: { reportConversationUser(for: profileConversation) }
@@ -941,6 +949,111 @@ struct ConversationView: View {
         }.resume()
     }
 
+    private func profilePrimaryActionLabel() -> String? {
+        guard let profile = viewedProfile else { return nil }
+        switch profile.friendship_status.lowercased() {
+        case "self":
+            return nil
+        case "accepted":
+            return "Send Message"
+        case "pending":
+            return "Pending"
+        default:
+            return "Add as Friend"
+        }
+    }
+
+    private func profilePrimaryActionEnabled() -> Bool {
+        guard let profile = viewedProfile else { return false }
+        switch profile.friendship_status.lowercased() {
+        case "accepted", "none":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleProfilePrimaryAction(for targetConversation: Conversation) {
+        guard let profile = viewedProfile else { return }
+        let relationship = profile.friendship_status.lowercased()
+        if relationship == "accepted" {
+            openDirectMessageFromProfile(targetUserId: profile.profile.id)
+        } else if relationship == "none" {
+            sendFriendRequestFromProfile(targetUserId: profile.profile.id)
+        }
+    }
+
+    private func openDirectMessageFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/messages/open-dm") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "otherUserId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300,
+                      let data = data,
+                      let payload = try? JSONDecoder().decode(DMOpenResponse.self, from: data) else {
+                    infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to open direct message."
+                    return
+                }
+                appState.requestedTabIndex = 0
+                appState.requestedConversationTopic = payload.topic
+                profileSheetConversation = nil
+                infoNotice = "Direct message ready."
+            }
+        }.resume()
+    }
+
+    private func sendFriendRequestFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/friends/add") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to send friend request."
+                    return
+                }
+                if let profile = viewedProfile {
+                    viewedProfile = ConversationPublicProfileResponse(
+                        visibility: profile.visibility,
+                        isFriend: profile.isFriend,
+                        friendship_status: "pending",
+                        profile: profile.profile,
+                        today_health: profile.today_health,
+                        recent_posts: profile.recent_posts
+                    )
+                }
+                infoNotice = "Friend request sent."
+            }
+        }.resume()
+    }
+
     private func clearDraftAttachments(resetSelection: Bool = true) {
         for attachment in draftAttachments {
             if let previewURL = attachment.previewURL {
@@ -1090,17 +1203,21 @@ private struct ConversationNotificationSettingsView: View {
     @State private var saving = false
     @State private var statusText = ""
 
+    private var selectedBubbleTheme: ConversationBubbleThemePreset {
+        conversationBubbleThemePreset(id: appState.conversationBubbleThemeId(for: conversation.id))
+    }
+
     var body: some View {
         ZStack {
             ZYMBackgroundLayer().ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(conversation.name)
                             .font(.custom("Syne", size: 28))
                             .foregroundColor(Color.zymText)
-                        Text("Choose whether this conversation should stay noisy or quiet. Your account-wide defaults still live in Profile.")
+                        Text("Keep this chat loud or quiet. You can also pick a simple bubble theme here.")
                             .font(.system(size: 14))
                             .foregroundColor(Color.zymSubtext)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1121,8 +1238,8 @@ private struct ConversationNotificationSettingsView: View {
                                         .font(.system(size: 15, weight: .semibold))
                                         .foregroundColor(Color.zymText)
                                     Text((preference?.muted ?? false)
-                                         ? "This chat still lives in your inbox, but new messages from it will stay quiet."
-                                         : "New messages from this chat will continue appearing in your notification feed.")
+                                         ? "This chat stays in your inbox, but new messages stay quiet."
+                                         : "New messages from this chat can still notify you.")
                                         .font(.system(size: 12))
                                         .foregroundColor(Color.zymSubtext)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -1143,9 +1260,7 @@ private struct ConversationNotificationSettingsView: View {
                                 }
                                 .disabled(saving || loading)
                             }
-                            .padding(14)
-                            .background(Color.white.opacity(0.82))
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.vertical, 2)
                         }
 
                         if !statusText.isEmpty {
@@ -1156,6 +1271,66 @@ private struct ConversationNotificationSettingsView: View {
                     }
                     .zymCard()
                     .zymAppear(delay: 0.08)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Bubble theme")
+                            .font(.custom("Syne", size: 20))
+                            .foregroundColor(Color.zymText)
+
+                        Text("Saved on this device for this chat.")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color.zymSubtext)
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            ForEach(conversationBubbleThemePresets) { preset in
+                                Button {
+                                    appState.setConversationBubbleThemeId(preset.id, for: conversation.id)
+                                    statusText = "Bubble theme updated."
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text(preset.label)
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundColor(Color.zymText)
+                                            HStack(spacing: 6) {
+                                                Capsule()
+                                                    .fill(preset.incomingFill)
+                                                    .frame(width: 24, height: 10)
+                                                    .overlay(
+                                                        Capsule()
+                                                            .fill(preset.incomingText.opacity(0.8))
+                                                            .frame(width: 10, height: 3)
+                                                    )
+                                                Capsule()
+                                                    .fill(preset.outgoingFill)
+                                                    .frame(width: 24, height: 10)
+                                                    .overlay(
+                                                        Capsule()
+                                                            .fill(preset.outgoingText.opacity(0.8))
+                                                            .frame(width: 10, height: 3)
+                                                    )
+                                            }
+                                        }
+
+                                        Spacer(minLength: 8)
+
+                                        if selectedBubbleTheme.id == preset.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(Color.zymPrimaryDark)
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 11)
+                                    .background(Color.zymSurfaceSoft.opacity(selectedBubbleTheme.id == preset.id ? 0.96 : 0.72))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .zymCard()
+                    .zymAppear(delay: 0.1)
                 }
                 .padding(14)
             }
@@ -1328,6 +1503,7 @@ private struct ConversationMessageRow: View {
     let conversationIsCoach: Bool
     let coachId: String
     let timeZone: TimeZone
+    let bubbleTheme: ConversationBubbleThemePreset
     let revealedCoachSegmentCount: Int?
     let inlineTypingLabel: String
     let onOpenProfile: ((Int, String, String?) -> Void)?
@@ -1448,7 +1624,7 @@ private struct ConversationMessageRow: View {
 
                     VStack(alignment: isMine ? .trailing : .leading, spacing: 8) {
                         ForEach(Array(renderedSegments.enumerated()), id: \.offset) { _, segment in
-                            ConversationSegmentBubble(content: segment, isMine: isMine)
+                            ConversationSegmentBubble(content: segment, isMine: isMine, theme: bubbleTheme)
                         }
 
                         if hasRemainingCoachSegments {
@@ -1536,20 +1712,21 @@ private struct ConversationAvatarBadge: View {
 private struct ConversationSegmentBubble: View {
     let content: String
     let isMine: Bool
+    let theme: ConversationBubbleThemePreset
 
     var body: some View {
-        ConversationMarkdownText(content: content, isMine: isMine)
+        ConversationMarkdownText(content: content, isMine: isMine, theme: theme)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(isMine ? Color.zymSurfaceSoft.opacity(0.92) : Color.zymBubbleDark)
+            .background(isMine ? theme.outgoingFill : theme.incomingFill)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: isMine ? Color.black.opacity(0.03) : Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
     }
 }
 
 private struct ConversationMarkdownText: View {
     let content: String
     let isMine: Bool
+    let theme: ConversationBubbleThemePreset
 
     private var attributed: AttributedString? {
         try? AttributedString(
@@ -1562,13 +1739,13 @@ private struct ConversationMarkdownText: View {
         if let attributed {
             Text(attributed)
                 .font(.system(size: 15))
-                .foregroundColor(isMine ? Color.zymText : .white)
-                .tint(isMine ? Color.zymPrimaryDark : Color.white.opacity(0.92))
+                .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
+                .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
         } else {
             Text(content)
                 .font(.system(size: 15))
-                .foregroundColor(isMine ? Color.zymText : .white)
-                .tint(isMine ? Color.zymPrimaryDark : Color.white.opacity(0.92))
+                .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
+                .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
         }
     }
 }
@@ -1614,10 +1791,6 @@ struct RemoteMediaGrid: View {
                             }
                         }
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isMine ? Color.white.opacity(0.25) : Color.zymLine, lineWidth: 1)
-                    )
                 }
             }
         }
@@ -1649,10 +1822,6 @@ struct DraftAttachmentPreview: View {
         }
         .frame(width: 76, height: 76)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.zymLine, lineWidth: 1)
-        )
     }
 }
 
@@ -1827,6 +1996,7 @@ struct GroupMembersResponse: Codable {
 struct ConversationPublicProfileResponse: Codable {
     let visibility: String
     let isFriend: Bool
+    let friendship_status: String
     let profile: ConversationPublicProfile
     let today_health: ConversationPublicHealth?
     let recent_posts: [ConversationPublicPost]
@@ -1866,6 +2036,10 @@ struct ConversationProfileSheet: View {
     let appCoach: String
     let profile: ConversationPublicProfileResponse?
     let loading: Bool
+    let primaryActionLabel: String?
+    let primaryActionEnabled: Bool
+    let primaryActionPending: Bool
+    let onPrimaryAction: (() -> Void)?
     let canReportUser: Bool
     let reportPending: Bool
     let onReportUser: () -> Void
@@ -1960,13 +2134,33 @@ struct ConversationProfileSheet: View {
                             }
                             .zymCard()
 
-                            if canReportUser {
-                                Button(action: onReportUser) {
-                                    Text(reportPending ? "Reporting..." : "Report User")
-                                        .frame(maxWidth: .infinity)
+                            HStack(spacing: 8) {
+                                if let primaryActionLabel {
+                                    if primaryActionEnabled {
+                                        Button(action: { onPrimaryAction?() }) {
+                                            Text(primaryActionPending ? "Working..." : primaryActionLabel)
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(ZYMPrimaryButton())
+                                        .disabled(primaryActionPending || onPrimaryAction == nil)
+                                    } else {
+                                        Button(action: { onPrimaryAction?() }) {
+                                            Text(primaryActionPending ? "Working..." : primaryActionLabel)
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(ZYMGhostButton())
+                                        .disabled(true)
+                                    }
                                 }
-                                .buttonStyle(ZYMGhostButton())
-                                .disabled(reportPending)
+
+                                if canReportUser {
+                                    Button(action: onReportUser) {
+                                        Text(reportPending ? "Reporting..." : "Report")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(ZYMGhostButton())
+                                    .disabled(reportPending)
+                                }
                             }
 
                             VStack(alignment: .leading, spacing: 6) {

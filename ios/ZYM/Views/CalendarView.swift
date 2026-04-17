@@ -237,10 +237,10 @@ struct CalendarView: View {
                         .font(.system(size: 11, weight: .bold))
                         .tracking(1.4)
                         .foregroundColor(Color.zymSubtext)
-                    Text("Progress, meals, training, and Apple Health")
+                    Text("Daily log")
                         .font(.custom("Syne", size: 24))
                         .foregroundColor(Color.zymText)
-                    Text("Use the date picker to jump between days. Everything below updates around the day you actually selected.")
+                    Text("Pick a day. Everything below updates with it.")
                         .font(.system(size: 13))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -261,7 +261,7 @@ struct CalendarView: View {
             }
 
             HStack {
-                Text(syncStatus.isEmpty ? "Apple Health steps, calories, and active minutes sync here for web and iOS." : syncStatus)
+                Text(syncStatus.isEmpty ? "Health sync shows here." : syncStatus)
                     .font(.system(size: 12))
                     .foregroundColor(Color.zymSubtext)
                 Spacer()
@@ -280,22 +280,22 @@ struct CalendarView: View {
             calendarStatCard(
                 title: "Daily Target",
                 value: calendarMetric(records?.profile.daily_target, suffix: " kcal"),
-                detail: "Calculated from your saved profile"
+                detail: "From profile"
             )
             calendarStatCard(
                 title: "Latest Weight",
                 value: calendarMetric(records?.progress?.latestWeightKg, suffix: " kg"),
-                detail: records?.progress?.latestWeightDay.map { "Last weigh-in \(calendarFormattedDay($0))" } ?? "No weigh-ins yet"
+                detail: records?.progress?.latestWeightDay.map { calendarFormattedDay($0) } ?? "No check-ins"
             )
             calendarStatCard(
                 title: "Selected Steps",
                 value: selectedHealth.map { "\($0.steps)" } ?? "--",
-                detail: selectedHealth?.synced_at == nil ? "No health sync for this day" : "Synced from Apple Health"
+                detail: selectedHealth?.synced_at == nil ? "No sync" : "Synced"
             )
             calendarStatCard(
                 title: "14d Delta",
                 value: calendarSignedMetric(records?.progress?.weight14dDelta, suffix: " kg"),
-                detail: records?.progress?.statusLabel ?? "Need more signal"
+                detail: records?.progress?.statusLabel ?? "Need data"
             )
         }
     }
@@ -308,7 +308,7 @@ struct CalendarView: View {
                         .font(.system(size: 11, weight: .bold))
                         .tracking(1.4)
                         .foregroundColor(Color.zymSubtext)
-                    Text("Weight trend anchored to \(calendarFormattedDay(effectiveDay))")
+                    Text("Weight trend")
                         .font(.custom("Syne", size: 20))
                         .foregroundColor(Color.zymText)
                 }
@@ -325,10 +325,10 @@ struct CalendarView: View {
             CalendarWeightBars(points: weightPoints)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(records?.progress?.statusLabel ?? "Need more signal before calling the trend.")
+                Text(records?.progress?.statusLabel ?? "Need more data.")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color.zymText)
-                Text(records?.progress?.trendNarrative ?? "Once you log a few check-ins, the calendar can separate real progress from normal short-term noise.")
+                Text(records?.progress?.trendNarrative ?? "Log a few check-ins to see the trend.")
                     .font(.system(size: 13))
                     .foregroundColor(Color.zymSubtext)
             }
@@ -338,7 +338,7 @@ struct CalendarView: View {
 
     private var dailyOverviewCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("DAY OVERVIEW")
+            Text("SELECTED DAY")
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(Color.zymSubtext)
@@ -377,7 +377,7 @@ struct CalendarView: View {
 
     private var checkInCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("QUICK CHECK-IN")
+            Text("CHECK-IN")
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(Color.zymSubtext)
@@ -416,12 +416,12 @@ struct CalendarView: View {
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(Color.zymSubtext)
-            Text("What you ate on \(calendarFormattedDay(effectiveDay))")
+            Text("Meals on \(calendarFormattedDay(effectiveDay))")
                 .font(.custom("Syne", size: 20))
                 .foregroundColor(Color.zymText)
 
             if selectedMeals.isEmpty {
-                calendarEmptyState("No meals were logged for this day.")
+                calendarEmptyState("No meals logged.")
             } else {
                 ForEach(selectedMeals) { meal in
                     VStack(alignment: .leading, spacing: 8) {
@@ -458,12 +458,12 @@ struct CalendarView: View {
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.4)
                 .foregroundColor(Color.zymSubtext)
-            Text("What you trained on \(calendarFormattedDay(effectiveDay))")
+            Text("Training on \(calendarFormattedDay(effectiveDay))")
                 .font(.custom("Syne", size: 20))
                 .foregroundColor(Color.zymText)
 
             if selectedTraining.isEmpty {
-                calendarEmptyState("No training entries were logged for this day.")
+                calendarEmptyState("No training logged.")
             } else {
                 ForEach(selectedTraining) { entry in
                     VStack(alignment: .leading, spacing: 8) {
@@ -733,7 +733,7 @@ private struct CalendarWeightBars: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if numericWeights.count < 2 {
-                Text("Add at least two weigh-ins and the trend visualization will appear here.")
+                Text("Add two weigh-ins to see the trend.")
                     .font(.system(size: 13))
                     .foregroundColor(Color.zymSubtext)
                     .frame(maxWidth: .infinity, minHeight: 140)

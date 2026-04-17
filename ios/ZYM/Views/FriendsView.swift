@@ -3,6 +3,76 @@ import AVFoundation
 import CoreImage.CIFilterBuiltins
 import UIKit
 
+private func nearbyDistanceText(_ distance: Double) -> String {
+    if distance < 1 {
+        return "\(max(100, Int((distance * 1000).rounded()))) m"
+    }
+    return distance >= 10 ? "\(Int(distance.rounded())) km" : String(format: "%.1f km", distance)
+}
+
+private func nearbyStatusTitle(_ status: String) -> String {
+    switch status.lowercased() {
+    case "accepted":
+        return "Friends"
+    case "pending":
+        return "Pending"
+    case "self":
+        return "You"
+    default:
+        return "Add"
+    }
+}
+
+private struct NearbyAvatarTile: View {
+    let user: NearbyUserPayload
+    let onTap: () -> Void
+
+    var body: some View {
+        Button {
+            onTap()
+        } label: {
+            VStack(spacing: 8) {
+                if let avatarURL = user.avatar_url, let url = resolveRemoteURL(avatarURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.zymSurfaceSoft)
+                        }
+                    }
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.zymSurfaceSoft)
+                        .frame(width: 64, height: 64)
+                        .overlay(
+                            Text(String(user.username.prefix(1)).uppercased())
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(Color.zymPrimaryDark)
+                        )
+                }
+
+                VStack(spacing: 2) {
+                    Text(user.username)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                        .lineLimit(1)
+                    Text(nearbyDistanceText(user.distance_km))
+                        .font(.system(size: 10))
+                        .foregroundColor(Color.zymSubtext)
+                }
+                .frame(width: 68)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct FriendsView: View {
     @State private var friends: [Friend] = []
     @State private var requests: [Friend] = []
@@ -28,13 +98,7 @@ struct FriendsView: View {
                                 .font(.custom("Syne", size: 20))
 
                             TextField("Search people by username", text: $searchQuery)
-                                .padding(12)
-                                .background(Color.zymSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.zymLine, lineWidth: 1)
-                                )
-                                .cornerRadius(12)
+                                .zymFieldStyle()
                                 .textInputAutocapitalization(.never)
                                 .disableAutocorrection(true)
 
@@ -162,7 +226,7 @@ struct FriendsView: View {
         }.resume()
     }
 
-    func sendFriendRequest(to friendId: Int) {
+    func sendFriendRequest(to friendId: Int, dismissAfterAdd: Bool = true) {
         guard let userId = appState.userId,
               let url = apiURL("/friends/add") else { return }
 
@@ -387,7 +451,19 @@ struct AddFriendView: View {
     @State private var pending = false
     @State private var showQRCodeFullscreen = false
     @State private var showQRScanner = false
+    @State private var sharedLocation: StoredUserLocationPayload?
+    @State private var nearbyUsers: [NearbyUserPayload] = []
+    @State private var nearbyLoading = false
+    @State private var nearbyLocationSheetOpen = false
+    @State private var nearbyStatusText = ""
+    @State private var profileConversation: Conversation?
+    @State private var viewedProfile: ConversationPublicProfileResponse?
+    @State private var profileLoading = false
+    @State private var profileReportPending = false
+    @State private var profileActionPending = false
+    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     private let refreshTimer = Timer.publish(every: 55, on: .main, in: .common).autoconnect()
+    private let nearbyRefreshTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
     let onAdd: () -> Void
 
     var body: some View {
@@ -464,31 +540,76 @@ struct AddFriendView: View {
                             .buttonStyle(ZYMGhostButton())
                     }
 
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text("Nearby")
+                                        .font(.custom("Syne", size: 18))
+                                        .foregroundColor(Color.zymText)
+                                    Button(action: { loadNearbyUsers() }) {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundColor(Color.zymSubtext)
+                                            .rotationEffect(.degrees(nearbyLoading ? 180 : 0))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(nearbyLoading || sharedLocation == nil)
+                                }
+                                Text(sharedLocation?.label ?? "Location off")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+
+                            Spacer()
+
+                            Button(sharedLocation == nil ? "Enable" : "Manage") {
+                                nearbyLocationSheetOpen = true
+                            }
+                            .buttonStyle(ZYMGhostButton())
+                        }
+
+                        if sharedLocation == nil {
+                            Text("No nearby users")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+                        } else if nearbyUsers.isEmpty && !nearbyLoading {
+                            Text("No nearby users")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(Array(nearbyUsers.prefix(8))) { user in
+                                        NearbyAvatarTile(user: user) {
+                                            openNearbyProfile(user)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !nearbyStatusText.isEmpty {
+                            Text(nearbyStatusText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymPrimary)
+                        }
+                    }
+                    .zymCard()
+
                     Text("Add by user ID or connect code")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
 
                     TextField("e.g. 102 or zym://add-friend?uid=102", text: $identifier)
-                        .padding(12)
-                        .background(Color.zymSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.zymLine, lineWidth: 1)
-                        )
-                        .cornerRadius(12)
+                        .zymFieldStyle()
 
                     Text("Or invite by username")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
 
                     TextField("Search username", text: $username)
-                        .padding(12)
-                        .background(Color.zymSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.zymLine, lineWidth: 1)
-                        )
-                        .cornerRadius(12)
+                        .zymFieldStyle()
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
 
@@ -530,9 +651,15 @@ struct AddFriendView: View {
         }
         .onAppear {
             loadConnectCode()
+            loadStoredLocation()
+            loadNearbyUsers()
         }
         .onReceive(refreshTimer) { _ in
             loadConnectCode(silent: true)
+        }
+        .onReceive(nearbyRefreshTimer) { _ in
+            guard sharedLocation != nil else { return }
+            loadNearbyUsers()
         }
         .onChange(of: username) { _, value in
             scheduleUsernameSearch(for: value)
@@ -565,9 +692,43 @@ struct AddFriendView: View {
                 onRefresh: { loadConnectCode() }
             )
         }
+        .sheet(isPresented: $nearbyLocationSheetOpen) {
+            NearbyLocationSheet(
+                initialLocation: sharedLocation,
+                onSaved: { location in
+                    sharedLocation = location
+                    nearbyStatusText = location == nil ? "" : "Updated."
+                    loadNearbyUsers()
+                },
+                onDisabled: {
+                    sharedLocation = nil
+                    nearbyUsers = []
+                    nearbyStatusText = "Location off."
+                },
+                locationCoordinator: locationCoordinator
+            )
+            .environmentObject(appState)
+        }
+        .sheet(item: $profileConversation) { profileConversation in
+            ConversationProfileSheet(
+                conversation: profileConversation,
+                appCoach: appState.selectedCoach ?? "zj",
+                profile: viewedProfile,
+                loading: profileLoading,
+                primaryActionLabel: profilePrimaryActionLabel(),
+                primaryActionEnabled: profilePrimaryActionEnabled(),
+                primaryActionPending: profileActionPending,
+                onPrimaryAction: {
+                    handleProfilePrimaryAction()
+                },
+                canReportUser: true,
+                reportPending: profileReportPending,
+                onReportUser: { reportNearbyProfileUser(conversation: profileConversation) }
+            )
+        }
     }
 
-    func sendFriendRequest(to friendId: Int) {
+    func sendFriendRequest(to friendId: Int, dismissAfterAdd: Bool = true) {
         guard let userId = appState.userId,
               let url = apiURL("/friends/add") else { return }
 
@@ -597,8 +758,13 @@ struct AddFriendView: View {
                     }
                     return
                 }
+                applyNearbyStatus(friendId: friendId, status: "pending")
                 onAdd()
-                dismiss()
+                if dismissAfterAdd {
+                    dismiss()
+                } else {
+                    nearbyStatusText = "Friend request sent."
+                }
             }
         }.resume()
     }
@@ -729,6 +895,216 @@ struct AddFriendView: View {
                     connectId = String(connectIdInt)
                 }
                 connectExpiresAt = parseISODate(payload["expiresAt"] as? String)
+            }
+        }.resume()
+    }
+
+    func loadStoredLocation() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/profile/\(userId)") else { return }
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(StoredLocationResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                sharedLocation = response.location
+            }
+        }.resume()
+    }
+
+    func loadNearbyUsers() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/nearby/\(userId)") else { return }
+        nearbyLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async {
+                nearbyLoading = false
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(NearbyUsersResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                nearbyUsers = response.users
+            }
+        }.resume()
+    }
+
+    func applyNearbyStatus(friendId: Int, status: String) {
+        guard let index = nearbyUsers.firstIndex(where: { $0.id == friendId }) else { return }
+        nearbyUsers[index].friendship_status = status
+    }
+
+    func openNearbyProfile(_ user: NearbyUserPayload) {
+        profileConversation = Conversation(
+            id: "user_\(user.id)",
+            name: user.username,
+            isGroup: false,
+            isCoach: false,
+            coachId: nil,
+            coachEnabled: nil,
+            avatarUrl: user.avatar_url,
+            otherUserId: user.id,
+            previewText: "",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+        viewedProfile = nil
+        profileLoading = true
+
+        guard let url = apiURL("/profile/public/\(user.id)") else {
+            profileLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            defer {
+                DispatchQueue.main.async {
+                    profileLoading = false
+                }
+            }
+
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ConversationPublicProfileResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                viewedProfile = response
+            }
+        }.resume()
+    }
+
+    func profilePrimaryActionLabel() -> String? {
+        guard let profile = viewedProfile else { return nil }
+        switch profile.friendship_status.lowercased() {
+        case "self":
+            return nil
+        case "accepted":
+            return "Send Message"
+        case "pending":
+            return "Pending"
+        default:
+            return "Add as Friend"
+        }
+    }
+
+    func profilePrimaryActionEnabled() -> Bool {
+        guard let profile = viewedProfile else { return false }
+        switch profile.friendship_status.lowercased() {
+        case "accepted", "none":
+            return true
+        default:
+            return false
+        }
+    }
+
+    func handleProfilePrimaryAction() {
+        guard let profile = viewedProfile else { return }
+        let relationship = profile.friendship_status.lowercased()
+        if relationship == "accepted" {
+            openDirectMessageFromProfile(targetUserId: profile.profile.id)
+        } else if relationship == "none" {
+            sendFriendRequestFromProfile(targetUserId: profile.profile.id)
+        }
+    }
+
+    func openDirectMessageFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/messages/open-dm") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "otherUserId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300,
+                      let data = data,
+                      let payload = try? JSONDecoder().decode(DMOpenResponse.self, from: data) else {
+                    nearbyStatusText = "Failed to open chat."
+                    return
+                }
+                appState.requestedTabIndex = 0
+                appState.requestedConversationTopic = payload.topic
+                profileConversation = nil
+                dismiss()
+            }
+        }.resume()
+    }
+
+    func sendFriendRequestFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/friends/add") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    nearbyStatusText = "Failed to send request."
+                    return
+                }
+                applyNearbyStatus(friendId: targetUserId, status: "pending")
+                if let profile = viewedProfile {
+                    viewedProfile = ConversationPublicProfileResponse(
+                        visibility: profile.visibility,
+                        isFriend: profile.isFriend,
+                        friendship_status: "pending",
+                        profile: profile.profile,
+                        today_health: profile.today_health,
+                        recent_posts: profile.recent_posts
+                    )
+                }
+                nearbyStatusText = "Friend request sent."
+            }
+        }.resume()
+    }
+
+    func reportNearbyProfileUser(conversation: Conversation) {
+        guard !profileReportPending,
+              let reporterUserId = appState.userId,
+              let targetUserId = viewedProfile?.profile.id ?? conversation.otherUserId,
+              let url = apiURL("/moderation/report") else { return }
+
+        profileReportPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": reporterUserId,
+            "targetType": "user",
+            "targetId": targetUserId,
+            "reason": "inappropriate_behavior",
+            "details": "Reported from iOS nearby profile"
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { _, response, _ in
+            DispatchQueue.main.async {
+                profileReportPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                nearbyStatusText = (200...299).contains(statusCode) ? "Report submitted." : "Failed to report user."
             }
         }.resume()
     }

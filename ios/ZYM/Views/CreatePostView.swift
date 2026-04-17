@@ -42,6 +42,13 @@ private func appendCreatePostHashtag(_ content: String, hashtag: String) -> Stri
     return trimmed.isEmpty ? "#\(normalized)" : "\(trimmed) #\(normalized)"
 }
 
+private func stripCreatePostHashtags(_ content: String) -> String {
+    content
+        .replacingOccurrences(of: "(^|\\s)#[a-z0-9_]{2,32}\\b", with: "$1", options: .regularExpression)
+        .replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 struct PostDraftAttachment: Identifiable {
     let id = UUID()
     let data: Data
@@ -97,6 +104,10 @@ struct CreatePostView: View {
                         }
 
                         Button(action: {
+                            guard visibility == "public" else {
+                                composerStatusText = "Hashtags stay on public posts only."
+                                return
+                            }
                             if let first = hashtagSuggestions.first {
                                 content = appendCreatePostHashtag(content, hashtag: first)
                             }
@@ -123,6 +134,7 @@ struct CreatePostView: View {
                         Menu {
                             Button("Friends only") {
                                 visibility = "friends"
+                                content = stripCreatePostHashtags(content)
                             }
                             Button("Public") {
                                 visibility = "public"
@@ -157,7 +169,7 @@ struct CreatePostView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
 
-                    if !hashtagSuggestions.isEmpty {
+                    if visibility == "public" && !hashtagSuggestions.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(hashtagSuggestions, id: \.self) { tag in
@@ -208,7 +220,7 @@ struct CreatePostView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Text(visibility == "public" ? "This post will be visible to everyone." : "This post will be visible to friends only.")
+                    Text(visibility == "public" ? "This post will be visible to everyone." : "This post will be visible to friends only. Hashtags stay off private posts.")
                         .font(.system(size: 12))
                         .foregroundColor(Color.zymSubtext)
                         .frame(maxWidth: .infinity, alignment: .leading)

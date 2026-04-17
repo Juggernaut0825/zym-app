@@ -102,30 +102,32 @@ struct ProfileView: View {
                         .zymAppear(delay: 0.04)
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Bio")
-                                .font(.custom("Syne", size: 18))
-                                .foregroundColor(Color.zymText)
-                            Text(profile?.bio?.isEmpty == false ? profile?.bio ?? "" : "No bio yet.")
-                                .font(.system(size: 14))
-                                .foregroundColor(Color.zymSubtext)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Bio")
+                                    .font(.custom("Syne", size: 18))
+                                    .foregroundColor(Color.zymText)
+                                Text(profile?.bio?.isEmpty == false ? profile?.bio ?? "" : "No bio yet.")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
 
-                            Divider()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Fitness Goal")
+                                    .font(.custom("Syne", size: 18))
+                                    .foregroundColor(Color.zymText)
+                                Text(profile?.fitness_goal?.isEmpty == false ? profile?.fitness_goal ?? "" : "Not set")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
 
-                            Text("Fitness Goal")
-                                .font(.custom("Syne", size: 18))
-                                .foregroundColor(Color.zymText)
-                            Text(profile?.fitness_goal?.isEmpty == false ? profile?.fitness_goal ?? "" : "Not set")
-                                .font(.system(size: 14))
-                                .foregroundColor(Color.zymSubtext)
-
-                            Divider()
-
-                            Text("Hobbies")
-                                .font(.custom("Syne", size: 18))
-                                .foregroundColor(Color.zymText)
-                            Text(profile?.hobbies?.isEmpty == false ? profile?.hobbies ?? "" : "Not set")
-                                .font(.system(size: 14))
-                                .foregroundColor(Color.zymSubtext)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Hobbies")
+                                    .font(.custom("Syne", size: 18))
+                                    .foregroundColor(Color.zymText)
+                                Text(profile?.hobbies?.isEmpty == false ? profile?.hobbies ?? "" : "Not set")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .zymCard()
@@ -138,7 +140,7 @@ struct ProfileView: View {
                         .buttonStyle(ZYMPrimaryButton())
                         .zymAppear(delay: 0.14)
 
-                        Text("Coach info, check-ins, meals, training, and Apple Health sync now live in Calendar.")
+                        Text("Calendar has your check-ins, meals, training, and health sync.")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(Color.zymSubtext)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,7 +152,7 @@ struct ProfileView: View {
                                 .font(.custom("Syne", size: 20))
                                 .foregroundColor(Color.zymText)
 
-                            Text("Set account-wide defaults here. Chat-level mute stays inside each conversation’s three-dot settings page.")
+                            Text("Set account-wide defaults here.")
                                 .font(.system(size: 13))
                                 .foregroundColor(Color.zymSubtext)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -195,6 +197,32 @@ struct ProfileView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .zymCard()
                         .zymAppear(delay: 0.177)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Message Bubble")
+                                .font(.custom("Syne", size: 20))
+                                .foregroundColor(Color.zymText)
+
+                            Text("Pick a default chat color style.")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(conversationBubbleThemePresets) { preset in
+                                    ProfileBubbleThemeChip(
+                                        preset: preset,
+                                        selected: appState.defaultConversationBubbleThemeId == preset.id,
+                                        onSelect: {
+                                            appState.setDefaultConversationBubbleThemeId(preset.id)
+                                            notificationStatusText = "Bubble theme updated."
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .zymCard()
+                        .zymAppear(delay: 0.178)
 
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
@@ -542,16 +570,11 @@ private struct ProfileEditSheet: View {
             profileImageContent(remoteURL: remoteURL, draft: draft, circular: true)
                 .frame(width: frameHeight, height: frameHeight)
                 .clipShape(Circle())
-                .overlay(Circle().stroke(Color.zymLine, lineWidth: 1))
         } else {
             profileImageContent(remoteURL: remoteURL, draft: draft, circular: false)
                 .frame(maxWidth: .infinity)
                 .frame(height: frameHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.zymLine, lineWidth: 1)
-                )
         }
     }
 
@@ -1683,7 +1706,7 @@ private func formatCoachDay(_ day: String) -> String {
     return day
 }
 
-private func parseAPIError(_ data: Data?) -> String? {
+func parseAPIError(_ data: Data?) -> String? {
     guard let data,
           let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let error = payload["error"] as? String,
@@ -1726,6 +1749,55 @@ private struct ProfileNotificationRow: View {
         .padding(14)
         .background(Color.white.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct ProfileBubbleThemeChip: View {
+    let preset: ConversationBubbleThemePreset
+    let selected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(preset.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    HStack(spacing: 6) {
+                        Capsule()
+                            .fill(preset.incomingFill)
+                            .frame(width: 24, height: 10)
+                            .overlay(
+                                Capsule()
+                                    .fill(preset.incomingText.opacity(0.82))
+                                    .frame(width: 10, height: 3)
+                            )
+                        Capsule()
+                            .fill(preset.outgoingFill)
+                            .frame(width: 24, height: 10)
+                            .overlay(
+                                Capsule()
+                                    .fill(preset.outgoingText.opacity(0.82))
+                                    .frame(width: 10, height: 3)
+                            )
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color.zymPrimaryDark)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.white.opacity(selected ? 0.92 : 0.76))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 

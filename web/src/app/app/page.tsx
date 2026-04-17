@@ -26,7 +26,6 @@ import {
   getInbox,
   getLeaderboard,
   getMentionNotifications,
-  getNearbyUsers,
   getNotificationPreferences,
   getSecurityEvents,
   getMessages,
@@ -53,7 +52,6 @@ import {
   syncHealth,
   updateConversationNotificationPreference,
   updateNotificationPreferences,
-  updateStoredLocation,
   updatePostVisibility,
   updateProfile,
   uploadFile,
@@ -80,7 +78,6 @@ import {
   LocationSelection,
   LeaderboardEntry,
   MentionNotification,
-  NearbyUser,
   NotificationPreferences,
   SecurityEvent,
   StoredUserLocation,
@@ -168,12 +165,38 @@ const MAX_PROFILE_AVATAR_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 const GROUP_MEMBER_LIMIT = 500;
+const MESSAGE_BUBBLE_THEME_STORAGE_KEY_PREFIX = 'zym.web.messageBubbleTheme.v1.user';
 const HASHTAG_STOP_WORDS = new Set([
   'about', 'after', 'also', 'and', 'back', 'been', 'being', 'both', 'but', 'came', 'come', 'does', 'dont',
   'even', 'feel', 'felt', 'from', 'have', 'into', 'just', 'keep', 'more', 'need', 'over', 'really', 'some',
   'that', 'their', 'them', 'then', 'there', 'they', 'this', 'today', 'want', 'what', 'when', 'with', 'would',
   'your', 'yours',
 ]);
+
+interface MessageBubbleThemePreset {
+  id: string;
+  label: string;
+  incomingFill: string;
+  incomingText: string;
+  outgoingFill: string;
+  outgoingText: string;
+}
+
+const messageBubbleThemePresets: MessageBubbleThemePreset[] = [
+  { id: 'sand', label: 'Sand', incomingFill: '#faf7f2', incomingText: '#1f2937', outgoingFill: '#f3e9d1', outgoingText: '#1f2937' },
+  { id: 'ink', label: 'Ink', incomingFill: '#f1f5f9', incomingText: '#0f172a', outgoingFill: '#334155', outgoingText: '#ffffff' },
+  { id: 'sage', label: 'Sage', incomingFill: '#f3faf4', incomingText: '#16321f', outgoingFill: '#d7ead9', outgoingText: '#16321f' },
+  { id: 'sky', label: 'Sky', incomingFill: '#f2f8ff', incomingText: '#183153', outgoingFill: '#d7e9fb', outgoingText: '#183153' },
+  { id: 'peach', label: 'Peach', incomingFill: '#fff5ef', incomingText: '#4b2416', outgoingFill: '#ffdcca', outgoingText: '#4b2416' },
+  { id: 'lavender', label: 'Lavender', incomingFill: '#f7f2ff', incomingText: '#342357', outgoingFill: '#e8dcff', outgoingText: '#342357' },
+  { id: 'rose', label: 'Rose', incomingFill: '#fff1f6', incomingText: '#4f1e35', outgoingFill: '#ffd8e8', outgoingText: '#4f1e35' },
+  { id: 'midnight', label: 'Midnight', incomingFill: '#eef2ff', incomingText: '#172554', outgoingFill: '#1e293b', outgoingText: '#ffffff' },
+];
+
+function resolveMessageBubbleTheme(id?: string | null): MessageBubbleThemePreset {
+  const normalized = String(id || '').trim();
+  return messageBubbleThemePresets.find((item) => item.id === normalized) || messageBubbleThemePresets[0];
+}
 
 function extractHashtagsFromText(value?: string | null): string[] {
   const matches = String(value || '').match(/#([a-z0-9_]{2,32})/gi) || [];
@@ -208,6 +231,15 @@ function appendHashtagToDraft(value: string, hashtag: string): string {
   }
   const trimmed = value.trimEnd();
   return `${trimmed}${trimmed ? ' ' : ''}#${normalizedTag}`;
+}
+
+function stripHashtagsFromDraft(value: string): string {
+  return String(value || '')
+    .replace(/(^|\s)#[a-z0-9_]{2,32}\b/gi, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function activityNotificationTitle(item: ActivityNotification): string {
@@ -519,6 +551,10 @@ function postDraftStorageKey(userId: number): string {
   return `${POST_DRAFT_STORAGE_KEY_PREFIX}.${userId}`;
 }
 
+function bubbleThemeStorageKey(userId: number): string {
+  return `${MESSAGE_BUBBLE_THEME_STORAGE_KEY_PREFIX}.${userId}`;
+}
+
 function loadMessageDrafts(userId: number): Record<string, string> {
   if (typeof window === 'undefined') return {};
   if (!Number.isInteger(userId) || userId <= 0) return {};
@@ -587,6 +623,26 @@ function persistPostDraft(userId: number, value: string) {
   }
 }
 
+function loadBubbleThemeId(userId: number): string {
+  if (typeof window === 'undefined') return messageBubbleThemePresets[0].id;
+  if (!Number.isInteger(userId) || userId <= 0) return messageBubbleThemePresets[0].id;
+  try {
+    return resolveMessageBubbleTheme(localStorage.getItem(bubbleThemeStorageKey(userId))).id;
+  } catch {
+    return messageBubbleThemePresets[0].id;
+  }
+}
+
+function persistBubbleThemeId(userId: number, themeId: string) {
+  if (typeof window === 'undefined') return;
+  if (!Number.isInteger(userId) || userId <= 0) return;
+  try {
+    localStorage.setItem(bubbleThemeStorageKey(userId), resolveMessageBubbleTheme(themeId).id);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function buildP2PTopic(userA: number, userB: number): string {
   const left = Math.min(userA, userB);
   const right = Math.max(userA, userB);
@@ -643,11 +699,14 @@ function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
 }
 
-function buildAppUrl(tab: TabKey = 'messages', welcomeState?: 'done'): string {
+function buildAppUrl(tab: TabKey = 'messages', welcomeState?: 'done', topic?: string): string {
   const params = new URLSearchParams();
   params.set('tab', tab);
   if (welcomeState) {
     params.set('welcome', welcomeState);
+  }
+  if (topic) {
+    params.set('topic', topic);
   }
   return `/app?${params.toString()}`;
 }
@@ -976,21 +1035,17 @@ export default function AppPage() {
   const [activityNotificationsLoading, setActivityNotificationsLoading] = useState(false);
   const [postLocation, setPostLocation] = useState<LocationSelection | null>(null);
   const [sharedLocation, setSharedLocation] = useState<StoredUserLocation | null>(null);
-  const [sharedLocationLoading, setSharedLocationLoading] = useState(false);
-  const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
-  const [nearbyUsersLoading, setNearbyUsersLoading] = useState(false);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [locationPickerMode, setLocationPickerMode] = useState<'post' | 'nearby'>('post');
   const [locationSearchQuery, setLocationSearchQuery] = useState('');
   const [locationSearchResults, setLocationSearchResults] = useState<LocationSelection[]>([]);
   const [locationSearchLoading, setLocationSearchLoading] = useState(false);
   const [locationPickerPending, setLocationPickerPending] = useState(false);
-  const [locationShareEnabled, setLocationShareEnabled] = useState(true);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
     messageNotificationsEnabled: true,
     postNotificationsEnabled: true,
   });
   const [notificationPreferencesPending, setNotificationPreferencesPending] = useState(false);
+  const [messageBubbleThemeId, setMessageBubbleThemeId] = useState(messageBubbleThemePresets[0].id);
   const [conversationNotificationPreference, setConversationNotificationPreference] = useState<ConversationNotificationPreference | null>(null);
   const [conversationSettingsOpen, setConversationSettingsOpen] = useState(false);
   const [conversationSettingsLoading, setConversationSettingsLoading] = useState(false);
@@ -1036,6 +1091,7 @@ export default function AppPage() {
     coachId: 'zj',
     data: null,
   });
+  const [profileViewerActionPending, setProfileViewerActionPending] = useState(false);
   const [mediaLightbox, setMediaLightbox] = useState<{
     open: boolean;
     url: string;
@@ -1056,6 +1112,7 @@ export default function AppPage() {
   const friendsRef = useRef<Friend[]>([]);
   const selectedCoachRef = useRef<'zj' | 'lc'>('zj');
   const postMenuRef = useRef<HTMLDivElement | null>(null);
+  const requestedTopicRef = useRef('');
 
   const typingTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -1135,6 +1192,10 @@ export default function AppPage() {
   );
 
   const unreadCommunityNotificationCount = unreadMentionCount + unreadActivityNotificationCount;
+  const selectedMessageBubbleTheme = useMemo(
+    () => resolveMessageBubbleTheme(messageBubbleThemeId),
+    [messageBubbleThemeId],
+  );
 
   const prioritizedCommunityNotifications = useMemo<CommunityNotificationEntry[]>(
     () => [
@@ -1173,11 +1234,13 @@ export default function AppPage() {
 
   const trendingHashtags = useMemo(() => {
     const counts = new Map<string, number>();
-    feed.forEach((post) => {
+    feed
+      .filter((post) => post.visibility === 'public')
+      .forEach((post) => {
       extractHashtagsFromText(post.content).forEach((tag) => {
         counts.set(tag, (counts.get(tag) || 0) + 1);
       });
-    });
+      });
 
     return Array.from(counts.entries())
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
@@ -1191,10 +1254,11 @@ export default function AppPage() {
   );
 
   const composerHashtagSuggestions = useMemo(() => {
+    if (postVisibility !== 'public') return [];
     const keywordSuggestions = extractKeywordHashtags(postText, 6);
     if (keywordSuggestions.length > 0) return keywordSuggestions;
     return trendingHashtags.slice(0, 6).map((item) => item.tag);
-  }, [postText, trendingHashtags]);
+  }, [postText, postVisibility, trendingHashtags]);
 
   const filteredFeed = useMemo(() => {
     const query = communityQuery.trim().toLowerCase();
@@ -1889,6 +1953,7 @@ export default function AppPage() {
     const bootstrapCoach = auth.selectedCoach || 'zj';
     const params = new URLSearchParams(window.location.search);
     const suppressWelcome = params.get('welcome') === 'done';
+    requestedTopicRef.current = String(params.get('topic') || '').trim();
     if (suppressWelcome) {
       params.delete('welcome');
       const nextSearch = params.toString();
@@ -1906,6 +1971,7 @@ export default function AppPage() {
     setActiveTopic('');
     setComposer('');
     setPostText(loadPostDraft(auth.userId));
+    setMessageBubbleThemeId(loadBubbleThemeId(auth.userId));
 
     setTab(normalizeTabKey(params.get('tab')));
 
@@ -1931,7 +1997,6 @@ export default function AppPage() {
       loadConnectInfo(auth.userId),
       loadMentions(auth.userId),
       loadStoredLocation(auth.userId),
-      loadNearbyLocationUsers(auth.userId),
     ]);
   };
 
@@ -1963,6 +2028,11 @@ export default function AppPage() {
       document.removeEventListener('visibilitychange', syncTimezone);
     };
   }, [ready, authUserId]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    persistBubbleThemeId(authUserId, messageBubbleThemeId);
+  }, [authUserId, messageBubbleThemeId]);
 
   useEffect(() => {
     const onAuthExpired = () => forceReauth('Invalid or expired token.');
@@ -2077,7 +2147,6 @@ export default function AppPage() {
     setPostText(loadPostDraft(authUserId));
     setPostLocation(null);
     setSharedLocation(null);
-    setNearbyUsers([]);
     if (activeTopicRef.current) {
       skipTypingPulseRef.current = true;
       setComposer(scopedDrafts[activeTopicRef.current] || '');
@@ -2475,8 +2544,13 @@ export default function AppPage() {
       ];
 
       setConversations(list);
-
-      if (!activeTopicRef.current || !list.some((item) => item.topic === activeTopicRef.current)) {
+      const requestedTopic = requestedTopicRef.current;
+      if (requestedTopic && list.some((item) => item.topic === requestedTopic)) {
+        setTab('messages');
+        setActiveTopic(requestedTopic);
+        setMobileConversationListOpen(false);
+        requestedTopicRef.current = '';
+      } else if (!activeTopicRef.current || !list.some((item) => item.topic === activeTopicRef.current)) {
         setActiveTopic(list[0]?.topic || '');
       }
 
@@ -2578,28 +2652,10 @@ export default function AppPage() {
     if (!userId) return;
 
     try {
-      setSharedLocationLoading(true);
       const location = await getStoredLocation(userId);
       setSharedLocation(location);
-      setLocationShareEnabled(Boolean(location?.shared));
     } catch (err: any) {
       setError(err.message || 'Failed to load location.');
-    } finally {
-      setSharedLocationLoading(false);
-    }
-  }
-
-  async function loadNearbyLocationUsers(userId = authUserId) {
-    if (!userId) return;
-
-    try {
-      setNearbyUsersLoading(true);
-      const rows = await getNearbyUsers(userId);
-      setNearbyUsers(rows);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load nearby users.');
-    } finally {
-      setNearbyUsersLoading(false);
     }
   }
 
@@ -3033,14 +3089,12 @@ export default function AppPage() {
     }
   }
 
-  function openLocationPicker(mode: 'post' | 'nearby') {
-    setLocationPickerMode(mode);
+  function openLocationPicker() {
     setLocationPickerOpen(true);
     setLocationSearchQuery('');
     setLocationSearchResults([]);
     setLocationSearchLoading(false);
     setLocationPickerPending(false);
-    setLocationShareEnabled(mode === 'nearby' ? true : Boolean(sharedLocation?.shared));
   }
 
   function closeLocationPicker() {
@@ -3051,33 +3105,11 @@ export default function AppPage() {
     setLocationPickerPending(false);
   }
 
-  async function persistSharedLocation(location: LocationSelection | null, shared: boolean) {
-    const next = await updateStoredLocation({
-      userId: authUserId,
-      location,
-      locationShared: shared,
-    });
-    setSharedLocation(next);
-    if (shared && next) {
-      await loadNearbyLocationUsers(authUserId);
-    } else {
-      setNearbyUsers([]);
-    }
-  }
-
   async function applyLocationSelection(selection: LocationSelection) {
     try {
       setLocationPickerPending(true);
-      if (locationPickerMode === 'nearby') {
-        await persistSharedLocation(selection, true);
-        showNotice(`Nearby discovery now uses ${selection.label}.`);
-      } else {
-        setPostLocation(selection);
-        if (locationShareEnabled) {
-          await persistSharedLocation(selection, true);
-        }
-        showNotice(`Post location set to ${selection.label}.`);
-      }
+      setPostLocation(selection);
+      showNotice(`Post location set to ${selection.label}.`);
       closeLocationPicker();
     } catch (err: any) {
       setError(err.message || 'Failed to save location.');
@@ -3113,18 +3145,6 @@ export default function AppPage() {
       } else {
         setError(err.message || 'Failed to use your current location.');
       }
-      setLocationPickerPending(false);
-    }
-  }
-
-  async function handleDisableNearbySharing() {
-    try {
-      setLocationPickerPending(true);
-      await persistSharedLocation(null, false);
-      showNotice('Nearby discovery is turned off.');
-      closeLocationPicker();
-    } catch (err: any) {
-      setError(err.message || 'Failed to disable nearby sharing.');
       setLocationPickerPending(false);
     }
   }
@@ -3570,6 +3590,7 @@ export default function AppPage() {
   }
 
   function closeProfileViewer() {
+    setProfileViewerActionPending(false);
     setProfileViewer((prev) => ({ ...prev, open: false }));
     if (profileViewer.surface === 'message-pane' && !activeConversation && !isWideMessageLayout) {
       setMobileConversationListOpen(true);
@@ -3605,6 +3626,7 @@ export default function AppPage() {
       userId: targetUserId,
       data: null,
     });
+    setProfileViewerActionPending(false);
 
     try {
       const data = await getPublicProfile(targetUserId);
@@ -3633,6 +3655,7 @@ export default function AppPage() {
       userId: targetUserId,
       data: null,
     });
+    setProfileViewerActionPending(false);
 
     try {
       const data = await getPublicProfile(targetUserId);
@@ -3647,6 +3670,64 @@ export default function AppPage() {
     } catch (err: any) {
       setProfileViewer((prev) => ({ ...prev, loading: false, data: null }));
       setError(err.message || 'Failed to load profile.');
+    }
+  }
+
+  function profileViewerPrimaryActionLabel(): string | null {
+    const status = profileViewer.data?.friendship_status;
+    const targetUserId = profileViewer.data?.profile?.id || 0;
+    if (!status || !targetUserId || targetUserId === authUserId) return null;
+    if (status === 'accepted') return 'Send Message';
+    if (status === 'none') return 'Add as Friend';
+    if (status === 'pending') return 'Pending';
+    return null;
+  }
+
+  function profileViewerPrimaryActionEnabled(): boolean {
+    const status = profileViewer.data?.friendship_status;
+    const targetUserId = profileViewer.data?.profile?.id || 0;
+    if (!status || !targetUserId || targetUserId === authUserId || profileViewerActionPending) return false;
+    return status === 'accepted' || status === 'none';
+  }
+
+  async function handleProfileViewerPrimaryAction() {
+    const viewedProfile = profileViewer.data?.profile;
+    const status = profileViewer.data?.friendship_status;
+    if (!viewedProfile || !status || viewedProfile.id === authUserId || profileViewerActionPending) return;
+
+    try {
+      setProfileViewerActionPending(true);
+      if (status === 'accepted') {
+        const topic = await openDM(authUserId, viewedProfile.id);
+        requestedTopicRef.current = topic;
+        setTab('messages');
+        setActiveTopic(topic);
+        setMobileConversationListOpen(false);
+        closeProfileViewer();
+        await loadInbox(authUserId, friendsRef.current);
+        return;
+      }
+
+      if (status === 'none') {
+        await addFriend({ userId: authUserId, friendId: viewedProfile.id });
+        setProfileViewer((prev) => (
+          prev.data
+            ? {
+              ...prev,
+              data: {
+                ...prev.data,
+                friendship_status: 'pending',
+                isFriend: false,
+              },
+            }
+            : prev
+        ));
+        showNotice(`Friend request sent to ${viewedProfile.username}.`);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to update profile action.');
+    } finally {
+      setProfileViewerActionPending(false);
     }
   }
 
@@ -3798,12 +3879,6 @@ export default function AppPage() {
     )),
     1,
   );
-  const suggestedCommunities = [
-    { icon: 'bolt', name: 'Daily Push', meta: 'Training accountability room' },
-    { icon: 'nutrition', name: 'Macro Circle', meta: 'Meals, prep, and protein check-ins' },
-    { icon: 'favorite', name: 'Recovery Crew', meta: 'Sleep, stress, and habit momentum' },
-  ];
-  const trendingTopics = ['#hybridtraining', '#mealprep', '#coachcheckin', '#habitstack', '#accountability'];
 
   const renderAppHeader = (
     title: string,
@@ -3816,7 +3891,7 @@ export default function AppPage() {
     onSearchSuggestionSelect?: (value: string) => void,
     trailing?: JSX.Element,
   ) => (
-    <header className="flex flex-col gap-2.5 border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:gap-4 sm:px-5 sm:py-3 md:flex-row md:items-center md:justify-between md:px-8">
+    <header className="relative z-20 flex flex-col gap-2.5 border-b border-slate-200/50 bg-white/20 px-4 py-2.5 backdrop-blur-sm sm:gap-4 sm:px-5 sm:py-3 md:flex-row md:items-center md:justify-between md:px-8">
       <div>
         <h1 className="text-[1.3rem] font-semibold tracking-tight text-slate-900 sm:text-[1.9rem] md:text-[2.15rem]">{title}</h1>
         {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
@@ -3855,7 +3930,7 @@ export default function AppPage() {
             ) : null}
           </label>
         ) : null}
-        {trailing ? <div className="flex items-center gap-2">{trailing}</div> : null}
+        {trailing ? <div className="relative z-30 flex items-center gap-2">{trailing}</div> : null}
       </div>
     </header>
   );
@@ -4205,15 +4280,20 @@ export default function AppPage() {
                               key={`${message.id}-segment-${segmentIndex}`}
                               className={`rounded-[18px] px-3 py-2.5 shadow-sm sm:rounded-[22px] sm:px-4 sm:py-3 ${
                                 mine
-                                  ? 'rounded-tr-md bg-white/92 text-slate-800 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'
-                                  : 'rounded-tl-md text-white'
+                                  ? 'rounded-tr-md'
+                                  : 'rounded-tl-md'
                               } ${segmentIndex > 0 ? 'mt-2' : ''}`}
-                              style={!mine ? (
-                                {
-                                  background: neutralTheme.solidBubble,
-                                  boxShadow: '0 12px 26px rgba(15,23,42,0.14)',
-                                }
-                              ) : undefined}
+                              style={{
+                                background: mine
+                                  ? selectedMessageBubbleTheme.outgoingFill
+                                  : selectedMessageBubbleTheme.incomingFill,
+                                color: mine
+                                  ? selectedMessageBubbleTheme.outgoingText
+                                  : selectedMessageBubbleTheme.incomingText,
+                                boxShadow: mine
+                                  ? '0 10px 24px rgba(15,23,42,0.06)'
+                                  : '0 12px 26px rgba(15,23,42,0.08)',
+                              }}
                             >
                               {segment ? <p className="text-[13px] leading-5 sm:text-sm sm:leading-6">{renderMessageInlineLinks(segment)}</p> : null}
                             </div>
@@ -4360,6 +4440,8 @@ export default function AppPage() {
     const viewerProfile = profileViewer.data?.profile;
     const viewerPosts = profileViewer.data?.recent_posts || [];
     const viewerHealth = profileViewer.data?.today_health;
+    const primaryActionLabel = profileViewerPrimaryActionLabel();
+    const primaryActionEnabled = profileViewerPrimaryActionEnabled();
 
     return (
       <div
@@ -4467,7 +4549,7 @@ export default function AppPage() {
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
                             <span>User ID {viewerProfile.id}</span>
                             <span>•</span>
-                            <span>{profileViewer.data?.isFriend ? 'Friend' : 'Community member'}</span>
+                            <span>{profileViewer.data?.friendship_status === 'accepted' ? 'Friend' : 'Community member'}</span>
                             {viewerProfile.enabled_coaches?.length ? (
                               <>
                                 <span>•</span>
@@ -4479,20 +4561,36 @@ export default function AppPage() {
                       </div>
 
                       {viewerProfile.id !== authUserId ? (
-                        <button
-                          className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-                          type="button"
-                          onClick={() => {
-                            openAbuseReportDialog(
-                              'user',
-                              viewerProfile.id,
-                              'inappropriate_behavior',
-                              `Reported user ${viewerProfile.username} from profile viewer`,
-                            );
-                          }}
-                        >
-                          Report
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {primaryActionLabel ? (
+                            <button
+                              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                                primaryActionEnabled
+                                  ? 'bg-slate-900 text-white hover:bg-slate-800'
+                                  : 'bg-slate-200 text-slate-500'
+                              }`}
+                              type="button"
+                              disabled={!primaryActionEnabled}
+                              onClick={() => void handleProfileViewerPrimaryAction()}
+                            >
+                              {profileViewerActionPending ? 'Working...' : primaryActionLabel}
+                            </button>
+                          ) : null}
+                          <button
+                            className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                            type="button"
+                            onClick={() => {
+                              openAbuseReportDialog(
+                                'user',
+                                viewerProfile.id,
+                                'inappropriate_behavior',
+                                `Reported user ${viewerProfile.username} from profile viewer`,
+                              );
+                            }}
+                          >
+                            Report
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   </div>
@@ -4602,7 +4700,7 @@ export default function AppPage() {
     return (
       <div className="flex h-full flex-col">
         {renderAppHeader(
-          'Community Feed',
+          'Community',
           '',
           communityQuery,
           setCommunityQuery,
@@ -4699,7 +4797,7 @@ export default function AppPage() {
                 </span>
               </button>
               {communityActionsOpen ? (
-                <div className="absolute right-0 top-[calc(100%+10px)] z-30 flex min-w-[180px] flex-col gap-1.5 rounded-[18px] bg-[rgba(17,24,39,0.92)] p-2.5 text-white shadow-xl backdrop-blur-xl">
+                <div className="absolute right-0 top-[calc(100%+10px)] z-50 flex min-w-[180px] flex-col gap-1.5 rounded-[18px] bg-[rgba(17,24,39,0.92)] p-2.5 text-white shadow-xl backdrop-blur-xl">
                   <button
                     type="button"
                     className="rounded-[14px] px-3 py-2.5 text-left text-sm font-semibold transition hover:bg-white/10"
@@ -4796,23 +4894,25 @@ export default function AppPage() {
                         Add media
                         <input hidden type="file" multiple accept="image/*,video/*" onChange={onFileSelect(postFiles, setPostFiles)} />
                       </label>
+                      {postVisibility === 'public' ? (
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
+                          onClick={() => {
+                            const nextTag = composerHashtagSuggestions[0];
+                            if (nextTag) {
+                              setPostText((prev) => appendHashtagToDraft(prev, nextTag));
+                            }
+                          }}
+                        >
+                          <span className="text-sm font-bold">#</span>
+                          Suggest hashtag
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
-                        onClick={() => {
-                          const nextTag = composerHashtagSuggestions[0];
-                          if (nextTag) {
-                            setPostText((prev) => appendHashtagToDraft(prev, nextTag));
-                          }
-                        }}
-                      >
-                        <span className="text-sm font-bold">#</span>
-                        Suggest hashtag
-                      </button>
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-[13px] font-medium text-slate-700 transition hover:bg-slate-200 sm:px-4 sm:py-2 sm:text-sm"
-                        onClick={() => openLocationPicker('post')}
+                        onClick={() => openLocationPicker()}
                       >
                         <span className="material-symbols-outlined" style={{ fontSize: 16 }}>near_me</span>
                         {postLocation ? 'Edit location' : 'Add location'}
@@ -4825,7 +4925,7 @@ export default function AppPage() {
                       ) : null}
                     </div>
 
-                    {composerHashtagSuggestions.length > 0 ? (
+                    {postVisibility === 'public' && composerHashtagSuggestions.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {composerHashtagSuggestions.map((tag) => (
                           <button
@@ -4861,7 +4961,13 @@ export default function AppPage() {
                         <select
                           className="w-full appearance-none rounded-full border border-transparent bg-slate-100/90 px-4 py-2 pr-10 text-[13px] font-medium text-slate-700 outline-none transition sm:py-2.5 sm:text-sm"
                           value={postVisibility}
-                          onChange={(event) => setPostVisibility(event.target.value as 'public' | 'friends')}
+                          onChange={(event) => {
+                            const nextVisibility = event.target.value as 'public' | 'friends';
+                            setPostVisibility(nextVisibility);
+                            if (nextVisibility !== 'public') {
+                              setPostText((prev) => stripHashtagsFromDraft(prev));
+                            }
+                          }}
                           aria-label="Post visibility"
                         >
                           <option value="public">Public</option>
@@ -4875,6 +4981,9 @@ export default function AppPage() {
                         </span>
                       </label>
                       <div className="flex items-center gap-2">
+                        {postVisibility !== 'public' ? (
+                          <span className="text-xs text-slate-400">Hashtags stay on public posts.</span>
+                        ) : null}
                         <button
                           type="button"
                           className="btn btn-ghost"
@@ -4894,48 +5003,6 @@ export default function AppPage() {
                       wrapperClassName="media-grid-preview"
                       itemClassName="media-thumb"
                     />
-                  </div>
-                ) : null}
-              </section>
-
-              <section className="xl:hidden rounded-[22px] bg-white/44 p-4 backdrop-blur-xl sm:rounded-[28px] sm:p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Nearby</p>
-                    <h3 className="mt-1 text-base font-semibold text-slate-900">People around you</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-500">
-                      {sharedLocation
-                        ? `Using ${sharedLocation.label} for nearby discovery.`
-                        : 'Turn on location sharing to discover nearby members.'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-200"
-                    onClick={() => openLocationPicker('nearby')}
-                  >
-                    {sharedLocation ? 'Update' : 'Enable'}
-                  </button>
-                </div>
-                {sharedLocationLoading || nearbyUsersLoading ? (
-                  <p className="mt-3 text-sm text-slate-500">Loading nearby members...</p>
-                ) : null}
-                {!sharedLocationLoading && !nearbyUsersLoading && sharedLocation && nearbyUsers.length > 0 ? (
-                  <div className="mt-3 flex flex-col gap-2">
-                    {nearbyUsers.slice(0, 4).map((user) => (
-                      <button
-                        key={`nearby-mobile-${user.id}`}
-                        type="button"
-                        className="flex items-center justify-between rounded-[18px] bg-white/72 px-3 py-2.5 text-left transition hover:bg-white"
-                        onClick={() => void openPublicProfile(user.id)}
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{user.username}</p>
-                          <p className="text-xs text-slate-500">{user.location_city}</p>
-                        </div>
-                        <span className="text-xs font-semibold text-slate-400">{formatDistanceKm(user.distance_km)}</span>
-                      </button>
-                    ))}
                   </div>
                 ) : null}
               </section>
@@ -5211,8 +5278,8 @@ export default function AppPage() {
           <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
             <section className="rounded-[24px] bg-white/58 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trending</p>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">What people are actually using</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Tap one to filter the feed with real tags already showing up in posts.</p>
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">Public tags</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Only hashtags from public posts show up here.</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {trendingHashtags.length > 0 ? trendingHashtags.map((item) => (
                   <button
@@ -5229,72 +5296,6 @@ export default function AppPage() {
               </div>
             </section>
 
-            <section className="rounded-[24px] bg-white/52 p-4 backdrop-blur-xl">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Nearby</p>
-                  <h3 className="mt-2 text-lg font-semibold text-slate-900">People around you</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    {sharedLocation
-                      ? `Discover members near ${sharedLocation.label}.`
-                      : 'Share a location to discover nearby members without making the page feel crowded.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-200"
-                  onClick={() => openLocationPicker('nearby')}
-                >
-                  {sharedLocation ? 'Update' : 'Enable'}
-                </button>
-              </div>
-
-              {sharedLocation ? (
-                <div className="mt-3 flex items-center justify-between rounded-[18px] bg-white/74 px-3 py-2.5">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{sharedLocation.label}</p>
-                    <p className="text-xs text-slate-500">
-                      {sharedLocation.precision === 'city' ? 'City-level sharing' : 'Precise sharing'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-[12px] font-semibold text-slate-400 transition hover:text-slate-700"
-                    onClick={() => openLocationPicker('nearby')}
-                  >
-                    Edit
-                  </button>
-                </div>
-              ) : null}
-
-              {sharedLocationLoading || nearbyUsersLoading ? (
-                <p className="mt-4 text-sm text-slate-500">Loading nearby members...</p>
-              ) : null}
-
-              {!sharedLocationLoading && !nearbyUsersLoading && sharedLocation && nearbyUsers.length === 0 ? (
-                <p className="mt-4 text-sm leading-6 text-slate-500">No one nearby yet. Keep sharing your city and this list will populate as the local community grows.</p>
-              ) : null}
-
-              {!sharedLocationLoading && !nearbyUsersLoading && nearbyUsers.length > 0 ? (
-                <div className="mt-4 flex flex-col gap-2.5">
-                  {nearbyUsers.slice(0, 6).map((user) => (
-                    <button
-                      key={`nearby-${user.id}`}
-                      type="button"
-                      className="flex items-center justify-between rounded-[18px] bg-white/74 px-3 py-3 text-left transition hover:bg-white"
-                      onClick={() => void openPublicProfile(user.id)}
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{user.username}</p>
-                        <p className="truncate text-xs text-slate-500">{user.location_city}</p>
-                      </div>
-                      <span className="shrink-0 text-xs font-semibold text-slate-400">{formatDistanceKm(user.distance_km)}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-
           </aside>
         </div>
 
@@ -5304,15 +5305,13 @@ export default function AppPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    {locationPickerMode === 'nearby' ? 'Nearby users' : 'Post location'}
+                    Post location
                   </p>
                   <h3 className="mt-1 text-lg font-semibold text-slate-900">
-                    {locationPickerMode === 'nearby' ? 'Choose a shared location' : 'Attach a location'}
+                    Attach a location
                   </h3>
                   <p className="mt-1 text-sm leading-6 text-slate-500">
-                    {locationPickerMode === 'nearby'
-                      ? 'Use your city or a more precise area so the nearby people rail stays useful without feeling noisy.'
-                      : 'Pick a location for this post. You can also sync it to nearby discovery.'}
+                    Pick a city, use your current location, or search for a place.
                   </p>
                 </div>
                 <button
@@ -5353,17 +5352,6 @@ export default function AppPage() {
                 ) : null}
               </div>
 
-              {locationPickerMode === 'post' ? (
-                <label className="mt-4 flex items-center gap-3 rounded-[18px] bg-slate-50/90 px-3 py-3 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={locationShareEnabled}
-                    onChange={(event) => setLocationShareEnabled(event.target.checked)}
-                  />
-                  Also use this location for nearby discovery
-                </label>
-              ) : null}
-
               <label className="relative mt-4 block">
                 <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style={{ fontSize: 16 }}>search</span>
                 <input
@@ -5379,8 +5367,8 @@ export default function AppPage() {
                 {!locationSearchLoading && locationSearchQuery.trim().length >= 2 && locationSearchResults.length === 0 ? (
                   <p className="text-sm text-slate-500">No matching locations yet. Try a broader city name.</p>
                 ) : null}
-                {!locationSearchLoading && locationSearchQuery.trim().length < 2 && locationPickerMode === 'nearby' && sharedLocation ? (
-                  <p className="text-sm text-slate-500">Your saved location is ready. Search if you want to switch places.</p>
+                {!locationSearchLoading && locationSearchQuery.trim().length < 2 && sharedLocation ? (
+                  <p className="text-sm text-slate-500">Your saved location is ready if you want to reuse it.</p>
                 ) : null}
                 {locationSearchResults.map((result) => (
                   <button
@@ -5397,21 +5385,10 @@ export default function AppPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                {locationPickerMode === 'nearby' && sharedLocation ? (
-                  <button
-                    type="button"
-                    className="text-sm font-semibold text-slate-400 transition hover:text-slate-700"
-                    disabled={locationPickerPending}
-                    onClick={() => void handleDisableNearbySharing()}
-                  >
-                    Turn off nearby discovery
-                  </button>
-                ) : (
-                  <span className="text-xs text-slate-400">
-                    {locationPickerPending ? 'Saving location...' : 'Choose a result to continue.'}
-                  </span>
-                )}
-                {locationPickerMode === 'post' && postLocation ? (
+                <span className="text-xs text-slate-400">
+                  {locationPickerPending ? 'Saving location...' : 'Choose a result to continue.'}
+                </span>
+                {postLocation ? (
                   <button
                     type="button"
                     className="text-sm font-semibold text-slate-400 transition hover:text-slate-700"
@@ -5652,6 +5629,53 @@ export default function AppPage() {
                 {notificationPreferencesPending ? 'Saving' : notificationPreferences.postNotificationsEnabled ? 'Notify' : 'Muted'}
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-[22px] bg-white/52 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl sm:rounded-[28px] sm:p-5">
+          <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Message Bubble</h2>
+          <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Pick a default chat color style for this device.</p>
+          <div className="mt-4 grid gap-3 sm:mt-5 sm:grid-cols-2">
+            {messageBubbleThemePresets.map((preset) => {
+              const selected = preset.id === selectedMessageBubbleTheme.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`rounded-[22px] px-4 py-3 text-left transition ${
+                    selected ? 'bg-slate-900 text-white shadow-[0_14px_30px_rgba(15,23,42,0.12)]' : 'bg-slate-50/90 text-slate-700 hover:bg-slate-100'
+                  }`}
+                  onClick={() => {
+                    setMessageBubbleThemeId(preset.id);
+                    showNotice('Bubble theme updated.');
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">{preset.label}</p>
+                      <p className={`mt-1 text-xs ${selected ? 'text-white/70' : 'text-slate-400'}`}>Chat bubbles</p>
+                    </div>
+                    {selected ? (
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>check</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span
+                      className="inline-flex h-8 min-w-[84px] items-center rounded-full px-3 text-xs font-semibold"
+                      style={{ background: preset.incomingFill, color: preset.incomingText }}
+                    >
+                      Incoming
+                    </span>
+                    <span
+                      className="inline-flex h-8 min-w-[84px] items-center rounded-full px-3 text-xs font-semibold"
+                      style={{ background: preset.outgoingFill, color: preset.outgoingText }}
+                    >
+                      Yours
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -6225,7 +6249,7 @@ export default function AppPage() {
             <div className="mt-5 rounded-[22px] border border-slate-200/70 bg-slate-50/90 px-4 py-3 text-sm leading-6 text-slate-600">
               {postActionDialog.mode === 'delete'
                 ? 'The post content, media visibility, and feed entry will be removed from the community view.'
-                : 'Friends only means only accepted friends can see it. Public means everyone in the community feed can see it.'}
+                : 'Friends only means only accepted friends can see it. Public means everyone in community can see it.'}
             </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">

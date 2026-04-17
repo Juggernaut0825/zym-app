@@ -2,6 +2,8 @@ import SwiftUI
 
 struct InboxView: View {
     @State private var conversations: [Conversation] = []
+    @State private var selectedConversation: Conversation?
+    @State private var showRequestedConversation = false
     @State private var showAddMenu = false
     @State private var showAddFriend = false
     @State private var showCreateGroup = false
@@ -83,6 +85,21 @@ struct InboxView: View {
                 }
             }
             .navigationBarHidden(true)
+            .background(
+                NavigationLink(
+                    isActive: $showRequestedConversation,
+                    destination: {
+                        if let selectedConversation {
+                            ConversationView(conversation: selectedConversation)
+                                .environmentObject(appState)
+                        } else {
+                            EmptyView()
+                        }
+                    },
+                    label: { EmptyView() }
+                )
+                .hidden()
+            )
             .sheet(isPresented: $showConnectionsSheet) {
                 FriendsView()
                     .environmentObject(appState)
@@ -118,6 +135,13 @@ struct InboxView: View {
                     return
                 }
                 wsManager.connect(token: token)
+            }
+            .onChange(of: appState.requestedConversationTopic) { _, topic in
+                guard let topic, !topic.isEmpty else { return }
+                guard let conversation = conversations.first(where: { $0.id == topic }) else { return }
+                selectedConversation = conversation
+                showRequestedConversation = true
+                appState.requestedConversationTopic = nil
             }
         }
     }
@@ -261,6 +285,12 @@ struct InboxView: View {
             }
 
             conversations = convs
+            if let requestedTopic = appState.requestedConversationTopic,
+               let conversation = convs.first(where: { $0.id == requestedTopic }) {
+                selectedConversation = conversation
+                showRequestedConversation = true
+                appState.requestedConversationTopic = nil
+            }
         }
     }
 }
@@ -391,10 +421,6 @@ struct ConversationRow: View {
                     }
                     .frame(width: 50, height: 50)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.zymLine, lineWidth: 1)
-                    )
                 } else {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(conversation.isCoach ? Color.zymCoachAccent(conversation.coachId) : Color.zymSurfaceSoft)

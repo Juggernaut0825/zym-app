@@ -3,11 +3,41 @@ import Foundation
 import Security
 import CoreLocation
 
-private let fallbackAPIBaseURL = "http://localhost:3001"
-private let fallbackWSBaseURL = "ws://localhost:8080"
+private enum ZYMAppEnvironment {
+    case dev
+    case prod
+}
+
+private let devAPIBaseURL = "http://localhost:3001"
+private let devWSBaseURL = "ws://localhost:8080"
+private let prodAPIBaseURL = "https://api.zym8.com"
+private let prodWSBaseURL = "wss://ws.zym8.com"
+
+private func resolvedAppEnvironment() -> ZYMAppEnvironment {
+    let rawOverride = String(ProcessInfo.processInfo.environment["ZYM_APP_ENV"] ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+
+    switch rawOverride {
+    case "prod", "production":
+        return .prod
+    case "dev", "development", "local":
+        return .dev
+    default:
+#if DEBUG
+        return .dev
+#else
+        return .prod
+#endif
+    }
+}
 
 func apiBaseURLString() -> String {
-    (ProcessInfo.processInfo.environment["ZYM_API_BASE_URL"] ?? fallbackAPIBaseURL)
+    let env = ProcessInfo.processInfo.environment
+    let scopedFallback = resolvedAppEnvironment() == .prod
+        ? (env["ZYM_API_BASE_URL_PROD"] ?? prodAPIBaseURL)
+        : (env["ZYM_API_BASE_URL_DEV"] ?? devAPIBaseURL)
+    return (env["ZYM_API_BASE_URL"] ?? scopedFallback)
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 }
@@ -31,7 +61,11 @@ func resolveRemoteURL(_ raw: String?) -> URL? {
 }
 
 func websocketURL() -> URL? {
-    let configured = (ProcessInfo.processInfo.environment["ZYM_WS_URL"] ?? fallbackWSBaseURL)
+    let env = ProcessInfo.processInfo.environment
+    let scopedFallback = resolvedAppEnvironment() == .prod
+        ? (env["ZYM_WS_URL_PROD"] ?? prodWSBaseURL)
+        : (env["ZYM_WS_URL_DEV"] ?? devWSBaseURL)
+    let configured = (env["ZYM_WS_URL"] ?? scopedFallback)
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     return URL(string: configured)
@@ -143,7 +177,7 @@ struct NearbyUserPayload: Codable, Identifiable {
     let avatar_url: String?
     let bio: String?
     let fitness_goal: String?
-    let friendship_status: String
+    var friendship_status: String
     let location_label: String
     let location_city: String
     let distance_km: Double
@@ -290,6 +324,8 @@ class AppState: ObservableObject {
         static let username = "zym.username"
         static let selectedCoach = "zym.selectedCoach"
         static let timezone = "zym.timezone"
+        static let defaultConversationBubbleThemeId = "zym.defaultConversationBubbleThemeId"
+        static let conversationBubbleThemeIds = "zym.conversationBubbleThemeIds"
     }
 
     private var restoring = false
@@ -327,9 +363,18 @@ class AppState: ObservableObject {
     }
 
     @Published var requestedTabIndex: Int?
+    @Published var requestedConversationTopic: String?
+    @Published var defaultConversationBubbleThemeId: String = conversationBubbleThemePresets[0].id {
+        didSet { persistDefaultConversationBubbleThemeIfNeeded() }
+    }
+    @Published var conversationBubbleThemeIds: [String: String] = [:] {
+        didSet { persistConversationBubbleThemesIfNeeded() }
+    }
 
     init() {
         restoreSession()
+        restoreDefaultConversationBubbleTheme()
+        restoreConversationBubbleThemes()
     }
 
     func logout() {
@@ -447,6 +492,28 @@ class AppState: ObservableObject {
         isLoggedIn = (savedToken?.isEmpty == false) && (savedRefreshToken?.isEmpty == false) && (savedUserId > 0)
     }
 
+    private func restoreConversationBubbleThemes() {
+        restoring = true
+        defer { restoring = false }
+
+        let defaults = UserDefaults.standard
+        guard let saved = defaults.dictionary(forKey: Keys.conversationBubbleThemeIds) as? [String: String] else {
+            conversationBubbleThemeIds = [:]
+            return
+        }
+        conversationBubbleThemeIds = saved
+    }
+
+    private func restoreDefaultConversationBubbleTheme() {
+        restoring = true
+        defer { restoring = false }
+
+        let defaults = UserDefaults.standard
+        defaultConversationBubbleThemeId = conversationBubbleThemePreset(
+            id: defaults.string(forKey: Keys.defaultConversationBubbleThemeId)
+        ).id
+    }
+
     private func persistSessionIfNeeded() {
         if restoring { return }
 
@@ -476,6 +543,38 @@ class AppState: ObservableObject {
         defaults.removeObject(forKey: Keys.username)
         defaults.removeObject(forKey: Keys.selectedCoach)
         defaults.removeObject(forKey: Keys.timezone)
+    }
+
+    private func persistConversationBubbleThemesIfNeeded() {
+        if restoring { return }
+        let defaults = UserDefaults.standard
+        defaults.set(conversationBubbleThemeIds, forKey: Keys.conversationBubbleThemeIds)
+    }
+
+    private func persistDefaultConversationBubbleThemeIfNeeded() {
+        if restoring { return }
+        let defaults = UserDefaults.standard
+        defaults.set(
+            conversationBubbleThemePreset(id: defaultConversationBubbleThemeId).id,
+            forKey: Keys.defaultConversationBubbleThemeId
+        )
+    }
+
+    func conversationBubbleThemeId(for topic: String) -> String {
+        let trimmed = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return conversationBubbleThemePreset(id: defaultConversationBubbleThemeId).id }
+        let stored = conversationBubbleThemeIds[trimmed]
+        return conversationBubbleThemePreset(id: stored ?? defaultConversationBubbleThemeId).id
+    }
+
+    func setDefaultConversationBubbleThemeId(_ themeId: String) {
+        defaultConversationBubbleThemeId = conversationBubbleThemePreset(id: themeId).id
+    }
+
+    func setConversationBubbleThemeId(_ themeId: String, for topic: String) {
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTopic.isEmpty else { return }
+        conversationBubbleThemeIds[trimmedTopic] = conversationBubbleThemePreset(id: themeId).id
     }
 
     private func finishRefresh(success: Bool, shouldLogout: Bool) {

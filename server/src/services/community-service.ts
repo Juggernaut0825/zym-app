@@ -10,6 +10,22 @@ function parseMediaUrls(mediaUrls: unknown): string[] {
   }
 }
 
+function sanitizePostContentForVisibility(
+  content: string,
+  visibility: 'private' | 'friends' | 'public',
+): string {
+  const normalized = String(content || '');
+  if (visibility === 'public') {
+    return normalized;
+  }
+  return normalized
+    .replace(/(^|\s)#[a-z0-9_]{2,32}\b/gi, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export class CommunityService {
   static createPost(
     userId: number,
@@ -25,6 +41,7 @@ export class CommunityService {
       precision: 'city' | 'precise';
     } | null,
   ) {
+    const sanitizedContent = sanitizePostContentForVisibility(content, visibility);
     const result = getDB().prepare(`
       INSERT INTO posts (
         user_id,
@@ -43,7 +60,7 @@ export class CommunityService {
       userId,
       type,
       visibility,
-      content,
+      sanitizedContent,
       mediaUrls.length > 0 ? JSON.stringify(mediaUrls) : null,
       location?.label || null,
       location?.city || null,
@@ -165,7 +182,7 @@ export class CommunityService {
   static getPostById(postId: number) {
     return getDB()
       .prepare(`
-        SELECT id, user_id, visibility, location_label, location_city, location_latitude, location_longitude, location_precision
+        SELECT id, user_id, visibility, content, location_label, location_city, location_latitude, location_longitude, location_precision
         FROM posts
         WHERE id = ?
       `)
@@ -173,6 +190,7 @@ export class CommunityService {
         id?: number;
         user_id?: number;
         visibility?: string;
+        content?: string | null;
         location_label?: string | null;
         location_city?: string | null;
         location_latitude?: number | null;
@@ -190,9 +208,11 @@ export class CommunityService {
       throw new Error('You can only update your own posts.');
     }
 
+    const currentContent = String(post.content || '');
+    const sanitizedContent = sanitizePostContentForVisibility(currentContent, visibility);
     getDB()
-      .prepare('UPDATE posts SET visibility = ? WHERE id = ?')
-      .run(visibility, postId);
+      .prepare('UPDATE posts SET visibility = ?, content = ? WHERE id = ?')
+      .run(visibility, sanitizedContent, postId);
   }
 
   static deletePost(postId: number, userId: number) {

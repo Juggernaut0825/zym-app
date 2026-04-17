@@ -24,7 +24,7 @@ struct MainTabView: View {
                     .tabItem {
                         Image(systemName: "sparkles.rectangle.stack.fill")
                             .symbolEffect(.bounce, value: selectedTab)
-                        Text("Feed")
+                        Text("Community")
                     }
 
                 CalendarView()

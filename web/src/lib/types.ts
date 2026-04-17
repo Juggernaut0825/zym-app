@@ -312,6 +312,7 @@ export interface PublicHealthSnapshot {
 export interface PublicProfileResponse {
   visibility: 'full' | 'limited';
   isFriend: boolean;
+  friendship_status: 'self' | 'none' | 'pending' | 'accepted' | 'blocked';
   profile: Profile;
   today_health: PublicHealthSnapshot | null;
   recent_posts: PublicProfilePost[];

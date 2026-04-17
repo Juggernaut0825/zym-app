@@ -3169,7 +3169,15 @@ app.get('/profile/public/:userId', async (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  const fullAccess = authUserId === targetUserId || isFriend(authUserId, targetUserId);
+  const relation = db.prepare(`
+    SELECT status
+    FROM friendships
+    WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(authUserId, targetUserId, targetUserId, authUserId) as { status?: string } | undefined;
+  const friendshipStatus = authUserId === targetUserId ? 'self' : String(relation?.status || 'none');
+  const fullAccess = friendshipStatus === 'self' || friendshipStatus === 'accepted';
   const avatarAsset = user.avatar_url ? mediaAssetService.getByStorageValue(user.avatar_url) : null;
   const backgroundAsset = user.background_url ? mediaAssetService.getByStorageValue(user.background_url) : null;
   if (!fullAccess) {
@@ -3194,6 +3202,7 @@ app.get('/profile/public/:userId', async (req, res) => {
     return res.json({
       visibility: 'limited',
       isFriend: false,
+      friendship_status: friendshipStatus,
       profile: {
         id: user.id,
         username: user.username,
@@ -3239,7 +3248,8 @@ app.get('/profile/public/:userId', async (req, res) => {
 
   res.json({
     visibility: 'full',
-    isFriend: authUserId === targetUserId ? true : isFriend(authUserId, targetUserId),
+    isFriend: friendshipStatus === 'self' || friendshipStatus === 'accepted',
+    friendship_status: friendshipStatus,
     profile: {
       ...user,
       enabled_coaches: resolveEnabledCoachesForUser(targetUserId),

@@ -10,7 +10,7 @@ struct ContentView: View {
 
             FeedView()
                 .tabItem {
-                    Label("Feed", systemImage: "house.fill")
+                    Label("Community", systemImage: "house.fill")
                 }
 
             ProfileView()

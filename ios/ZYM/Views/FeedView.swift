@@ -34,21 +34,18 @@ struct FeedView: View {
     @State private var notificationsOpen = false
     @State private var pendingOpenPostId: Int?
     @State private var notificationHint = ""
-    @State private var sharedLocation: StoredUserLocationPayload?
-    @State private var nearbyUsers: [NearbyUserPayload] = []
-    @State private var nearbyLoading = false
-    @State private var nearbyLocationSheetOpen = false
     @State private var profileConversation: Conversation?
     @State private var viewedProfile: ConversationPublicProfileResponse?
     @State private var profileLoading = false
     @State private var profileReportPending = false
+    @State private var profileActionPending = false
     @StateObject private var wsManager = WebSocketManager()
-    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     @EnvironmentObject var appState: AppState
 
     private var trendingItems: [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
         posts.forEach { post in
+            guard (post.visibility ?? "friends").lowercased() == "public" else { return }
             feedExtractHashtags(from: post.content).forEach { tag in
                 counts[tag, default: 0] += 1
             }
@@ -86,23 +83,10 @@ struct FeedView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        NearbyUsersStrip(
-                            location: sharedLocation,
-                            nearbyUsers: nearbyUsers,
-                            loading: nearbyLoading,
-                            onManageLocation: {
-                                nearbyLocationSheetOpen = true
-                            },
-                            onOpenUser: { user in
-                                openPublicProfile(userId: user.id, username: user.username, avatarURL: user.avatar_url)
-                            }
-                        )
-                        .zymAppear(delay: 0.01)
-
                         TrendingStrip(
                             items: trendingItems
                         )
-                        .zymAppear(delay: 0.02)
+                        .zymAppear(delay: 0.01)
 
                         ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
                             PostCard(
@@ -203,12 +187,10 @@ struct FeedView: View {
                     }
                 }
             }
-            .navigationTitle("Feed")
+            .navigationTitle("Community")
             .onAppear {
                 loadFeed()
                 loadNotifications()
-                loadStoredLocation()
-                loadNearbyUsers()
                 connectRealtime()
             }
             .onDisappear {
@@ -223,21 +205,6 @@ struct FeedView: View {
             }
             .sheet(isPresented: $showCreatePost) {
                 CreatePostView(onPost: loadFeed)
-            }
-            .sheet(isPresented: $nearbyLocationSheetOpen) {
-                NearbyLocationSheet(
-                    initialLocation: sharedLocation,
-                    onSaved: { location in
-                        sharedLocation = location
-                        loadNearbyUsers()
-                    },
-                    onDisabled: {
-                        sharedLocation = nil
-                        nearbyUsers = []
-                    },
-                    locationCoordinator: locationCoordinator
-                )
-                .environmentObject(appState)
             }
             .sheet(item: $selectedPost) { post in
                 FeedPostDetailSheet(
@@ -263,6 +230,12 @@ struct FeedView: View {
                     appCoach: conversation.coachId ?? appState.selectedCoach ?? "zj",
                     profile: viewedProfile,
                     loading: profileLoading,
+                    primaryActionLabel: profilePrimaryActionLabel(),
+                    primaryActionEnabled: profilePrimaryActionEnabled(),
+                    primaryActionPending: profileActionPending,
+                    onPrimaryAction: {
+                        handleProfilePrimaryAction(conversation: conversation)
+                    },
                     canReportUser: !conversation.isCoach && !conversation.isGroup && (conversation.otherUserId != nil),
                     reportPending: profileReportPending,
                     onReportUser: { reportPublicProfileUser(conversation: conversation) }
@@ -332,38 +305,6 @@ struct FeedView: View {
                 mentionNotifications = nextMentions
             }
         }
-    }
-
-    func loadStoredLocation() {
-        guard let userId = appState.userId,
-              let url = apiURL("/location/profile/\(userId)") else { return }
-        var request = URLRequest(url: url)
-        applyAuthorizationHeader(&request, token: appState.token)
-        authorizedDataTask(appState: appState, request: request) { data, _, _ in
-            guard let data = data,
-                  let response = try? JSONDecoder().decode(StoredLocationResponse.self, from: data) else { return }
-            DispatchQueue.main.async {
-                sharedLocation = response.location
-            }
-        }.resume()
-    }
-
-    func loadNearbyUsers() {
-        guard let userId = appState.userId,
-              let url = apiURL("/location/nearby/\(userId)") else { return }
-        nearbyLoading = true
-        var request = URLRequest(url: url)
-        applyAuthorizationHeader(&request, token: appState.token)
-        authorizedDataTask(appState: appState, request: request) { data, _, _ in
-            DispatchQueue.main.async {
-                nearbyLoading = false
-            }
-            guard let data = data,
-                  let response = try? JSONDecoder().decode(NearbyUsersResponse.self, from: data) else { return }
-            DispatchQueue.main.async {
-                nearbyUsers = response.users
-            }
-        }.resume()
     }
 
     func openPublicProfile(userId: Int, username: String, avatarURL: String?) {
@@ -446,6 +387,111 @@ struct FeedView: View {
         }.resume()
     }
 
+    private func profilePrimaryActionLabel() -> String? {
+        guard let profile = viewedProfile else { return nil }
+        switch profile.friendship_status.lowercased() {
+        case "self":
+            return nil
+        case "accepted":
+            return "Send Message"
+        case "pending":
+            return "Pending"
+        default:
+            return "Add as Friend"
+        }
+    }
+
+    private func profilePrimaryActionEnabled() -> Bool {
+        guard let profile = viewedProfile else { return false }
+        switch profile.friendship_status.lowercased() {
+        case "accepted", "none":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleProfilePrimaryAction(conversation: Conversation) {
+        guard let profile = viewedProfile else { return }
+        let relationship = profile.friendship_status.lowercased()
+        if relationship == "accepted" {
+            openDirectMessageFromProfile(targetUserId: profile.profile.id)
+        } else if relationship == "none" {
+            sendFriendRequestFromProfile(targetUserId: profile.profile.id)
+        }
+    }
+
+    private func openDirectMessageFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/messages/open-dm") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "otherUserId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300,
+                      let data = data,
+                      let payload = try? JSONDecoder().decode(DMOpenResponse.self, from: data) else {
+                    notificationHint = parseAPIError(data) ?? "Failed to open direct message."
+                    return
+                }
+                appState.requestedTabIndex = 0
+                appState.requestedConversationTopic = payload.topic
+                profileConversation = nil
+                notificationHint = "Direct message ready."
+            }
+        }.resume()
+    }
+
+    private func sendFriendRequestFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/friends/add") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    notificationHint = parseAPIError(data) ?? "Failed to send friend request."
+                    return
+                }
+                if let profile = viewedProfile {
+                    viewedProfile = ConversationPublicProfileResponse(
+                        visibility: profile.visibility,
+                        isFriend: profile.isFriend,
+                        friendship_status: "pending",
+                        profile: profile.profile,
+                        today_health: profile.today_health,
+                        recent_posts: profile.recent_posts
+                    )
+                }
+                notificationHint = "Friend request sent."
+            }
+        }.resume()
+    }
+
     func connectRealtime() {
         guard let token = appState.token, !token.isEmpty else { return }
 
@@ -453,8 +499,6 @@ struct FeedView: View {
             switch event {
             case .authSuccess:
                 loadNotifications()
-                loadStoredLocation()
-                loadNearbyUsers()
             case .authFailed:
                 appState.logout()
             case .inboxUpdated:
@@ -861,78 +905,6 @@ private struct FeedNotificationFlyout: View {
     }
 }
 
-private struct NearbyUsersStrip: View {
-    let location: StoredUserLocationPayload?
-    let nearbyUsers: [NearbyUserPayload]
-    let loading: Bool
-    let onManageLocation: () -> Void
-    let onOpenUser: (NearbyUserPayload) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Nearby")
-                        .font(.custom("Syne", size: 18))
-                        .foregroundColor(Color.zymText)
-                    Text(location?.label.isEmpty == false ? "Using \(location?.label ?? "")" : "Share your city to discover nearby members.")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.zymSubtext)
-                }
-                Spacer()
-                Button(location == nil ? "Enable" : "Update", action: onManageLocation)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.zymPrimary)
-            }
-
-            if loading {
-                Text("Loading nearby members...")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-            } else if location == nil {
-                Text("Turn on location sharing when you want local discovery. You stay in control of the precision.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if nearbyUsers.isEmpty {
-                Text("No nearby members yet. This list will fill in as more people share a location.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(nearbyUsers.prefix(6)) { user in
-                            Button(action: { onOpenUser(user) }) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(user.username)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(Color.zymText)
-                                    Text(user.location_city)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
-                                    Text(feedDistanceLabel(user.distance_km))
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(Color.zymPrimary)
-                                }
-                                .frame(width: 132, alignment: .leading)
-                                .padding(12)
-                                .background(Color.white.opacity(0.9))
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
-    }
-}
-
 private struct TrendingStrip: View {
     let items: [(tag: String, count: Int)]
 
@@ -943,7 +915,7 @@ private struct TrendingStrip: View {
                     Text("Trending")
                         .font(.custom("Syne", size: 18))
                         .foregroundColor(Color.zymText)
-                    Text("Real tags people are using in the feed right now.")
+                    Text("Real tags people are using.")
                         .font(.system(size: 12))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -1357,10 +1329,6 @@ struct FeedMediaPreviewGrid: View {
                             }
                         }
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.zymLine, lineWidth: 1)
-                    )
                 }
             }
         }
@@ -1446,7 +1414,7 @@ struct NearbyLocationSheet: View {
             ZStack {
                 ZYMBackgroundLayer().ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Share your city or a precise area to discover nearby members. You can turn this off anytime.")
+                    Text("Share a city or area for nearby discovery.")
                         .font(.system(size: 13))
                         .foregroundColor(Color.zymSubtext)
 
@@ -1488,9 +1456,7 @@ struct NearbyLocationSheet: View {
                     }
 
                     TextField("Search city or neighborhood", text: $query)
-                        .padding(12)
-                        .background(Color.zymSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .zymFieldStyle()
                         .onChange(of: query) { _, _ in
                             searchLocations()
                         }
