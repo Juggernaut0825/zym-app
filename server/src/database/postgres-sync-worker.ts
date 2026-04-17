@@ -172,6 +172,49 @@ function convertQuestionPlaceholders(input: string): string {
   return result;
 }
 
+function splitSqlStatements(input: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+  let inSingleQuote = false;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+
+    current += char;
+
+    if (char === "'") {
+      if (inSingleQuote && next === "'") {
+        current += next;
+        index += 1;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (!inSingleQuote && char === ';') {
+      const trimmed = current.trim();
+      if (trimmed) {
+        statements.push(trimmed.slice(0, -1).trim());
+      }
+      current = '';
+    }
+  }
+
+  const tail = current.trim();
+  if (tail) {
+    statements.push(tail);
+  }
+
+  return statements.filter(Boolean);
+}
+
+function summarizeSql(sql: string): string {
+  const compact = sql.replace(/\s+/g, ' ').trim();
+  return compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
+}
+
 function rewriteSqlForPostgres(sql: string): string {
   let rewritten = String(sql || '').trim().replace(/;\s*$/, '');
 
@@ -247,11 +290,35 @@ async function initializeDatabase(request: WorkerRequest): Promise<void> {
   if (!schemaSql) {
     return;
   }
+  const statements = splitSqlStatements(schemaSql).filter(
+    (statement) => !/^BEGIN$/i.test(statement) && !/^COMMIT$/i.test(statement),
+  );
 
   const client = await clientPool.connect();
   try {
     await client.query('SELECT pg_advisory_lock($1)', [SCHEMA_INIT_LOCK_ID]);
-    await client.query(schemaSql);
+    await client.query('BEGIN');
+    try {
+      for (let index = 0; index < statements.length; index += 1) {
+        const statement = statements[index];
+        try {
+          await client.query(statement);
+        } catch (error) {
+          throw new Error(
+            `Schema init failed at statement ${index + 1}/${statements.length}: ${summarizeSql(statement)}`,
+            { cause: error instanceof Error ? error : undefined },
+          );
+        }
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Ignore rollback errors so the original schema failure stays visible.
+      }
+      throw error;
+    }
   } finally {
     try {
       await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_INIT_LOCK_ID]);
