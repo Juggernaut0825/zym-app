@@ -1,3 +1,12 @@
+export type FriendshipStatus =
+  | 'self'
+  | 'none'
+  | 'accepted'
+  | 'pending'
+  | 'incoming_pending'
+  | 'outgoing_pending'
+  | 'blocked';
+
 export interface AuthPayload {
   userId: number;
   token: string;
@@ -27,7 +36,7 @@ export interface UserSummary {
 }
 
 export interface PublicUser extends UserSummary {
-  friendship_status: 'self' | 'none' | 'pending' | 'accepted' | 'blocked';
+  friendship_status: FriendshipStatus;
 }
 
 export interface InboxCoach {
@@ -196,7 +205,7 @@ export interface NearbyUser {
   avatar_url: string | null;
   bio: string | null;
   fitness_goal: string | null;
-  friendship_status: 'self' | 'none' | 'pending' | 'accepted';
+  friendship_status: FriendshipStatus;
   location_label: string;
   location_city: string;
   distance_km: number;
@@ -312,7 +321,7 @@ export interface PublicHealthSnapshot {
 export interface PublicProfileResponse {
   visibility: 'full' | 'limited';
   isFriend: boolean;
-  friendship_status: 'self' | 'none' | 'pending' | 'accepted' | 'blocked';
+  friendship_status: FriendshipStatus;
   profile: Profile;
   today_health: PublicHealthSnapshot | null;
   recent_posts: PublicProfilePost[];

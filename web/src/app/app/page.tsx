@@ -3679,7 +3679,8 @@ export default function AppPage() {
     if (!status || !targetUserId || targetUserId === authUserId) return null;
     if (status === 'accepted') return 'Send Message';
     if (status === 'none') return 'Add as Friend';
-    if (status === 'pending') return 'Pending';
+    if (status === 'incoming_pending') return 'Accept Invitation';
+    if (status === 'outgoing_pending' || status === 'pending') return 'Pending';
     return null;
   }
 
@@ -3687,7 +3688,7 @@ export default function AppPage() {
     const status = profileViewer.data?.friendship_status;
     const targetUserId = profileViewer.data?.profile?.id || 0;
     if (!status || !targetUserId || targetUserId === authUserId || profileViewerActionPending) return false;
-    return status === 'accepted' || status === 'none';
+    return status === 'accepted' || status === 'none' || status === 'incoming_pending';
   }
 
   async function handleProfileViewerPrimaryAction() {
@@ -3716,13 +3717,31 @@ export default function AppPage() {
               ...prev,
               data: {
                 ...prev.data,
-                friendship_status: 'pending',
+                friendship_status: 'outgoing_pending',
                 isFriend: false,
               },
             }
             : prev
         ));
         showNotice(`Friend request sent to ${viewedProfile.username}.`);
+        return;
+      }
+
+      if (status === 'incoming_pending') {
+        await acceptFriend(authUserId, viewedProfile.id);
+        setProfileViewer((prev) => (
+          prev.data
+            ? {
+              ...prev,
+              data: {
+                ...prev.data,
+                friendship_status: 'accepted',
+                isFriend: true,
+              },
+            }
+            : prev
+        ));
+        showNotice(`Friend request from ${viewedProfile.username} accepted.`);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to update profile action.');

@@ -35,6 +35,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
     private var authToken: String?
     private var shouldReconnect = false
     private var isAuthenticated = false
+    private var authenticatedUserId: Int?
     private var subscribedTopics = Set<String>()
 
     // Legacy compatibility for old chat screens.
@@ -64,6 +65,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
         shouldReconnect = false
         isAuthenticated = false
         authToken = nil
+        authenticatedUserId = nil
         subscribedTopics.removeAll()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
@@ -156,6 +158,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             isAuthenticated = true
             resubscribeAllTopics()
             let userId = payload["userId"] as? Int ?? 0
+            authenticatedUserId = userId > 0 ? userId : nil
             DispatchQueue.main.async {
                 self.onEvent?(.authSuccess(userId: userId))
             }
@@ -164,6 +167,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             isAuthenticated = false
             shouldReconnect = false
             authToken = nil
+            authenticatedUserId = nil
             webSocket?.cancel(with: .normalClosure, reason: nil)
             DispatchQueue.main.async {
                 self.onEvent?(.authFailed)
@@ -180,6 +184,25 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             if let messagePayload = payload["message"] as? [String: Any],
                let messageData = try? JSONSerialization.data(withJSONObject: messagePayload),
                let message = try? JSONDecoder().decode(SocketChatMessage.self, from: messageData) {
+                let senderName = (message.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                  ? message.username?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                  : nil)
+                    ?? ((message.is_coach ?? false) ? "Coach" : "New message")
+                let snippet = {
+                    let text = String(message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { return text }
+                    if let media = message.media_urls, !media.isEmpty {
+                        return media.count == 1 ? "Sent an attachment." : "Sent \(media.count) attachments."
+                    }
+                    return "Open ZYM to read it."
+                }()
+                if let authenticatedUserId, message.from_user_id != authenticatedUserId {
+                    AppNotificationManager.shared.scheduleMessageNotification(
+                        title: senderName,
+                        body: snippet,
+                        topic: topic
+                    )
+                }
                 DispatchQueue.main.async {
                     self.onEvent?(.messageCreated(topic: topic, message: message))
                     if let content = message.content, !(message.is_coach ?? false) {

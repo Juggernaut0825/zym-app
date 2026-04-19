@@ -2,9 +2,12 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
+import UserNotifications
 
 struct ProfileView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var notificationManager: AppNotificationManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var profile: APIProfile?
     @State private var showEditor = false
     @State private var showSessionsSheet = false
@@ -21,6 +24,19 @@ struct ProfileView: View {
     @State private var notificationPreferencesLoading = false
     @State private var notificationPreferencesPending = false
     @State private var notificationStatusText = ""
+    @State private var mediaPresentation: RemoteMediaPresentation?
+
+    private var profileMediaItems: [RemoteMediaItem] {
+        resolvedRemoteMediaItems(
+            from: [
+                profile?.background_url,
+                profile?.avatar_url,
+            ].compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+        )
+    }
 
     var body: some View {
         NavigationView {
@@ -31,22 +47,27 @@ struct ProfileView: View {
                     VStack(spacing: 12) {
                         ZStack(alignment: .bottomLeading) {
                             if let cover = profile?.background_url, let url = resolveRemoteURL(cover) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    default:
-                                        LinearGradient(
-                                            colors: [Color.zymSurfaceSoft, Color.zymBackground],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
+                                Button {
+                                    presentProfileMedia(startingWith: cover)
+                                } label: {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                        default:
+                                            LinearGradient(
+                                                colors: [Color.zymSurfaceSoft, Color.zymBackground],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        }
                                     }
                                 }
                                 .frame(height: 170)
                                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .buttonStyle(.plain)
                             } else {
                                 LinearGradient(
                                     colors: [Color.zymSurfaceSoft, Color.zymBackground],
@@ -59,19 +80,24 @@ struct ProfileView: View {
 
                             HStack(spacing: 10) {
                                 if let avatar = profile?.avatar_url, let url = resolveRemoteURL(avatar) {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                        default:
-                                            Circle().fill(Color.zymSurfaceSoft)
+                                    Button {
+                                        presentProfileMedia(startingWith: avatar)
+                                    } label: {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image
+                                                    .resizable()
+                                                    .scaledToFill()
+                                            default:
+                                                Circle().fill(Color.zymSurfaceSoft)
+                                            }
                                         }
                                     }
                                     .frame(width: 74, height: 74)
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 2))
+                                    .buttonStyle(.plain)
                                 } else {
                                     Circle()
                                         .fill(Color.zymPrimary)
@@ -152,39 +178,56 @@ struct ProfileView: View {
                                 .font(.custom("Syne", size: 20))
                                 .foregroundColor(Color.zymText)
 
-                            Text("Set account-wide defaults here.")
+                            Text("System permission and account defaults live together here.")
                                 .font(.system(size: 13))
                                 .foregroundColor(Color.zymSubtext)
                                 .fixedSize(horizontal: false, vertical: true)
+
+                            ProfileSystemNotificationRow(
+                                authorizationStatus: notificationManager.authorizationStatus,
+                                isEnabled: notificationManager.systemNotificationsEnabled,
+                                onToggle: { nextValue in
+                                    notificationManager.toggleSystemNotifications(nextValue)
+                                },
+                                onOpenSettings: {
+                                    notificationManager.openSystemSettings()
+                                }
+                            )
 
                             if notificationPreferencesLoading {
                                 ProgressView()
                                     .padding(.top, 2)
                             } else {
-                                ProfileNotificationRow(
+                                ProfileNotificationToggleRow(
                                     title: "Messages",
                                     subtitle: "Direct messages, coach chats, and groups follow this default.",
-                                    enabled: notificationPreferences.messageNotificationsEnabled,
+                                    isOn: Binding(
+                                        get: { notificationPreferences.messageNotificationsEnabled },
+                                        set: { nextValue in
+                                            updateNotificationPreferences(
+                                                messageNotificationsEnabled: nextValue,
+                                                postNotificationsEnabled: nil
+                                            )
+                                        }
+                                    ),
                                     pending: notificationPreferencesPending,
-                                    onToggle: {
-                                        updateNotificationPreferences(
-                                            messageNotificationsEnabled: !notificationPreferences.messageNotificationsEnabled,
-                                            postNotificationsEnabled: nil
-                                        )
-                                    }
+                                    disabled: false
                                 )
 
-                                ProfileNotificationRow(
+                                ProfileNotificationToggleRow(
                                     title: "Posts",
                                     subtitle: "Likes and comments on your community posts follow this default.",
-                                    enabled: notificationPreferences.postNotificationsEnabled,
+                                    isOn: Binding(
+                                        get: { notificationPreferences.postNotificationsEnabled },
+                                        set: { nextValue in
+                                            updateNotificationPreferences(
+                                                messageNotificationsEnabled: nil,
+                                                postNotificationsEnabled: nextValue
+                                            )
+                                        }
+                                    ),
                                     pending: notificationPreferencesPending,
-                                    onToggle: {
-                                        updateNotificationPreferences(
-                                            messageNotificationsEnabled: nil,
-                                            postNotificationsEnabled: !notificationPreferences.postNotificationsEnabled
-                                        )
-                                    }
+                                    disabled: false
                                 )
                             }
 
@@ -237,6 +280,9 @@ struct ProfileView: View {
             }
             .navigationTitle("Profile")
         }
+        .fullScreenCover(item: $mediaPresentation) { presentation in
+            RemoteMediaGalleryView(presentation: presentation)
+        }
         .sheet(isPresented: $showEditor) {
             ProfileEditSheet(profile: profile, onSaved: loadProfile)
                 .environmentObject(appState)
@@ -256,7 +302,19 @@ struct ProfileView: View {
         .onAppear {
             loadProfile()
             loadNotificationPreferences()
+            notificationManager.refreshAuthorizationStatus()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                notificationManager.refreshAuthorizationStatus()
+            }
+        }
+    }
+
+    private func presentProfileMedia(startingWith originalValue: String?) {
+        guard !profileMediaItems.isEmpty else { return }
+        let initialIndex = profileMediaItems.firstIndex(where: { $0.originalValue == originalValue }) ?? 0
+        mediaPresentation = RemoteMediaPresentation(items: profileMediaItems, initialIndex: initialIndex)
     }
 
     private func loadProfile() {
@@ -1714,12 +1772,69 @@ func parseAPIError(_ data: Data?) -> String? {
     return error
 }
 
-private struct ProfileNotificationRow: View {
+private struct ProfileSystemNotificationRow: View {
+    let authorizationStatus: UNAuthorizationStatus
+    let isEnabled: Bool
+    let onToggle: (Bool) -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("System notifications")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    Text(systemSubtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.zymSubtext)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Toggle("", isOn: Binding(
+                    get: { isEnabled },
+                    set: { nextValue in
+                        onToggle(nextValue)
+                    }
+                ))
+                .labelsHidden()
+                .tint(.green)
+            }
+
+            if authorizationStatus == .denied {
+                Button("Open Apple Settings") {
+                    onOpenSettings()
+                }
+                .buttonStyle(ZYMGhostButton())
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var systemSubtitle: String {
+        switch authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return "iPhone notifications are on. New alerts can appear outside the app when delivery is available."
+        case .notDetermined:
+            return "Turn this on to let iPhone ask for notification permission."
+        case .denied:
+            return "Notifications are off in Apple Settings. Turn them back on there to receive alerts."
+        @unknown default:
+            return "Notification access is unavailable right now."
+        }
+    }
+}
+
+private struct ProfileNotificationToggleRow: View {
     let title: String
     let subtitle: String
-    let enabled: Bool
+    let isOn: Binding<Bool>
     let pending: Bool
-    let onToggle: () -> Void
+    let disabled: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -1735,16 +1850,10 @@ private struct ProfileNotificationRow: View {
 
             Spacer(minLength: 12)
 
-            Button(action: onToggle) {
-                Text(pending ? "Saving" : (enabled ? "Notify" : "Muted"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(enabled ? .white : Color.zymText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(enabled ? Color.zymText : Color.zymSurfaceSoft)
-                    .clipShape(Capsule())
-            }
-            .disabled(pending)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(.green)
+                .disabled(pending || disabled)
         }
         .padding(14)
         .background(Color.white.opacity(0.78))

@@ -1,4 +1,5 @@
 import { getDB } from '../database/runtime-db.js';
+import { FriendService, type FriendshipRelationshipStatus } from './friend-service.js';
 
 export type LocationPrecision = 'city' | 'precise';
 
@@ -22,7 +23,7 @@ export interface NearbyUserSummary {
   avatar_url: string | null;
   bio: string | null;
   fitness_goal: string | null;
-  friendship_status: 'self' | 'none' | 'pending' | 'accepted';
+  friendship_status: FriendshipRelationshipStatus;
   location_label: string;
   location_city: string;
   distance_km: number;
@@ -343,14 +344,6 @@ export class LocationService {
       `)
       .all(userId) as any[];
 
-    const relationStmt = getDB().prepare(`
-      SELECT status
-      FROM friendships
-      WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
-      ORDER BY id DESC
-      LIMIT 1
-    `);
-
     const nearby = rows
       .map((row): NearbyUserSummary | null => {
         const targetLocation = toSelection(row);
@@ -362,7 +355,6 @@ export class LocationService {
           targetLocation.longitude,
         );
         if (!Number.isFinite(distanceKm) || distanceKm > maxDistanceKm) return null;
-        const relation = relationStmt.get(userId, Number(row.id), Number(row.id), userId) as { status?: string } | undefined;
         return {
           id: Number(row.id),
           public_uuid: normalizeText(row.public_uuid, 80) || null,
@@ -370,9 +362,7 @@ export class LocationService {
           avatar_url: normalizeText(row.avatar_url, 2048) || null,
           bio: normalizeText(row.bio, 240) || null,
           fitness_goal: normalizeText(row.fitness_goal, 160) || null,
-          friendship_status: relation?.status === 'accepted' || relation?.status === 'pending'
-            ? relation.status as 'accepted' | 'pending'
-            : 'none',
+          friendship_status: FriendService.getRelationshipStatus(userId, Number(row.id)),
           location_label: targetLocation.label,
           location_city: targetLocation.city,
           distance_km: Math.round(distanceKm * 10) / 10,

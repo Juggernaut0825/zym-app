@@ -2042,15 +2042,7 @@ app.get('/users/public/:id', (req, res) => {
     .get(targetUserId) as any;
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const relation = db.prepare(`
-    SELECT status
-    FROM friendships
-    WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
-    ORDER BY id DESC
-    LIMIT 1
-  `).get(authUserId, targetUserId, targetUserId, authUserId) as any;
-
-  const friendshipStatus = authUserId === targetUserId ? 'self' : (relation?.status || 'none');
+  const friendshipStatus = FriendService.getRelationshipStatus(authUserId, targetUserId);
   res.json({
     id: user.id,
     public_uuid: String(user.public_uuid || '').trim() || null,
@@ -3169,14 +3161,7 @@ app.get('/profile/public/:userId', async (req, res) => {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  const relation = db.prepare(`
-    SELECT status
-    FROM friendships
-    WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
-    ORDER BY id DESC
-    LIMIT 1
-  `).get(authUserId, targetUserId, targetUserId, authUserId) as { status?: string } | undefined;
-  const friendshipStatus = authUserId === targetUserId ? 'self' : String(relation?.status || 'none');
+  const friendshipStatus = FriendService.getRelationshipStatus(authUserId, targetUserId);
   const fullAccess = friendshipStatus === 'self' || friendshipStatus === 'accepted';
   const avatarAsset = user.avatar_url ? mediaAssetService.getByStorageValue(user.avatar_url) : null;
   const backgroundAsset = user.background_url ? mediaAssetService.getByStorageValue(user.background_url) : null;

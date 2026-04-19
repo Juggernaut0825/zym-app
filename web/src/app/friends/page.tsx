@@ -401,7 +401,8 @@ export default function FriendsPage() {
     if (!status || !targetUserId || targetUserId === authUserId) return null;
     if (status === 'accepted') return 'Send Message';
     if (status === 'none') return 'Add as Friend';
-    if (status === 'pending') return 'Pending';
+    if (status === 'incoming_pending') return 'Accept Invitation';
+    if (status === 'outgoing_pending' || status === 'pending') return 'Pending';
     return null;
   }
 
@@ -409,7 +410,7 @@ export default function FriendsPage() {
     const status = nearbyProfile?.friendship_status;
     const targetUserId = nearbyProfile?.profile?.id || 0;
     if (!status || !targetUserId || targetUserId === authUserId || nearbyProfileActionPending) return false;
-    return status === 'accepted' || status === 'none';
+    return status === 'accepted' || status === 'none' || status === 'incoming_pending';
   }
 
   async function handleNearbyProfilePrimaryAction() {
@@ -429,18 +430,37 @@ export default function FriendsPage() {
       if (status === 'none') {
         await addFriend({ userId: authUserId, friendId: targetUserId });
         setNearbyUsers((prev) => prev.map((item) => (
-          item.id === targetUserId ? { ...item, friendship_status: 'pending' } : item
+          item.id === targetUserId ? { ...item, friendship_status: 'outgoing_pending' } : item
         )));
         setNearbyProfile((prev) => (
           prev
             ? {
               ...prev,
-              friendship_status: 'pending',
+              friendship_status: 'outgoing_pending',
               isFriend: false,
             }
             : prev
         ));
         setNotice(`Friend request sent to ${targetUsername}.`);
+        setTimeout(() => setNotice(''), 2500);
+        return;
+      }
+
+      if (status === 'incoming_pending') {
+        await acceptFriend(authUserId, targetUserId);
+        setNearbyUsers((prev) => prev.map((item) => (
+          item.id === targetUserId ? { ...item, friendship_status: 'accepted' } : item
+        )));
+        setNearbyProfile((prev) => (
+          prev
+            ? {
+              ...prev,
+              friendship_status: 'accepted',
+              isFriend: true,
+            }
+            : prev
+        ));
+        setNotice(`Friend request from ${targetUsername} accepted.`);
         setTimeout(() => setNotice(''), 2500);
       }
     } catch (err: any) {

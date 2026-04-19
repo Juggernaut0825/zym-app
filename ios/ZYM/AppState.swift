@@ -2,6 +2,8 @@ import SwiftUI
 import Foundation
 import Security
 import CoreLocation
+import UIKit
+import UserNotifications
 
 private enum ZYMAppEnvironment {
     case dev
@@ -185,6 +187,157 @@ struct NearbyUserPayload: Codable, Identifiable {
 
 struct NearbyUsersResponse: Codable {
     let users: [NearbyUserPayload]
+}
+
+enum FriendshipStatus: String {
+    case currentUser = "self"
+    case none
+    case accepted
+    case pending
+    case incomingPending = "incoming_pending"
+    case outgoingPending = "outgoing_pending"
+    case blocked
+}
+
+func friendshipStatus(from raw: String?) -> FriendshipStatus {
+    FriendshipStatus(rawValue: String(raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) ?? .none
+}
+
+func friendshipPrimaryActionLabel(status rawStatus: String?, targetUserId: Int, currentUserId: Int?) -> String? {
+    guard targetUserId > 0, targetUserId != currentUserId else { return nil }
+    switch friendshipStatus(from: rawStatus) {
+    case .currentUser:
+        return nil
+    case .accepted:
+        return "Send Message"
+    case .incomingPending:
+        return "Accept Invitation"
+    case .outgoingPending, .pending:
+        return "Pending"
+    case .none:
+        return "Add as Friend"
+    case .blocked:
+        return nil
+    }
+}
+
+func friendshipPrimaryActionEnabled(
+    status rawStatus: String?,
+    targetUserId: Int,
+    currentUserId: Int?,
+    pending: Bool
+) -> Bool {
+    guard !pending, targetUserId > 0, targetUserId != currentUserId else { return false }
+    switch friendshipStatus(from: rawStatus) {
+    case .accepted, .incomingPending, .none:
+        return true
+    default:
+        return false
+    }
+}
+
+final class AppNotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = AppNotificationManager()
+
+    @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    var systemNotificationsEnabled: Bool {
+        switch authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var shouldPromptToOpenSettings: Bool {
+        authorizationStatus == .denied
+    }
+
+    private override init() {
+        super.init()
+        UNUserNotificationCenter.current().delegate = self
+        refreshAuthorizationStatus()
+    }
+
+    func refreshAuthorizationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                self.authorizationStatus = settings.authorizationStatus
+            }
+        }
+    }
+
+    func requestAuthorizationIfNeeded() {
+        refreshAuthorizationStatus()
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else {
+                DispatchQueue.main.async {
+                    self.authorizationStatus = settings.authorizationStatus
+                }
+                return
+            }
+
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+                self.refreshAuthorizationStatus()
+            }
+        }
+    }
+
+    func toggleSystemNotifications(_ enabled: Bool) {
+        if enabled {
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                DispatchQueue.main.async {
+                    self.authorizationStatus = settings.authorizationStatus
+                    switch settings.authorizationStatus {
+                    case .notDetermined:
+                        self.requestAuthorizationIfNeeded()
+                    case .denied:
+                        self.openSystemSettings()
+                    default:
+                        break
+                    }
+                }
+            }
+        } else if systemNotificationsEnabled || authorizationStatus == .denied {
+            openSystemSettings()
+        }
+    }
+
+    func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    func scheduleMessageNotification(title: String, body: String, topic: String) {
+        guard systemNotificationsEnabled else { return }
+
+        let appState = UIApplication.shared.applicationState
+        guard appState != .active else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New message" : title
+        content.body = body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Open ZYM to read it." : body
+        content.sound = .default
+        content.userInfo = ["topic": topic]
+
+        let request = UNNotificationRequest(
+            identifier: "zym-message-\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.15, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
+    }
 }
 
 enum AppLocationPermissionError: LocalizedError {

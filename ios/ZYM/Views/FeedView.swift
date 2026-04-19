@@ -1,5 +1,4 @@
 import SwiftUI
-import AVKit
 
 private func feedExtractHashtags(from content: String?) -> [String] {
     guard let content, !content.isEmpty else { return [] }
@@ -389,35 +388,34 @@ struct FeedView: View {
 
     private func profilePrimaryActionLabel() -> String? {
         guard let profile = viewedProfile else { return nil }
-        switch profile.friendship_status.lowercased() {
-        case "self":
-            return nil
-        case "accepted":
-            return "Send Message"
-        case "pending":
-            return "Pending"
-        default:
-            return "Add as Friend"
-        }
+        return friendshipPrimaryActionLabel(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId
+        )
     }
 
     private func profilePrimaryActionEnabled() -> Bool {
         guard let profile = viewedProfile else { return false }
-        switch profile.friendship_status.lowercased() {
-        case "accepted", "none":
-            return true
-        default:
-            return false
-        }
+        return friendshipPrimaryActionEnabled(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId,
+            pending: profileActionPending
+        )
     }
 
     private func handleProfilePrimaryAction(conversation: Conversation) {
         guard let profile = viewedProfile else { return }
-        let relationship = profile.friendship_status.lowercased()
-        if relationship == "accepted" {
+        switch friendshipStatus(from: profile.friendship_status) {
+        case .accepted:
             openDirectMessageFromProfile(targetUserId: profile.profile.id)
-        } else if relationship == "none" {
+        case .none:
             sendFriendRequestFromProfile(targetUserId: profile.profile.id)
+        case .incomingPending:
+            acceptFriendRequestFromProfile(targetUserId: profile.profile.id)
+        default:
+            break
         }
     }
 
@@ -481,13 +479,51 @@ struct FeedView: View {
                     viewedProfile = ConversationPublicProfileResponse(
                         visibility: profile.visibility,
                         isFriend: profile.isFriend,
-                        friendship_status: "pending",
+                        friendship_status: "outgoing_pending",
                         profile: profile.profile,
                         today_health: profile.today_health,
                         recent_posts: profile.recent_posts
                     )
                 }
                 notificationHint = "Friend request sent."
+            }
+        }.resume()
+    }
+
+    private func acceptFriendRequestFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/friends/accept") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    notificationHint = parseAPIError(data) ?? "Failed to accept invitation."
+                    return
+                }
+                if let profile = viewedProfile {
+                    viewedProfile = ConversationPublicProfileResponse(
+                        visibility: profile.visibility,
+                        isFriend: true,
+                        friendship_status: "accepted",
+                        profile: profile.profile,
+                        today_health: profile.today_health,
+                        recent_posts: profile.recent_posts
+                    )
+                }
+                notificationHint = "Invitation accepted."
             }
         }.resume()
     }
@@ -1293,45 +1329,7 @@ struct FeedMediaPreviewGrid: View {
     let mediaUrls: [String]
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-            ForEach(mediaUrls, id: \.self) { mediaUrl in
-                if let url = resolveRemoteURL(mediaUrl) {
-                    ZStack {
-                        if isVideoURL(mediaUrl) {
-                            VideoPlayer(player: AVPlayer(url: url))
-                                .frame(height: 110)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        } else {
-                            Link(destination: url) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    case .failure(_):
-                                        ZStack {
-                                            Color.zymSurfaceSoft
-                                            Image(systemName: "photo")
-                                                .foregroundColor(Color.zymSubtext)
-                                        }
-                                    case .empty:
-                                        ZStack {
-                                            Color.zymSurfaceSoft
-                                            ProgressView()
-                                        }
-                                    @unknown default:
-                                        Color.zymSurfaceSoft
-                                    }
-                                }
-                                .frame(height: 110)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        RemoteMediaGrid(mediaUrls: mediaUrls, isMine: false)
     }
 }
 

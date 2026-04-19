@@ -32,6 +32,7 @@ function resolveAppleAudiences(): string[] {
       process.env.IOS_BUNDLE_ID,
       process.env.NEXT_PUBLIC_IOS_BUNDLE_ID,
       process.env.BUNDLE_IDENTIFIER,
+      'com.zym8.app',
       'com.zym.app',
       ...String(process.env.APPLE_CLIENT_IDS || '')
         .split(',')

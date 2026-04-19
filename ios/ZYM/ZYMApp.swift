@@ -3,7 +3,9 @@ import SwiftUI
 @main
 struct ZYMApp: App {
     @StateObject private var appState = AppState()
+    @StateObject private var notificationManager = AppNotificationManager.shared
     @State private var showLaunchSplash = true
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -11,10 +13,12 @@ struct ZYMApp: App {
                 if appState.isLoggedIn {
                     MainTabView()
                         .environmentObject(appState)
+                        .environmentObject(notificationManager)
                 } else {
                     NavigationView {
                         LoginView()
                             .environmentObject(appState)
+                            .environmentObject(notificationManager)
                     }
                 }
 
@@ -24,10 +28,16 @@ struct ZYMApp: App {
                 }
             }
             .onAppear {
+                notificationManager.refreshAuthorizationStatus()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
                     withAnimation(.zymSoft) {
                         showLaunchSplash = false
                     }
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    notificationManager.refreshAuthorizationStatus()
                 }
             }
         }

@@ -1,5 +1,12 @@
 import { getDB } from '../database/runtime-db.js';
 
+export type FriendshipRelationshipStatus =
+  | 'self'
+  | 'none'
+  | 'accepted'
+  | 'outgoing_pending'
+  | 'incoming_pending';
+
 export class FriendService {
   static async addFriend(userId: string, friendId: string) {
     const db = getDB();
@@ -69,5 +76,37 @@ export class FriendService {
       WHERE f.friend_id = ? AND f.status = 'pending'
       ORDER BY f.created_at DESC
     `).all(userId);
+  }
+
+  static getRelationshipStatus(viewerUserId: number, targetUserId: number): FriendshipRelationshipStatus {
+    const viewerId = Number(viewerUserId);
+    const targetId = Number(targetUserId);
+    if (!Number.isInteger(viewerId) || viewerId <= 0 || !Number.isInteger(targetId) || targetId <= 0) {
+      return 'none';
+    }
+    if (viewerId == targetId) {
+      return 'self';
+    }
+
+    const relation = getDB().prepare(`
+      SELECT user_id, friend_id, status
+      FROM friendships
+      WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(viewerId, targetId, targetId, viewerId) as {
+      user_id?: number;
+      friend_id?: number;
+      status?: string;
+    } | undefined;
+
+    const status = String(relation?.status || '').trim().toLowerCase();
+    if (status === 'accepted') {
+      return 'accepted';
+    }
+    if (status === 'pending') {
+      return Number(relation?.user_id) === viewerId ? 'outgoing_pending' : 'incoming_pending';
+    }
+    return 'none';
   }
 }

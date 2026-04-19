@@ -951,35 +951,34 @@ struct ConversationView: View {
 
     private func profilePrimaryActionLabel() -> String? {
         guard let profile = viewedProfile else { return nil }
-        switch profile.friendship_status.lowercased() {
-        case "self":
-            return nil
-        case "accepted":
-            return "Send Message"
-        case "pending":
-            return "Pending"
-        default:
-            return "Add as Friend"
-        }
+        return friendshipPrimaryActionLabel(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId
+        )
     }
 
     private func profilePrimaryActionEnabled() -> Bool {
         guard let profile = viewedProfile else { return false }
-        switch profile.friendship_status.lowercased() {
-        case "accepted", "none":
-            return true
-        default:
-            return false
-        }
+        return friendshipPrimaryActionEnabled(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId,
+            pending: profileActionPending
+        )
     }
 
     private func handleProfilePrimaryAction(for targetConversation: Conversation) {
         guard let profile = viewedProfile else { return }
-        let relationship = profile.friendship_status.lowercased()
-        if relationship == "accepted" {
+        switch friendshipStatus(from: profile.friendship_status) {
+        case .accepted:
             openDirectMessageFromProfile(targetUserId: profile.profile.id)
-        } else if relationship == "none" {
+        case .none:
             sendFriendRequestFromProfile(targetUserId: profile.profile.id)
+        case .incomingPending:
+            acceptFriendRequestFromProfile(targetUserId: profile.profile.id)
+        default:
+            break
         }
     }
 
@@ -1043,13 +1042,51 @@ struct ConversationView: View {
                     viewedProfile = ConversationPublicProfileResponse(
                         visibility: profile.visibility,
                         isFriend: profile.isFriend,
-                        friendship_status: "pending",
+                        friendship_status: "outgoing_pending",
                         profile: profile.profile,
                         today_health: profile.today_health,
                         recent_posts: profile.recent_posts
                     )
                 }
                 infoNotice = "Friend request sent."
+            }
+        }.resume()
+    }
+
+    private func acceptFriendRequestFromProfile(targetUserId: Int) {
+        guard !profileActionPending,
+              let userId = appState.userId,
+              let url = apiURL("/friends/accept") else { return }
+
+        profileActionPending = true
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "friendId": targetUserId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                profileActionPending = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to accept invitation."
+                    return
+                }
+                if let profile = viewedProfile {
+                    viewedProfile = ConversationPublicProfileResponse(
+                        visibility: profile.visibility,
+                        isFriend: true,
+                        friendship_status: "accepted",
+                        profile: profile.profile,
+                        today_health: profile.today_health,
+                        recent_posts: profile.recent_posts
+                    )
+                }
+                infoNotice = "Invitation accepted."
             }
         }.resume()
     }
@@ -1750,50 +1787,275 @@ private struct ConversationMarkdownText: View {
     }
 }
 
+enum RemoteMediaKind {
+    case image
+    case video
+}
+
+struct RemoteMediaItem: Identifiable, Hashable {
+    let id: String
+    let url: URL
+    let kind: RemoteMediaKind
+    let originalValue: String
+}
+
+struct RemoteMediaPresentation: Identifiable {
+    let id = UUID()
+    let items: [RemoteMediaItem]
+    let initialIndex: Int
+}
+
+func resolvedRemoteMediaItems(from mediaUrls: [String]) -> [RemoteMediaItem] {
+    mediaUrls.reduce(into: [RemoteMediaItem]()) { result, mediaUrl in
+        guard let url = resolveRemoteURL(mediaUrl) else { return }
+        let item = RemoteMediaItem(
+            id: url.absoluteString,
+            url: url,
+            kind: isVideoURL(mediaUrl) ? .video : .image,
+            originalValue: mediaUrl
+        )
+        guard !result.contains(where: { $0.id == item.id }) else { return }
+        result.append(item)
+    }
+}
+
 struct RemoteMediaGrid: View {
     let mediaUrls: [String]
     let isMine: Bool
 
+    @State private var mediaPresentation: RemoteMediaPresentation?
+
+    private var items: [RemoteMediaItem] {
+        resolvedRemoteMediaItems(from: mediaUrls)
+    }
+
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-            ForEach(mediaUrls, id: \.self) { mediaUrl in
-                if let url = resolveRemoteURL(mediaUrl) {
-                    ZStack {
-                        if isVideoURL(mediaUrl) {
-                            VideoPlayer(player: AVPlayer(url: url))
-                                .frame(height: 110)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        } else {
-                            Link(destination: url) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    case .failure(_):
-                                        ZStack {
-                                            Color.zymSurfaceSoft
-                                            Image(systemName: "exclamationmark.triangle")
-                                                .foregroundColor(Color.zymSubtext)
-                                        }
-                                    case .empty:
-                                        ZStack {
-                                            Color.zymSurfaceSoft
-                                            ProgressView()
-                                        }
-                                    @unknown default:
-                                        Color.zymSurfaceSoft
-                                    }
-                                }
-                                .frame(height: 110)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                Button {
+                    mediaPresentation = RemoteMediaPresentation(items: items, initialIndex: index)
+                } label: {
+                    RemoteMediaThumbnailCard(item: item, height: 110, showMineAccent: isMine)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .fullScreenCover(item: $mediaPresentation) { presentation in
+            RemoteMediaGalleryView(presentation: presentation)
+        }
+    }
+}
+
+struct RemoteMediaThumbnailCard: View {
+    let item: RemoteMediaItem
+    let height: CGFloat
+    let showMineAccent: Bool
+
+    var body: some View {
+        ZStack {
+            if item.kind == .video {
+                RemoteVideoThumbnailView(url: item.url)
+                LinearGradient(
+                    colors: [Color.black.opacity(0.02), Color.black.opacity(0.32)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 28, weight: .regular))
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(10)
+                }
+            } else {
+                AsyncImage(url: item.url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure(_):
+                        ZStack {
+                            Color.zymSurfaceSoft
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(Color.zymSubtext)
                         }
+                    case .empty:
+                        ZStack {
+                            Color.zymSurfaceSoft
+                            ProgressView()
+                        }
+                    @unknown default:
+                        Color.zymSurfaceSoft
                     }
                 }
             }
         }
+        .frame(height: height)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(showMineAccent ? Color.white.opacity(0.12) : Color.zymLine.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+struct RemoteVideoThumbnailView: View {
+    let url: URL
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        SwiftUI.Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Color.black.opacity(0.9)
+                    ProgressView()
+                        .tint(.white)
+                }
+            }
+        }
+        .task(id: url) {
+            await loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() async {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1200, height: 1200)
+
+        let time = CMTime(seconds: 0.1, preferredTimescale: 600)
+        if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
+            await MainActor.run {
+                image = UIImage(cgImage: cgImage)
+            }
+        }
+    }
+}
+
+struct RemoteMediaGalleryView: View {
+    let presentation: RemoteMediaPresentation
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: Int
+
+    init(presentation: RemoteMediaPresentation) {
+        self.presentation = presentation
+        _selection = State(initialValue: presentation.initialIndex)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            TabView(selection: $selection) {
+                ForEach(Array(presentation.items.enumerated()), id: \.element.id) { index, item in
+                    ZStack {
+                        Color.black.ignoresSafeArea()
+                        if item.kind == .video {
+                            NativeVideoPlayerView(url: item.url)
+                                .ignoresSafeArea()
+                        } else {
+                            RemoteFullscreenImageView(url: item.url)
+                                .ignoresSafeArea()
+                        }
+                    }
+                    .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            VStack {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28, weight: .medium))
+                            .foregroundColor(.white.opacity(0.92))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    if presentation.items.count > 1 {
+                        Text("\(selection + 1) / \(presentation.items.count)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+
+                Spacer()
+            }
+        }
+    }
+}
+
+struct RemoteFullscreenImageView: View {
+    let url: URL
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                    case .failure(_):
+                        VStack(spacing: 10) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 28))
+                            Text("Could not load media")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(.white.opacity(0.82))
+                    case .empty:
+                        ProgressView()
+                            .tint(.white)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct NativeVideoPlayerView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.showsPlaybackControls = true
+        controller.player = AVPlayer(url: url)
+        controller.player?.play()
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: ()) {
+        uiViewController.player?.pause()
+        uiViewController.player = nil
     }
 }
 
@@ -2044,9 +2306,29 @@ struct ConversationProfileSheet: View {
     let reportPending: Bool
     let onReportUser: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var mediaPresentation: RemoteMediaPresentation?
 
     private var coachName: String {
         appCoach == "lc" ? "LC Coach" : "ZJ Coach"
+    }
+
+    private var profileMediaItems: [RemoteMediaItem] {
+        guard let profile else { return [] }
+        return resolvedRemoteMediaItems(
+            from: [
+                profile.profile.background_url,
+                profile.profile.avatar_url,
+            ].compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+        )
+    }
+
+    private func presentProfileMedia(startingWith originalValue: String?) {
+        guard !profileMediaItems.isEmpty else { return }
+        let initialIndex = profileMediaItems.firstIndex(where: { $0.originalValue == originalValue }) ?? 0
+        mediaPresentation = RemoteMediaPresentation(items: profileMediaItems, initialIndex: initialIndex)
     }
 
     var body: some View {
@@ -2087,30 +2369,40 @@ struct ConversationProfileSheet: View {
                                 .padding(.top, 18)
                         } else if let profile {
                             if let coverURL = profile.profile.background_url, let url = resolveRemoteURL(coverURL) {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image.resizable().scaledToFill()
-                                    default:
-                                        Color.zymSurfaceSoft
-                                    }
-                                }
-                                .frame(height: 150)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            }
-
-                            HStack(spacing: 12) {
-                                if let avatarURL = profile.profile.avatar_url, let url = resolveRemoteURL(avatarURL) {
+                                Button {
+                                    presentProfileMedia(startingWith: coverURL)
+                                } label: {
                                     AsyncImage(url: url) { phase in
                                         switch phase {
                                         case .success(let image):
                                             image.resizable().scaledToFill()
                                         default:
-                                            Circle().fill(Color.zymSurfaceSoft)
+                                            Color.zymSurfaceSoft
+                                        }
+                                    }
+                                }
+                                .frame(height: 150)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .buttonStyle(.plain)
+                            }
+
+                            HStack(spacing: 12) {
+                                if let avatarURL = profile.profile.avatar_url, let url = resolveRemoteURL(avatarURL) {
+                                    Button {
+                                        presentProfileMedia(startingWith: avatarURL)
+                                    } label: {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image.resizable().scaledToFill()
+                                            default:
+                                                Circle().fill(Color.zymSurfaceSoft)
+                                            }
                                         }
                                     }
                                     .frame(width: 62, height: 62)
                                     .clipShape(Circle())
+                                    .buttonStyle(.plain)
                                 } else {
                                     Circle()
                                         .fill(Color.zymPrimary)
@@ -2235,6 +2527,9 @@ struct ConversationProfileSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+        .fullScreenCover(item: $mediaPresentation) { presentation in
+            RemoteMediaGalleryView(presentation: presentation)
         }
     }
 }
