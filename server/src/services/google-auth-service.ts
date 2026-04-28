@@ -20,8 +20,13 @@ function resolveGoogleAudiences(): string[] {
   return Array.from(new Set(
     [
       process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_IOS_CLIENT_ID,
       process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
       ...(String(process.env.GOOGLE_CLIENT_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)),
+      ...(String(process.env.GOOGLE_IOS_CLIENT_IDS || '')
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean)),

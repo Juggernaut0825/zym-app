@@ -27,6 +27,7 @@ function buildGuardrailPrompt() {
 - Use plain text. Inline markdown links are allowed only for citations or helpful resources, for example [Wiens et al. (2024)](https://example.com).
 - Do not use Markdown formatting like headings, bold text, or code fences.
 - Use only validated tool outputs when providing grounded guidance.
+- Avoid obscure or unsupported emoji. If emoji are not necessary, omit them.
 - If the available tools and visible conversation context are not enough to solve a request, say so plainly and redirect back to training, food, recovery, progress, or media-analysis topics.`;
 }
 
@@ -101,10 +102,56 @@ function collectLatestToolResults(messages: Message[]): Map<string, any> {
 
 function sanitizeCoachResponseText(text: string): string {
   return String(text || '')
+    .replace(/\uFFFD/g, '')
     .replace(/\*\*/g, '')
     .replace(/`/g, '')
     .replace(/\r\n/g, '\n')
     .trim();
+}
+
+function extractLatestUserLanguageSample(message: string): string {
+  const normalized = sanitizePromptText(message, 2_000);
+  const marker = '[NEW_GROUP_MESSAGE]';
+  const markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex >= 0) {
+    const afterMarker = normalized.slice(markerIndex + marker.length).trim();
+    const firstLine = afterMarker.split('\n').map((line) => line.trim()).find(Boolean) || afterMarker;
+    const speakerSplit = firstLine.lastIndexOf(']:');
+    return (speakerSplit >= 0 ? firstLine.slice(speakerSplit + 2) : firstLine).trim();
+  }
+  return normalized.replace(/^\[USER_MESSAGE\]\s*/i, '').trim();
+}
+
+function detectLatestMessageLanguage(message: string): 'English' | 'Chinese' | null {
+  const sample = extractLatestUserLanguageSample(message)
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/@\w+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!sample) return null;
+
+  const cjkCount = (sample.match(/[\u3400-\u9FFF]/g) || []).length;
+  const latinCount = (sample.match(/[A-Za-z]/g) || []).length;
+
+  if (latinCount >= 3 && latinCount >= cjkCount * 2) {
+    return 'English';
+  }
+  if (cjkCount >= 2 && cjkCount >= Math.max(1, Math.floor(latinCount / 2))) {
+    return 'Chinese';
+  }
+  return null;
+}
+
+function buildReplyLanguagePrompt(message: string): string {
+  const language = detectLatestMessageLanguage(message);
+  const languageLine = language
+    ? `- The user's latest message appears to be ${language}. Reply in ${language}.`
+    : '- The latest user message is language-ambiguous. Reply in the language of the direct question, not old context.';
+
+  return `[REPLY LANGUAGE]
+${languageLine}
+- Prior conversation history, summaries, and retrieved context must not override the latest user message's language.
+- If the latest message intentionally mixes languages, follow the language used for the actual question.`;
 }
 
 interface KnowledgeCitationLink {
@@ -425,6 +472,7 @@ export class CoachService {
     const systemPrompt = composeCoachSystemPrompt({
       soulPrompt: basePrompt,
       guardrailPrompt: buildGuardrailPrompt(),
+      languagePrompt: buildReplyLanguagePrompt(normalizedMessage),
       skillPrompt: activeSkill.prompt,
       injectionPrompt,
       sessionPrompt: buildSessionPrompt(session),

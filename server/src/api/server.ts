@@ -1138,6 +1138,36 @@ function isGroupOwner(groupId: number, userId: number): boolean {
   return Boolean(row);
 }
 
+function resolveGoogleIOSRedirectScheme(clientId: string): string {
+  const configuredScheme = String(process.env.GOOGLE_IOS_REDIRECT_SCHEME || '').trim();
+  if (configuredScheme) return configuredScheme;
+
+  const suffix = '.apps.googleusercontent.com';
+  const normalizedClientId = String(clientId || '').trim();
+  if (normalizedClientId.endsWith(suffix)) {
+    return `com.googleusercontent.apps.${normalizedClientId.slice(0, -suffix.length)}`;
+  }
+  return '';
+}
+
+function resolveGoogleMobileAuthConfig() {
+  const clientId = [
+    process.env.GOOGLE_IOS_CLIENT_ID,
+    ...(String(process.env.GOOGLE_IOS_CLIENT_IDS || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)),
+  ]
+    .map((value) => String(value || '').trim())
+    .find(Boolean) || '';
+
+  return {
+    configured: Boolean(clientId),
+    clientId,
+    redirectScheme: clientId ? resolveGoogleIOSRedirectScheme(clientId) : '',
+  };
+}
+
 app.get('/health', (_req, res) => {
   void getRuntimeHealthReport()
     .then((report) => {
@@ -1164,6 +1194,7 @@ app.get('/', (_, res) => {
       '/auth/register',
       '/auth/login',
       '/auth/google',
+      '/auth/google/mobile-config',
       '/auth/refresh',
       '/auth/verify-email/request',
       '/auth/verify-email/confirm',
@@ -1490,6 +1521,13 @@ app.post('/auth/login',
     res.status(400).json({ error: err.message });
   }
 });
+
+app.get('/auth/google/mobile-config',
+  APIGateway.rateLimit(90, 10 * 60_000, 'auth-google-mobile-config'),
+  (_req, res) => {
+    const config = resolveGoogleMobileAuthConfig();
+    res.json(config);
+  });
 
 app.post('/auth/google',
   APIGateway.rateLimit(36, 10 * 60_000, 'auth-google'),

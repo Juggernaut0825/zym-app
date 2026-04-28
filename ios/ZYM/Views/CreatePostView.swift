@@ -49,6 +49,39 @@ private func stripCreatePostHashtags(_ content: String) -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+private struct CreatePostToolCircle: View {
+    let systemImage: String?
+    let text: String?
+
+    init(systemImage: String) {
+        self.systemImage = systemImage
+        self.text = nil
+    }
+
+    init(text: String) {
+        self.systemImage = nil
+        self.text = text
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.zymSurfaceSoft.opacity(0.86))
+
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+            } else {
+                Text(text ?? "")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(Color.zymText)
+            }
+        }
+        .frame(width: 52, height: 52)
+    }
+}
+
 struct PostDraftAttachment: Identifiable {
     let id = UUID()
     let data: Data
@@ -92,16 +125,13 @@ struct CreatePostView: View {
 
                     HStack(spacing: 8) {
                         PhotosPicker(selection: $selectedMedia, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "photo.on.rectangle.angled")
-                                Text("Media")
-                            }
-                            .frame(maxWidth: .infinity)
+                            CreatePostToolCircle(systemImage: "photo.on.rectangle.angled")
                         }
-                        .buttonStyle(ZYMGhostButton())
+                        .buttonStyle(.plain)
                         .onChange(of: selectedMedia) { _, _ in
                             loadMedia()
                         }
+                        .accessibilityLabel("Add media")
 
                         Button(action: {
                             guard visibility == "public" else {
@@ -112,24 +142,18 @@ struct CreatePostView: View {
                                 content = appendCreatePostHashtag(content, hashtag: first)
                             }
                         }) {
-                            HStack(spacing: 6) {
-                                Text("#").font(.system(size: 15, weight: .bold))
-                                Text("Hashtag")
-                            }
-                            .frame(maxWidth: .infinity)
+                            CreatePostToolCircle(text: "#")
                         }
-                        .buttonStyle(ZYMGhostButton())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add hashtag")
 
                         Button(action: {
                             showLocationSheet = true
                         }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "location.north.line")
-                                Text(selectedLocation == nil ? "Location" : "Edit")
-                            }
-                            .frame(maxWidth: .infinity)
+                            CreatePostToolCircle(systemImage: "location.north.line")
                         }
-                        .buttonStyle(ZYMGhostButton())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(selectedLocation == nil ? "Add location" : "Edit location")
 
                         Menu {
                             Button("Friends only") {
@@ -140,13 +164,10 @@ struct CreatePostView: View {
                                 visibility = "public"
                             }
                         } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: visibility == "public" ? "globe" : "person.2.fill")
-                                Text(visibility == "public" ? "Public" : "Friends")
-                            }
-                            .frame(maxWidth: .infinity)
+                            CreatePostToolCircle(systemImage: visibility == "public" ? "globe" : "person.2.fill")
                         }
-                        .buttonStyle(ZYMGhostButton())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(visibility == "public" ? "Post visibility public" : "Post visibility friends")
                     }
 
                     if let selectedLocation {

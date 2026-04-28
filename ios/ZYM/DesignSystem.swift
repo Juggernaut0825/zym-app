@@ -25,6 +25,84 @@ func conversationBubbleThemePreset(id: String?) -> ConversationBubbleThemePreset
     return conversationBubbleThemePresets.first(where: { $0.id == resolvedId }) ?? conversationBubbleThemePresets[0]
 }
 
+struct ConversationBubbleThemePreview: View {
+    let preset: ConversationBubbleThemePreset
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Capsule()
+                .fill(preset.incomingFill)
+                .frame(width: 28, height: 12)
+                .overlay(
+                    Capsule()
+                        .fill(preset.incomingText.opacity(0.8))
+                        .frame(width: 12, height: 3)
+                )
+            Capsule()
+                .fill(preset.outgoingFill)
+                .frame(width: 34, height: 12)
+                .overlay(
+                    Capsule()
+                        .fill(preset.outgoingText.opacity(0.8))
+                        .frame(width: 14, height: 3)
+                )
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.zymSurfaceSoft.opacity(0.82))
+        .clipShape(Capsule())
+    }
+}
+
+struct ConversationBubbleThemeChip: View {
+    let preset: ConversationBubbleThemePreset
+    let selected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(preset.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    HStack(spacing: 6) {
+                        Capsule()
+                            .fill(preset.incomingFill)
+                            .frame(width: 24, height: 10)
+                            .overlay(
+                                Capsule()
+                                    .fill(preset.incomingText.opacity(0.82))
+                                    .frame(width: 10, height: 3)
+                            )
+                        Capsule()
+                            .fill(preset.outgoingFill)
+                            .frame(width: 24, height: 10)
+                            .overlay(
+                                Capsule()
+                                    .fill(preset.outgoingText.opacity(0.82))
+                                    .frame(width: 10, height: 3)
+                            )
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color.zymPrimaryDark)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.white.opacity(selected ? 0.92 : 0.76))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 extension Color {
     static let zymBackground = Color.white
     static let zymBackgroundSoft = Color.white

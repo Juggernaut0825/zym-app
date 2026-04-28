@@ -1031,7 +1031,7 @@ struct FeedPostDetailSheet: View {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top, spacing: 10) {
                             Button {
-                                onOpenProfile?(post.user_id, post.username ?? "User", post.avatar_url)
+                                openProfileFromDetail(userId: post.user_id, username: post.username ?? "User", avatarURL: post.avatar_url)
                             } label: {
                                 HStack(spacing: 10) {
                                     ZStack {
@@ -1071,14 +1071,6 @@ struct FeedPostDetailSheet: View {
                             }
                             .buttonStyle(.plain)
                             Spacer()
-                            VStack(alignment: .trailing, spacing: 6) {
-                                Text(post.type)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(Color.zymSubtext)
-                                Text(feedVisibilityLabel(visibility))
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(Color.zymSubtext)
-                            }
                         }
 
                         if let content = post.content, !content.isEmpty {
@@ -1164,7 +1156,7 @@ struct FeedPostDetailSheet: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(alignment: .center, spacing: 8) {
                                         Button {
-                                            onOpenProfile?(comment.user_id, comment.username, comment.avatar_url)
+                                            openProfileFromDetail(userId: comment.user_id, username: comment.username, avatarURL: comment.avatar_url)
                                         } label: {
                                             ZStack {
                                                 if let avatarURL = comment.avatar_url, let url = resolveRemoteURL(avatarURL) {
@@ -1199,7 +1191,7 @@ struct FeedPostDetailSheet: View {
                                         }
                                         .buttonStyle(.plain)
                                         Button {
-                                            onOpenProfile?(comment.user_id, comment.username, comment.avatar_url)
+                                            openProfileFromDetail(userId: comment.user_id, username: comment.username, avatarURL: comment.avatar_url)
                                         } label: {
                                             Text(comment.username)
                                                 .font(.system(size: 12, weight: .semibold))
@@ -1277,6 +1269,14 @@ struct FeedPostDetailSheet: View {
                 onVisibilitySaved(post.id, nextVisibility)
             }
         }.resume()
+    }
+
+    private func openProfileFromDetail(userId: Int, username: String, avatarURL: String?) {
+        guard let onOpenProfile else { return }
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            onOpenProfile(userId, username, avatarURL)
+        }
     }
 
     private func loadComments() {

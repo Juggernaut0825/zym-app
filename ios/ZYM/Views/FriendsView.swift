@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import CoreImage.CIFilterBuiltins
+import MapKit
 import UIKit
 
 private func nearbyDistanceText(_ distance: Double) -> String {
@@ -451,8 +452,8 @@ struct AddFriendView: View {
     @State private var connectExpiresAt: Date?
     @State private var statusText = ""
     @State private var pending = false
-    @State private var showQRCodeFullscreen = false
     @State private var showQRScanner = false
+    @State private var activePanel: AddFriendPanel = .menu
     @State private var sharedLocation: StoredUserLocationPayload?
     @State private var nearbyUsers: [NearbyUserPayload] = []
     @State private var requests: [Friend] = []
@@ -476,183 +477,30 @@ struct AddFriendView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Your account ID: \(appState.userId ?? 0)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.zymSubtext)
-
-                        if !connectId.isEmpty {
-                            Text("Your connect ID: \(connectId)")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color.zymText)
-                        }
-
-                        if let qrImage = makeQRCodeImage(from: connectCode) {
+                        if activePanel != .menu {
                             Button {
-                                showQRCodeFullscreen = true
+                                withAnimation(.zymSpring) {
+                                    activePanel = .menu
+                                }
                             } label: {
-                                VStack(spacing: 8) {
-                                    Image(uiImage: qrImage)
-                                        .resizable()
-                                        .interpolation(.none)
-                                        .scaledToFit()
-                                        .frame(width: 164, height: 164)
-                                        .padding(8)
-                                        .background(Color.white)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                                    Text("Tap QR to open full screen")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(Color.zymSubtext)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .zymCard()
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if !connectCode.isEmpty {
-                            Text(connectCode)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.zymPrimary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-
-                        if !connectCodeMeta.isEmpty {
-                            Text(connectCodeMeta)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.zymSubtext)
-                        }
-
-                        HStack(spacing: 8) {
-                            Button("Scan QR") {
-                                showQRScanner = true
+                                Label("Back", systemImage: "chevron.left")
                             }
                             .buttonStyle(ZYMGhostButton())
-
-                            Button("Copy Connect Code") {
-                                if !connectCode.isEmpty {
-                                    UIPasteboard.general.string = connectCode
-                                    statusText = "Connect code copied."
-                                }
-                            }
-                            .buttonStyle(ZYMGhostButton())
-                            .disabled(connectCode.isEmpty)
-
-                            Button("Refresh") { loadConnectCode() }
-                                .buttonStyle(ZYMGhostButton())
                         }
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .center, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Text("Nearby")
-                                            .font(.custom("Syne", size: 18))
-                                            .foregroundColor(Color.zymText)
-                                        Button(action: { loadNearbyUsers() }) {
-                                            Image(systemName: "arrow.clockwise")
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundColor(Color.zymSubtext)
-                                                .rotationEffect(.degrees(nearbyLoading ? 180 : 0))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(nearbyLoading || sharedLocation == nil)
-                                    }
-                                    Text(sharedLocation?.label ?? "Location off")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
-                                }
-
-                                Spacer()
-
-                                Button(sharedLocation == nil ? "Enable" : "Manage") {
-                                    nearbyLocationSheetOpen = true
-                                }
-                                .buttonStyle(ZYMGhostButton())
-                            }
-
-                            if sharedLocation == nil {
-                                Text("No nearby users")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(Color.zymSubtext)
-                            } else if nearbyUsers.isEmpty && !nearbyLoading {
-                                Text("No nearby users")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(Color.zymSubtext)
-                            } else {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 10) {
-                                        ForEach(Array(nearbyUsers.prefix(8))) { user in
-                                            NearbyAvatarTile(user: user) {
-                                                openNearbyProfile(user)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !nearbyStatusText.isEmpty {
-                                Text(nearbyStatusText)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(Color.zymPrimary)
-                            }
-                        }
-                        .zymCard()
-
-                        if !requests.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Pending Invitations")
-                                    .font(.custom("Syne", size: 18))
-                                    .foregroundColor(Color.zymText)
-
-                                ForEach(requests, id: \.id) { friend in
-                                    FriendRequestRow(friend: friend) {
-                                        acceptIncomingRequest(friend.id)
-                                    }
-                                }
-                            }
-                        }
-
-                        Text("Add by user ID or connect code")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.zymSubtext)
-
-                        TextField("e.g. 102 or zym://add-friend?uid=102", text: $identifier)
-                            .zymFieldStyle()
-
-                        Button(pending ? "Working..." : "Send Request") {
-                            addFriend()
-                        }
-                        .buttonStyle(ZYMPrimaryButton())
-                        .disabled(pending)
-
-                        Text("Or invite by username")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.zymSubtext)
-
-                        TextField("Search username", text: $username)
-                            .zymFieldStyle()
-                            .textInputAutocapitalization(.never)
-                            .disableAutocorrection(true)
-
-                        if usernameSearchPending {
-                            Text("Searching usernames...")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.zymSubtext)
-                        }
-
-                        ForEach(usernameSearchResults, id: \.id) { friend in
-                            FriendSearchResultRow(friend: friend) {
-                                sendFriendRequest(to: friend.id)
-                            }
-                        }
-
-                        if !statusText.isEmpty {
-                            Text(statusText)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.zymSubtext)
+                        switch activePanel {
+                        case .menu:
+                            addFriendMenu
+                        case .qr:
+                            addFriendQRPanel
+                        case .nearby:
+                            addFriendNearbyPanel
+                        case .username:
+                            addFriendUsernamePanel
+                        case .code:
+                            addFriendCodePanel
+                        case .invitations:
+                            addFriendInvitationsPanel
                         }
                     }
                     .padding(18)
@@ -689,9 +537,11 @@ struct AddFriendView: View {
                 QRCodeScannerView { scannedCode in
                     identifier = scannedCode
                     showQRScanner = false
+                    activePanel = .code
                     statusText = "Scanned code detected. Tap Send Request to add."
                 } onFailure: { errorMessage in
-                    statusText = errorMessage
+                    showQRScanner = false
+                    statusText = errorMessage == "No camera available on this device." ? "" : errorMessage
                 }
                 .ignoresSafeArea()
                 .navigationTitle("Scan Connect QR")
@@ -703,14 +553,6 @@ struct AddFriendView: View {
                     }
                 }
             }
-        }
-        .fullScreenCover(isPresented: $showQRCodeFullscreen) {
-            ConnectQRCodeFullscreenView(
-                connectId: connectId,
-                connectCode: connectCode,
-                expiresAt: connectExpiresAt,
-                onRefresh: { loadConnectCode() }
-            )
         }
         .sheet(isPresented: $nearbyLocationSheetOpen) {
             NearbyLocationSheet(
@@ -746,6 +588,384 @@ struct AddFriendView: View {
                 onReportUser: { reportNearbyProfileUser(conversation: profileConversation) }
             )
         }
+    }
+
+    private var addFriendMenu: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Choose a Way")
+                    .font(.custom("Syne", size: 26))
+                    .foregroundColor(Color.zymText)
+                Text("Your account ID is \(appState.userId ?? 0).")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
+            }
+            .padding(.bottom, 2)
+
+            addFriendAction(
+                title: "My QR Code",
+                subtitle: connectId.isEmpty ? "Let someone scan your secure code." : "Connect ID \(connectId)",
+                symbol: "qrcode",
+                badge: nil
+            ) {
+                activePanel = .qr
+            }
+
+            addFriendAction(
+                title: "Scan QR",
+                subtitle: "Use the camera to read a friend's code.",
+                symbol: "viewfinder",
+                badge: nil
+            ) {
+                showQRScanner = true
+            }
+
+            addFriendAction(
+                title: "Nearby",
+                subtitle: sharedLocation?.label ?? "Share a location to see people near you.",
+                symbol: "map",
+                badge: nearbyUsers.isEmpty ? nil : "\(nearbyUsers.count)"
+            ) {
+                activePanel = .nearby
+                loadNearbyUsers()
+            }
+
+            addFriendAction(
+                title: "Username Search",
+                subtitle: "Find a person by username.",
+                symbol: "magnifyingglass",
+                badge: nil
+            ) {
+                activePanel = .username
+            }
+
+            addFriendAction(
+                title: "Connect Code",
+                subtitle: "Paste a user ID, link, or scanned code.",
+                symbol: "link",
+                badge: nil
+            ) {
+                activePanel = .code
+            }
+
+            if !requests.isEmpty {
+                addFriendAction(
+                    title: "Invitations",
+                    subtitle: "Review incoming friend requests.",
+                    symbol: "person.crop.circle.badge.checkmark",
+                    badge: "\(requests.count)"
+                ) {
+                    activePanel = .invitations
+                }
+            }
+
+            statusLine
+        }
+    }
+
+    private var addFriendQRPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("My QR Code")
+                .font(.custom("Syne", size: 26))
+                .foregroundColor(Color.zymText)
+
+            if let qrImage = makeQRCodeImage(from: connectCode) {
+                Image(uiImage: qrImage)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 320)
+                    .padding(16)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.zymLine, lineWidth: 1)
+                    )
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    .zymCard()
+            }
+
+            if !connectId.isEmpty {
+                Text("Connect ID \(connectId)")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+            }
+
+            Text(connectCodeMeta)
+                .font(.system(size: 13))
+                .foregroundColor(Color.zymSubtext)
+
+            Button {
+                if !connectCode.isEmpty {
+                    UIPasteboard.general.string = connectCode
+                    statusText = "Connect code copied."
+                }
+            } label: {
+                Label("Copy Code", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(ZYMPrimaryButton())
+            .disabled(connectCode.isEmpty)
+
+            statusLine
+        }
+    }
+
+    private var addFriendNearbyPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Nearby")
+                        .font(.custom("Syne", size: 26))
+                        .foregroundColor(Color.zymText)
+                    Text(sharedLocation?.label ?? "Location sharing is off.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                }
+
+                Spacer()
+
+                Button(sharedLocation == nil ? "Enable" : "Manage") {
+                    nearbyLocationSheetOpen = true
+                }
+                .buttonStyle(ZYMGhostButton())
+            }
+
+            if let sharedLocation {
+                NearbyUsersMapView(viewerLocation: sharedLocation, users: nearbyUsers)
+                    .frame(height: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.zymLine, lineWidth: 1)
+                    )
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "map")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                    Text("Turn on nearby sharing to show the map.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+                .background(Color.zymSurfaceSoft.opacity(0.68))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            HStack {
+                Text(nearbyLoading ? "Loading people nearby..." : "\(nearbyUsers.count) nearby")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+                Spacer()
+                Button {
+                    loadNearbyUsers()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(ZYMGhostButton())
+                .disabled(nearbyLoading || sharedLocation == nil)
+            }
+
+            if sharedLocation != nil && nearbyUsers.isEmpty && !nearbyLoading {
+                Text("No nearby users yet.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .zymCard()
+            }
+
+            ForEach(nearbyUsers) { user in
+                Button {
+                    openNearbyProfile(user)
+                } label: {
+                    HStack(spacing: 12) {
+                        nearbyAvatar(user)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(user.username)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color.zymText)
+                            Text("\(nearbyDistanceText(user.distance_km)) · \(nearbyStatusTitle(user.friendship_status))")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.zymSubtext)
+                        }
+                        Spacer()
+                    }
+                    .zymCard()
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !nearbyStatusText.isEmpty {
+                Text(nearbyStatusText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.zymPrimary)
+            }
+        }
+    }
+
+    private var addFriendUsernamePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Username Search")
+                .font(.custom("Syne", size: 26))
+                .foregroundColor(Color.zymText)
+
+            TextField("Search username", text: $username)
+                .zymFieldStyle()
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+
+            if usernameSearchPending {
+                Text("Searching usernames...")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
+            }
+
+            ForEach(usernameSearchResults, id: \.id) { friend in
+                FriendSearchResultRow(friend: friend) {
+                    sendFriendRequest(to: friend.id)
+                }
+            }
+
+            statusLine
+        }
+    }
+
+    private var addFriendCodePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connect Code")
+                .font(.custom("Syne", size: 26))
+                .foregroundColor(Color.zymText)
+
+            TextField("User ID or zym://add-friend link", text: $identifier)
+                .zymFieldStyle()
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+
+            Button(pending ? "Working..." : "Send Request") {
+                addFriend()
+            }
+            .buttonStyle(ZYMPrimaryButton())
+            .disabled(pending)
+
+            statusLine
+        }
+    }
+
+    private var addFriendInvitationsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Invitations")
+                .font(.custom("Syne", size: 26))
+                .foregroundColor(Color.zymText)
+
+            if requests.isEmpty {
+                Text("No pending invitations.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .zymCard()
+            } else {
+                ForEach(requests, id: \.id) { friend in
+                    FriendRequestRow(friend: friend) {
+                        acceptIncomingRequest(friend.id)
+                    }
+                }
+            }
+
+            statusLine
+        }
+    }
+
+    private var statusLine: some View {
+        SwiftUI.Group {
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
+            }
+        }
+    }
+
+    private func addFriendAction(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        badge: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.zymSpring) {
+                action()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(Color.zymPrimaryDark)
+                    .frame(width: 34, height: 34)
+                    .background(Color.zymSurfaceSoft)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.zymSubtext)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.zymPrimaryDark)
+                        .clipShape(Capsule())
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Color.zymSubtext)
+            }
+            .zymCard()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func nearbyAvatar(_ user: NearbyUserPayload) -> some View {
+        SwiftUI.Group {
+            if let avatarURL = user.avatar_url, let url = resolveRemoteURL(avatarURL) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.zymSurfaceSoft)
+                    }
+                }
+            } else {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.zymSurfaceSoft)
+                    .overlay(
+                        Text(String(user.username.prefix(1)).uppercased())
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Color.zymPrimaryDark)
+                    )
+            }
+        }
+        .frame(width: 54, height: 54)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     func sendFriendRequest(to friendId: Int, dismissAfterAdd: Bool = true) {
@@ -1278,6 +1498,15 @@ struct DMOpenResponse: Codable {
     let topic: String
 }
 
+private enum AddFriendPanel {
+    case menu
+    case qr
+    case nearby
+    case username
+    case code
+    case invitations
+}
+
 func makeQRCodeImage(from payload: String) -> UIImage? {
     guard !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     let context = CIContext()
@@ -1362,6 +1591,120 @@ struct ConnectQRCodeFullscreenView: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+private final class NearbyMapAnnotation: NSObject, MKAnnotation {
+    let coordinate: CLLocationCoordinate2D
+    let title: String?
+    let subtitle: String?
+    let isViewer: Bool
+
+    init(coordinate: CLLocationCoordinate2D, title: String, subtitle: String?, isViewer: Bool) {
+        self.coordinate = coordinate
+        self.title = title
+        self.subtitle = subtitle
+        self.isViewer = isViewer
+    }
+}
+
+private struct NearbyUsersMapView: UIViewRepresentable {
+    let viewerLocation: StoredUserLocationPayload
+    let users: [NearbyUserPayload]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        mapView.pointOfInterestFilter = .excludingAll
+        mapView.showsCompass = false
+        mapView.isRotateEnabled = false
+        return mapView
+    }
+
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+
+        let viewerCoordinate = CLLocationCoordinate2D(
+            latitude: viewerLocation.latitude,
+            longitude: viewerLocation.longitude
+        )
+        var coordinates = [viewerCoordinate]
+        mapView.addAnnotation(
+            NearbyMapAnnotation(
+                coordinate: viewerCoordinate,
+                title: "You",
+                subtitle: viewerLocation.label,
+                isViewer: true
+            )
+        )
+
+        for user in users {
+            guard let latitude = user.location_latitude,
+                  let longitude = user.location_longitude,
+                  latitude.isFinite,
+                  longitude.isFinite else { continue }
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            coordinates.append(coordinate)
+            mapView.addAnnotation(
+                NearbyMapAnnotation(
+                    coordinate: coordinate,
+                    title: user.username,
+                    subtitle: nearbyDistanceText(user.distance_km),
+                    isViewer: false
+                )
+            )
+        }
+
+        mapView.setRegion(region(for: coordinates), animated: true)
+    }
+
+    private func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
+        guard let first = coordinates.first else {
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+            )
+        }
+
+        var minLatitude = first.latitude
+        var maxLatitude = first.latitude
+        var minLongitude = first.longitude
+        var maxLongitude = first.longitude
+
+        for coordinate in coordinates.dropFirst() {
+            minLatitude = min(minLatitude, coordinate.latitude)
+            maxLatitude = max(maxLatitude, coordinate.latitude)
+            minLongitude = min(minLongitude, coordinate.longitude)
+            maxLongitude = max(maxLongitude, coordinate.longitude)
+        }
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLatitude + maxLatitude) / 2,
+            longitude: (minLongitude + maxLongitude) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.04, (maxLatitude - minLatitude) * 1.8),
+            longitudeDelta: max(0.04, (maxLongitude - minLongitude) * 1.8)
+        )
+        return MKCoordinateRegion(center: center, span: span)
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            guard let annotation = annotation as? NearbyMapAnnotation else { return nil }
+            let identifier = annotation.isViewer ? "viewer" : "nearby"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            view.annotation = annotation
+            view.markerTintColor = annotation.isViewer ? UIColor(Color.zymPrimaryDark) : UIColor(Color.zymSecondary)
+            view.glyphImage = UIImage(systemName: annotation.isViewer ? "person.fill" : "figure.walk")
+            view.canShowCallout = true
+            return view
+        }
     }
 }
 

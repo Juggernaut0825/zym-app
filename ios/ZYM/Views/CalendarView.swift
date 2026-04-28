@@ -97,6 +97,7 @@ private func calendarFormattedDay(_ day: String) -> String {
     guard let date = calendarDate(from: day) else { return day }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
     formatter.dateFormat = "MMM d, yyyy"
     return formatter.string(from: date)
 }
@@ -105,8 +106,17 @@ private func calendarShortDay(_ day: String) -> String {
     guard let date = calendarDate(from: day) else { return String(day.suffix(5)) }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
     formatter.dateFormat = "MMM d"
     return formatter.string(from: date)
+}
+
+private func calendarPickerDate(from day: String) -> Date {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.date(from: day) ?? Date()
 }
 
 private func calendarAddDays(_ day: String, delta: Int) -> String {
@@ -138,7 +148,7 @@ struct CalendarView: View {
     @StateObject private var healthKitManager = HealthKitManager()
 
     @State private var records: CoachRecordsResponse?
-    @State private var selectedDate = Date()
+    @State private var selectedDay = calendarLocalDay(from: Date(), timeZoneId: nil)
     @State private var loadingRecords = false
     @State private var saving = false
     @State private var syncStatus = ""
@@ -148,9 +158,19 @@ struct CalendarView: View {
     @State private var trainingDraft: CalendarTrainingDraft?
     @State private var checkInDraft = CalendarCheckInDraft(day: "")
     @State private var progressRange = 30
+    @State private var checkInEditorExpanded = false
 
     private var effectiveDay: String {
-        calendarLocalDay(from: selectedDate, timeZoneId: records?.profile.timezone)
+        selectedDay
+    }
+
+    private var selectedDateBinding: Binding<Date> {
+        Binding(
+            get: { calendarPickerDate(from: selectedDay) },
+            set: { nextDate in
+                selectedDay = calendarLocalDay(from: nextDate, timeZoneId: nil)
+            }
+        )
     }
 
     private var selectedRecord: CoachDayRecord? {
@@ -230,46 +250,49 @@ struct CalendarView: View {
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("CALENDAR")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.4)
-                        .foregroundColor(Color.zymSubtext)
-                    Text("Daily log")
+                    Text(calendarFormattedDay(effectiveDay))
                         .font(.custom("Syne", size: 24))
                         .foregroundColor(Color.zymText)
-                    Text("Pick a day. Everything below updates with it.")
-                        .font(.system(size: 13))
+                        .lineLimit(1)
+                    Text("Coach records, health sync, and progress signals.")
+                        .font(.system(size: 14))
                         .foregroundColor(Color.zymSubtext)
                 }
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 8) {
-                    DatePicker("", selection: $selectedDate, displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
-
-                    Button(isSyncing ? "Syncing..." : "Sync Health") {
-                        syncFromHealthKit(auto: false)
-                    }
-                    .buttonStyle(ZYMGhostButton())
-                    .disabled(isSyncing)
-                }
+                DatePicker("", selection: selectedDateBinding, displayedComponents: .date)
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
             }
 
-            HStack {
-                Text(syncStatus.isEmpty ? "Health sync shows here." : syncStatus)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color.zymSubtext)
-                Spacer()
-                Button(loadingRecords ? "Refreshing..." : "Refresh") {
+            HStack(spacing: 10) {
+                Button {
+                    syncFromHealthKit(auto: false)
+                } label: {
+                    Label(isSyncing ? "Syncing" : "Sync", systemImage: "heart.text.square")
+                }
+                .buttonStyle(ZYMGhostButton())
+                .disabled(isSyncing)
+
+                Button {
                     loadRecords()
+                } label: {
+                    Label(loadingRecords ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(ZYMGhostButton())
                 .disabled(loadingRecords || saving)
+
+                Spacer()
+            }
+
+            if !syncStatus.isEmpty {
+                Text(syncStatus.isEmpty ? "Health sync shows here." : syncStatus)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.zymSubtext)
             }
         }
         .zymCard()
@@ -278,24 +301,24 @@ struct CalendarView: View {
     private var statGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             calendarStatCard(
-                title: "Daily Target",
-                value: calendarMetric(records?.profile.daily_target, suffix: " kcal"),
-                detail: "From profile"
+                title: "Intake",
+                value: calendarMetric(selectedRecord?.total_intake, suffix: " kcal"),
+                detail: "\(selectedMeals.count) meal\(selectedMeals.count == 1 ? "" : "s")"
             )
             calendarStatCard(
-                title: "Latest Weight",
-                value: calendarMetric(records?.progress?.latestWeightKg, suffix: " kg"),
-                detail: records?.progress?.latestWeightDay.map { calendarFormattedDay($0) } ?? "No check-ins"
+                title: "Training",
+                value: calendarMetric(selectedRecord?.total_burned, suffix: " kcal"),
+                detail: "\(selectedTraining.count) entr\(selectedTraining.count == 1 ? "y" : "ies")"
             )
             calendarStatCard(
-                title: "Selected Steps",
+                title: "Steps",
                 value: selectedHealth.map { "\($0.steps)" } ?? "--",
                 detail: selectedHealth?.synced_at == nil ? "No sync" : "Synced"
             )
             calendarStatCard(
-                title: "14d Delta",
-                value: calendarSignedMetric(records?.progress?.weight14dDelta, suffix: " kg"),
-                detail: records?.progress?.statusLabel ?? "Need data"
+                title: "Weight",
+                value: calendarMetric(selectedRecord?.check_in?.weight_kg ?? records?.progress?.latestWeightKg, suffix: " kg"),
+                detail: selectedRecord?.check_in?.weight_kg == nil ? "Latest logged" : "Selected day"
             )
         }
     }
@@ -304,13 +327,12 @@ struct CalendarView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("TREND")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.4)
-                        .foregroundColor(Color.zymSubtext)
-                    Text("Weight trend")
+                    Text("Weight Trend")
                         .font(.custom("Syne", size: 20))
                         .foregroundColor(Color.zymText)
+                    Text(records?.progress?.statusLabel ?? "Need more check-ins")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
                 }
                 Spacer()
                 Picker("Range", selection: $progressRange) {
@@ -324,51 +346,41 @@ struct CalendarView: View {
 
             CalendarWeightBars(points: weightPoints)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(records?.progress?.statusLabel ?? "Need more data.")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color.zymText)
-                Text(records?.progress?.trendNarrative ?? "Log a few check-ins to see the trend.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-            }
+            Text(records?.progress?.trendNarrative ?? "Log a few check-ins to see the trend.")
+                .font(.system(size: 14))
+                .foregroundColor(Color.zymSubtext)
         }
         .zymCard()
     }
 
     private var dailyOverviewCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("SELECTED DAY")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.4)
-                .foregroundColor(Color.zymSubtext)
-
-            Text(calendarFormattedDay(effectiveDay))
-                .font(.custom("Syne", size: 22))
+            Text("Coach Record")
+                .font(.custom("Syne", size: 20))
                 .foregroundColor(Color.zymText)
 
-            VStack(spacing: 10) {
-                calendarOverviewRow(
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                calendarSummaryPill(
                     title: "Check-in",
-                    detail: "Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg")) · Body fat \(calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%"))"
+                    value: "Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg"))"
                 )
-                calendarOverviewRow(
-                    title: "Activity",
-                    detail: "Steps \(selectedHealth.map { String($0.steps) } ?? "--") · Calories \(selectedHealth.map { "\($0.calories_burned) kcal" } ?? "--") · Active \(selectedHealth.map { String($0.active_minutes) } ?? "--") min"
+                calendarSummaryPill(
+                    title: "Body fat",
+                    value: calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%")
                 )
-                calendarOverviewRow(
-                    title: "Meals",
-                    detail: "\(selectedMeals.count) logged · Intake \(Int((selectedRecord?.total_intake ?? 0).rounded())) kcal"
+                calendarSummaryPill(
+                    title: "Active",
+                    value: selectedHealth.map { "\($0.active_minutes) min" } ?? "--"
                 )
-                calendarOverviewRow(
-                    title: "Training",
-                    detail: "\(selectedTraining.count) entries · Estimated work \(Int((selectedRecord?.total_burned ?? 0).rounded())) kcal"
+                calendarSummaryPill(
+                    title: "Target",
+                    value: calendarMetric(records?.profile.daily_target, suffix: " kcal")
                 )
             }
 
             if let notes = selectedRecord?.check_in?.notes, !notes.isEmpty {
                 Text(notes)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
                     .foregroundColor(Color.zymSubtext)
             }
         }
@@ -377,48 +389,60 @@ struct CalendarView: View {
 
     private var checkInCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("CHECK-IN")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.4)
-                .foregroundColor(Color.zymSubtext)
+            DisclosureGroup(isExpanded: $checkInEditorExpanded) {
+                VStack(spacing: 12) {
+                    HStack(spacing: 10) {
+                        calendarInput("Weight kg", text: $checkInDraft.weightKg, keyboard: .decimalPad)
+                        calendarInput("Body fat %", text: $checkInDraft.bodyFatPct, keyboard: .decimalPad)
+                    }
 
-            HStack(spacing: 10) {
-                calendarInput("Weight kg", text: $checkInDraft.weightKg, keyboard: .decimalPad)
-                calendarInput("Body fat %", text: $checkInDraft.bodyFatPct, keyboard: .decimalPad)
-            }
+                    TextEditor(text: $checkInDraft.notes)
+                        .frame(minHeight: 96)
+                        .padding(10)
+                        .background(Color.zymSurfaceSoft.opacity(0.76))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            TextEditor(text: $checkInDraft.notes)
-                .frame(minHeight: 110)
-                .padding(10)
-                .background(Color.zymSurfaceSoft.opacity(0.76))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    HStack {
+                        Button(saving ? "Saving..." : "Save check-in") {
+                            saveCheckInDraft()
+                        }
+                        .buttonStyle(ZYMPrimaryButton())
+                        .disabled(saving || loadingRecords)
 
-            HStack {
-                Button(saving ? "Saving..." : "Save check-in") {
-                    saveCheckInDraft()
+                        Button("Reset") {
+                            resetCheckInDraft()
+                        }
+                        .buttonStyle(ZYMGhostButton())
+                        .disabled(saving)
+                    }
                 }
-                .buttonStyle(ZYMPrimaryButton())
-                .disabled(saving || loadingRecords)
-
-                Button("Reset") {
-                    resetCheckInDraft()
+                .padding(.top, 8)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Check-in")
+                        .font(.custom("Syne", size: 20))
+                        .foregroundColor(Color.zymText)
+                    Text("Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg")) · Body fat \(calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%"))")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
                 }
-                .buttonStyle(ZYMGhostButton())
-                .disabled(saving)
             }
+            .accentColor(Color.zymText)
         }
         .zymCard()
     }
 
     private var mealsCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("MEALS")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.4)
-                .foregroundColor(Color.zymSubtext)
-            Text("Meals on \(calendarFormattedDay(effectiveDay))")
+            HStack {
+                Text("Meals")
                 .font(.custom("Syne", size: 20))
                 .foregroundColor(Color.zymText)
+                Spacer()
+                Text("\(Int((selectedRecord?.total_intake ?? 0).rounded())) kcal")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+            }
 
             if selectedMeals.isEmpty {
                 calendarEmptyState("No meals logged.")
@@ -445,7 +469,9 @@ struct CalendarView: View {
                             .font(.system(size: 13))
                             .foregroundColor(Color.zymSubtext)
                     }
-                    .padding(.vertical, 4)
+                    .padding(10)
+                    .background(Color.zymSurfaceSoft.opacity(0.58))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
@@ -454,13 +480,15 @@ struct CalendarView: View {
 
     private var trainingCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("TRAINING")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.4)
-                .foregroundColor(Color.zymSubtext)
-            Text("Training on \(calendarFormattedDay(effectiveDay))")
-                .font(.custom("Syne", size: 20))
-                .foregroundColor(Color.zymText)
+            HStack {
+                Text("Training")
+                    .font(.custom("Syne", size: 20))
+                    .foregroundColor(Color.zymText)
+                Spacer()
+                Text("\(selectedTraining.count) entr\(selectedTraining.count == 1 ? "y" : "ies")")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+            }
 
             if selectedTraining.isEmpty {
                 calendarEmptyState("No training logged.")
@@ -489,11 +517,30 @@ struct CalendarView: View {
                                 .foregroundColor(Color.zymSubtext)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(10)
+                    .background(Color.zymSurfaceSoft.opacity(0.58))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
         .zymCard()
+    }
+
+    private func calendarSummaryPill(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.zymSubtext)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Color.zymText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.zymSurfaceSoft.opacity(0.64))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func calendarStatCard(title: String, value: String, detail: String) -> some View {

@@ -26,6 +26,8 @@ export interface NearbyUserSummary {
   friendship_status: FriendshipRelationshipStatus;
   location_label: string;
   location_city: string;
+  location_latitude: number;
+  location_longitude: number;
   distance_km: number;
 }
 
@@ -365,6 +367,8 @@ export class LocationService {
           friendship_status: FriendService.getRelationshipStatus(userId, Number(row.id)),
           location_label: targetLocation.label,
           location_city: targetLocation.city,
+          location_latitude: targetLocation.latitude,
+          location_longitude: targetLocation.longitude,
           distance_km: Math.round(distanceKm * 10) / 10,
         };
       })

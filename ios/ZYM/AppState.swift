@@ -182,6 +182,8 @@ struct NearbyUserPayload: Codable, Identifiable {
     var friendship_status: String
     let location_label: String
     let location_city: String
+    let location_latitude: Double?
+    let location_longitude: Double?
     let distance_km: Double
 }
 

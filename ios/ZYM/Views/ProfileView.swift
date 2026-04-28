@@ -25,6 +25,11 @@ struct ProfileView: View {
     @State private var notificationPreferencesPending = false
     @State private var notificationStatusText = ""
     @State private var mediaPresentation: RemoteMediaPresentation?
+    @State private var showPreferences = false
+    @State private var sharedLocation: StoredUserLocationPayload?
+    @State private var locationPending = false
+    @State private var locationStatusText = ""
+    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
 
     private var profileMediaItems: [RemoteMediaItem] {
         resolvedRemoteMediaItems(
@@ -38,6 +43,12 @@ struct ProfileView: View {
         )
     }
 
+    private var preferencesSummary: String {
+        let theme = conversationBubbleThemePreset(id: appState.defaultConversationBubbleThemeId).label
+        let location = sharedLocation?.label ?? "Location off"
+        return "\(theme) bubbles · \(location)"
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -45,86 +56,12 @@ struct ProfileView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
-                        ZStack(alignment: .bottomLeading) {
-                            if let cover = profile?.background_url, let url = resolveRemoteURL(cover) {
-                                Button {
-                                    presentProfileMedia(startingWith: cover)
-                                } label: {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                        default:
-                                            LinearGradient(
-                                                colors: [Color.zymSurfaceSoft, Color.zymBackground],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        }
-                                    }
-                                }
-                                .frame(height: 170)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .buttonStyle(.plain)
-                            } else {
-                                LinearGradient(
-                                    colors: [Color.zymSurfaceSoft, Color.zymBackground],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                .frame(height: 170)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            }
-
-                            HStack(spacing: 10) {
-                                if let avatar = profile?.avatar_url, let url = resolveRemoteURL(avatar) {
-                                    Button {
-                                        presentProfileMedia(startingWith: avatar)
-                                    } label: {
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .success(let image):
-                                                image
-                                                    .resizable()
-                                                    .scaledToFill()
-                                            default:
-                                                Circle().fill(Color.zymSurfaceSoft)
-                                            }
-                                        }
-                                    }
-                                    .frame(width: 74, height: 74)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 2))
-                                    .buttonStyle(.plain)
-                                } else {
-                                    Circle()
-                                        .fill(Color.zymPrimary)
-                                        .frame(width: 74, height: 74)
-                                        .overlay(
-                                            Text(String((profile?.username ?? appState.username ?? "U").prefix(2)).uppercased())
-                                                .font(.custom("Syne", size: 24))
-                                                .foregroundColor(.white)
-                                        )
-                                        .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 2))
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(profile?.username ?? appState.username ?? "User")
-                                        .font(.custom("Syne", size: 28))
-                                        .foregroundColor(Color.zymText)
-                                    Text("ID: \(profile?.public_uuid ?? String(appState.userId ?? 0))")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
-                                    Text("Coach chats: \(profile?.enabled_coaches?.count ?? 0)")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(Color.zymSubtext)
-                                }
-                            }
-                            .padding(12)
-                        }
-                        .zymCard()
+                        ProfileHeroCard(
+                            profile: profile,
+                            fallbackUsername: appState.username ?? "User",
+                            fallbackUserId: String(appState.userId ?? 0),
+                            onPresentMedia: presentProfileMedia
+                        )
                         .zymAppear(delay: 0.04)
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -166,106 +103,39 @@ struct ProfileView: View {
                         .buttonStyle(ZYMPrimaryButton())
                         .zymAppear(delay: 0.14)
 
-                        Text("Calendar has your check-ins, meals, training, and health sync.")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(Color.zymSubtext)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 2)
-                            .zymAppear(delay: 0.175)
+                        Button {
+                            showPreferences = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(Color.zymPrimaryDark)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.zymSurfaceSoft)
+                                    .clipShape(Circle())
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Notification Settings")
-                                .font(.custom("Syne", size: 20))
-                                .foregroundColor(Color.zymText)
-
-                            Text("System permission and account defaults live together here.")
-                                .font(.system(size: 13))
-                                .foregroundColor(Color.zymSubtext)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            ProfileSystemNotificationRow(
-                                authorizationStatus: notificationManager.authorizationStatus,
-                                isEnabled: notificationManager.systemNotificationsEnabled,
-                                onToggle: { nextValue in
-                                    notificationManager.toggleSystemNotifications(nextValue)
-                                },
-                                onOpenSettings: {
-                                    notificationManager.openSystemSettings()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Preferences")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color.zymText)
+                                    Text(preferencesSummary)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .lineLimit(2)
                                 }
-                            )
 
-                            if notificationPreferencesLoading {
-                                ProgressView()
-                                    .padding(.top, 2)
-                            } else {
-                                ProfileNotificationToggleRow(
-                                    title: "Messages",
-                                    subtitle: "Direct messages, coach chats, and groups follow this default.",
-                                    isOn: Binding(
-                                        get: { notificationPreferences.messageNotificationsEnabled },
-                                        set: { nextValue in
-                                            updateNotificationPreferences(
-                                                messageNotificationsEnabled: nextValue,
-                                                postNotificationsEnabled: nil
-                                            )
-                                        }
-                                    ),
-                                    pending: notificationPreferencesPending,
-                                    disabled: false
-                                )
+                                Spacer()
 
-                                ProfileNotificationToggleRow(
-                                    title: "Posts",
-                                    subtitle: "Likes and comments on your community posts follow this default.",
-                                    isOn: Binding(
-                                        get: { notificationPreferences.postNotificationsEnabled },
-                                        set: { nextValue in
-                                            updateNotificationPreferences(
-                                                messageNotificationsEnabled: nil,
-                                                postNotificationsEnabled: nextValue
-                                            )
-                                        }
-                                    ),
-                                    pending: notificationPreferencesPending,
-                                    disabled: false
-                                )
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color.zymSubtext)
                             }
-
-                            if !notificationStatusText.isEmpty {
-                                Text(notificationStatusText)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(Color.zymPrimary)
-                            }
+                            .padding(14)
+                            .background(Color.white.opacity(0.78))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .zymCard()
-                        .zymAppear(delay: 0.177)
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Message Bubble")
-                                .font(.custom("Syne", size: 20))
-                                .foregroundColor(Color.zymText)
-
-                            Text("Pick a default chat color style.")
-                                .font(.system(size: 13))
-                                .foregroundColor(Color.zymSubtext)
-
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                                ForEach(conversationBubbleThemePresets) { preset in
-                                    ProfileBubbleThemeChip(
-                                        preset: preset,
-                                        selected: appState.defaultConversationBubbleThemeId == preset.id,
-                                        onSelect: {
-                                            appState.setDefaultConversationBubbleThemeId(preset.id)
-                                            notificationStatusText = "Bubble theme updated."
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .zymCard()
-                        .zymAppear(delay: 0.178)
+                        .buttonStyle(.plain)
+                        .zymAppear(delay: 0.18)
 
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
@@ -299,9 +169,43 @@ struct ProfileView: View {
                 onLogoutOthers: logoutOtherSessions
             )
         }
+        .sheet(isPresented: $showPreferences) {
+            ProfilePreferencesSheet(
+                notificationPreferences: $notificationPreferences,
+                notificationPreferencesLoading: notificationPreferencesLoading,
+                notificationPreferencesPending: notificationPreferencesPending,
+                notificationStatusText: notificationStatusText,
+                sharedLocation: $sharedLocation,
+                locationPending: locationPending,
+                locationStatusText: locationStatusText,
+                locationCoordinator: locationCoordinator,
+                onToggleSystemNotifications: { nextValue in
+                    notificationManager.toggleSystemNotifications(nextValue)
+                },
+                onOpenSystemNotificationSettings: {
+                    notificationManager.openSystemSettings()
+                },
+                onToggleMessages: { nextValue in
+                    updateNotificationPreferences(
+                        messageNotificationsEnabled: nextValue,
+                        postNotificationsEnabled: nil
+                    )
+                },
+                onTogglePosts: { nextValue in
+                    updateNotificationPreferences(
+                        messageNotificationsEnabled: nil,
+                        postNotificationsEnabled: nextValue
+                    )
+                },
+                onDisableLocation: disableStoredLocation
+            )
+            .environmentObject(appState)
+            .environmentObject(notificationManager)
+        }
         .onAppear {
             loadProfile()
             loadNotificationPreferences()
+            loadStoredLocation()
             notificationManager.refreshAuthorizationStatus()
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -350,6 +254,57 @@ struct ProfileView: View {
         }.resume()
     }
 
+    private func loadStoredLocation() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/profile/\(userId)") else { return }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data,
+                  let response = try? JSONDecoder().decode(StoredLocationResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                sharedLocation = response.location
+            }
+        }.resume()
+    }
+
+    private func disableStoredLocation() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/profile") else { return }
+
+        locationPending = true
+        locationStatusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "locationShared": false,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                locationPending = false
+                if let error {
+                    locationStatusText = error.localizedDescription
+                    return
+                }
+
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode) else {
+                    locationStatusText = parseAPIError(data) ?? "Failed to disable nearby sharing."
+                    return
+                }
+
+                sharedLocation = nil
+                locationStatusText = ""
+            }
+        }.resume()
+    }
+
     private func updateNotificationPreferences(
         messageNotificationsEnabled: Bool?,
         postNotificationsEnabled: Bool?
@@ -391,7 +346,7 @@ struct ProfileView: View {
                 }
 
                 notificationPreferences = decoded
-                notificationStatusText = "Notification settings updated."
+                notificationStatusText = ""
             }
         }.resume()
     }
@@ -504,6 +459,203 @@ struct ProfileView: View {
                 appState.logout()
             }
         }.resume()
+    }
+}
+
+private struct ProfilePreferencesSheet: View {
+    @Binding var notificationPreferences: ProfileNotificationPreferences
+    let notificationPreferencesLoading: Bool
+    let notificationPreferencesPending: Bool
+    let notificationStatusText: String
+    @Binding var sharedLocation: StoredUserLocationPayload?
+    let locationPending: Bool
+    let locationStatusText: String
+    @ObservedObject var locationCoordinator: AppLocationPermissionCoordinator
+    let onToggleSystemNotifications: (Bool) -> Void
+    let onOpenSystemNotificationSettings: () -> Void
+    let onToggleMessages: (Bool) -> Void
+    let onTogglePosts: (Bool) -> Void
+    let onDisableLocation: () -> Void
+
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var notificationManager: AppNotificationManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var bubbleThemeExpanded = false
+    @State private var locationSheetOpen = false
+
+    private var selectedTheme: ConversationBubbleThemePreset {
+        conversationBubbleThemePreset(id: appState.defaultConversationBubbleThemeId)
+    }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                ZYMBackgroundLayer().ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Preferences")
+                                .font(.custom("Syne", size: 30))
+                                .foregroundColor(Color.zymText)
+                            Text("Notifications, nearby discovery, and chat style live together here.")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .zymAppear(delay: 0.02)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Notifications")
+                                .font(.custom("Syne", size: 20))
+                                .foregroundColor(Color.zymText)
+
+                            ProfileSystemNotificationRow(
+                                authorizationStatus: notificationManager.authorizationStatus,
+                                isEnabled: notificationManager.systemNotificationsEnabled,
+                                onToggle: onToggleSystemNotifications,
+                                onOpenSettings: onOpenSystemNotificationSettings
+                            )
+
+                            if notificationPreferencesLoading {
+                                ProgressView()
+                                    .padding(.top, 2)
+                            } else {
+                                ProfileNotificationToggleRow(
+                                    title: "Messages",
+                                    subtitle: "Direct messages, coach chats, and groups follow this default.",
+                                    isOn: Binding(
+                                        get: { notificationPreferences.messageNotificationsEnabled },
+                                        set: onToggleMessages
+                                    ),
+                                    pending: notificationPreferencesPending,
+                                    disabled: false
+                                )
+
+                                ProfileNotificationToggleRow(
+                                    title: "Posts",
+                                    subtitle: "Likes and comments on your community posts follow this default.",
+                                    isOn: Binding(
+                                        get: { notificationPreferences.postNotificationsEnabled },
+                                        set: onTogglePosts
+                                    ),
+                                    pending: notificationPreferencesPending,
+                                    disabled: false
+                                )
+                            }
+
+                            if !notificationStatusText.isEmpty {
+                                Text(notificationStatusText)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color.zymPrimary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .zymCard()
+                        .zymAppear(delay: 0.06)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Discovery")
+                                .font(.custom("Syne", size: 20))
+                                .foregroundColor(Color.zymText)
+
+                            ProfileNotificationToggleRow(
+                                title: "Nearby Location",
+                                subtitle: sharedLocation?.label ?? "Share a city or area so nearby members can find you.",
+                                isOn: Binding(
+                                    get: { sharedLocation != nil },
+                                    set: { nextValue in
+                                        if nextValue {
+                                            locationSheetOpen = true
+                                        } else {
+                                            onDisableLocation()
+                                        }
+                                    }
+                                ),
+                                pending: locationPending,
+                                disabled: false
+                            )
+
+                            if sharedLocation != nil {
+                                Button("Change Location") {
+                                    locationSheetOpen = true
+                                }
+                                .buttonStyle(ZYMGhostButton())
+                                .disabled(locationPending)
+                            }
+
+                            if !locationStatusText.isEmpty {
+                                Text(locationStatusText)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Color.zymPrimary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .zymCard()
+                        .zymAppear(delay: 0.1)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            DisclosureGroup(isExpanded: $bubbleThemeExpanded) {
+                                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                    ForEach(conversationBubbleThemePresets) { preset in
+                                        ConversationBubbleThemeChip(
+                                            preset: preset,
+                                            selected: selectedTheme.id == preset.id,
+                                            onSelect: {
+                                                appState.setDefaultConversationBubbleThemeId(preset.id)
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.top, 10)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Message Bubble")
+                                            .font(.custom("Syne", size: 20))
+                                            .foregroundColor(Color.zymText)
+                                        Text(selectedTheme.label)
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundColor(Color.zymSubtext)
+                                    }
+
+                                    Spacer()
+
+                                    ConversationBubbleThemePreview(preset: selectedTheme)
+                                }
+                            }
+                            .accentColor(Color.zymText)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .zymCard()
+                        .zymAppear(delay: 0.14)
+                    }
+                    .padding(16)
+                    .padding(.bottom, 24)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(Color.zymPrimary)
+                }
+            }
+        }
+        .sheet(isPresented: $locationSheetOpen) {
+            NearbyLocationSheet(
+                initialLocation: sharedLocation,
+                onSaved: { location in
+                    sharedLocation = location
+                },
+                onDisabled: {
+                    sharedLocation = nil
+                },
+                locationCoordinator: locationCoordinator
+            )
+            .environmentObject(appState)
+        }
     }
 }
 
@@ -1772,6 +1924,143 @@ func parseAPIError(_ data: Data?) -> String? {
     return error
 }
 
+private struct ProfileHeroCard: View {
+    let profile: APIProfile?
+    let fallbackUsername: String
+    let fallbackUserId: String
+    let onPresentMedia: (String?) -> Void
+
+    private var username: String {
+        let value = String(profile?.username ?? fallbackUsername).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "User" : value
+    }
+
+    private var displayId: String {
+        let value = String(profile?.public_uuid ?? fallbackUserId).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? fallbackUserId : value
+    }
+
+    private var coachCount: Int {
+        profile?.enabled_coaches?.count ?? 0
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            coverImage
+                .frame(height: 138)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+            HStack(alignment: .top, spacing: 12) {
+                avatarImage
+                    .frame(width: 78, height: 78)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                    .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 5)
+                    .padding(.top, -28)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(username)
+                        .font(.custom("Syne", size: 26))
+                        .foregroundColor(Color.zymText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+
+                    Text("ID \(displayId)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Text("\(coachCount) coach chat\(coachCount == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.zymPrimaryDark)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.zymSurfaceSoft)
+                        .clipShape(Capsule())
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 16)
+            .padding(.top, 8)
+            .background(Color.white.opacity(0.86))
+        }
+        .background(Color.white.opacity(0.76))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.zymLine.opacity(0.72), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var coverImage: some View {
+        if let cover = profile?.background_url, let url = resolveRemoteURL(cover) {
+            Button {
+                onPresentMedia(cover)
+            } label: {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        coverPlaceholder
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            coverPlaceholder
+        }
+    }
+
+    @ViewBuilder
+    private var avatarImage: some View {
+        if let avatar = profile?.avatar_url, let url = resolveRemoteURL(avatar) {
+            Button {
+                onPresentMedia(avatar)
+            } label: {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        avatarPlaceholder
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            avatarPlaceholder
+        }
+    }
+
+    private var coverPlaceholder: some View {
+        LinearGradient(
+            colors: [Color.zymSurfaceSoft, Color(red: 0.93, green: 0.95, blue: 0.97)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var avatarPlaceholder: some View {
+        Circle()
+            .fill(Color.zymPrimary)
+            .overlay(
+                Text(String(username.prefix(2)).uppercased())
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+            )
+    }
+}
+
 private struct ProfileSystemNotificationRow: View {
     let authorizationStatus: UNAuthorizationStatus
     let isEnabled: Bool
@@ -1858,55 +2147,6 @@ private struct ProfileNotificationToggleRow: View {
         .padding(14)
         .background(Color.white.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
-
-private struct ProfileBubbleThemeChip: View {
-    let preset: ConversationBubbleThemePreset
-    let selected: Bool
-    let onSelect: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(preset.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color.zymText)
-                    HStack(spacing: 6) {
-                        Capsule()
-                            .fill(preset.incomingFill)
-                            .frame(width: 24, height: 10)
-                            .overlay(
-                                Capsule()
-                                    .fill(preset.incomingText.opacity(0.82))
-                                    .frame(width: 10, height: 3)
-                            )
-                        Capsule()
-                            .fill(preset.outgoingFill)
-                            .frame(width: 24, height: 10)
-                            .overlay(
-                                Capsule()
-                                    .fill(preset.outgoingText.opacity(0.82))
-                                    .frame(width: 10, height: 3)
-                            )
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color.zymPrimaryDark)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(Color.white.opacity(selected ? 0.92 : 0.76))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 }
 

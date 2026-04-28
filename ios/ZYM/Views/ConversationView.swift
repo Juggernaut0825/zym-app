@@ -54,6 +54,7 @@ struct ConversationView: View {
     @State private var coachRevealWorkItems: [Int: [DispatchWorkItem]] = [:]
     @State private var coachRevealTick = 0
     @State private var showConversationSettings = false
+    @State private var scrollToLatestRequest = 0
 
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
@@ -227,6 +228,9 @@ struct ConversationView: View {
                     }
                     .onChange(of: coachRevealTick) { _, _ in
                         scrollToLatestMessage(using: proxy)
+                    }
+                    .onChange(of: scrollToLatestRequest) { _, _ in
+                        scrollToLatestMessage(using: proxy, animated: false)
                     }
                 }
 
@@ -498,19 +502,23 @@ struct ConversationView: View {
                 }
                 pruneCoachReplyRevealAnimations(validMessageIds: Set(response.messages.map(\.id)))
                 markConversationRead(messageId: response.messages.last?.id)
+                scrollToLatestRequest += 1
             }
         }.resume()
     }
 
     private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool = true) {
-        DispatchQueue.main.async {
-            let scroll = {
-                proxy.scrollTo(latestMessageAnchor, anchor: .bottom)
-            }
-            if animated {
-                withAnimation(.zymSoft, scroll)
-            } else {
-                scroll()
+        let delays: [TimeInterval] = animated ? [0, 0.08, 0.24] : [0, 0.05, 0.18]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                let scroll = {
+                    proxy.scrollTo(latestMessageAnchor, anchor: .bottom)
+                }
+                if animated {
+                    withAnimation(.zymSoft, scroll)
+                } else {
+                    scroll()
+                }
             }
         }
     }
@@ -1239,6 +1247,7 @@ private struct ConversationNotificationSettingsView: View {
     @State private var loading = false
     @State private var saving = false
     @State private var statusText = ""
+    @State private var bubbleThemeExpanded = false
 
     private var selectedBubbleTheme: ConversationBubbleThemePreset {
         conversationBubbleThemePreset(id: appState.conversationBubbleThemeId(for: conversation.id))
@@ -1271,7 +1280,7 @@ private struct ConversationNotificationSettingsView: View {
                         } else {
                             HStack(alignment: .top, spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Thread-level alerts")
+                                    Text("Notifications")
                                         .font(.system(size: 15, weight: .semibold))
                                         .foregroundColor(Color.zymText)
                                     Text((preference?.muted ?? false)
@@ -1284,17 +1293,14 @@ private struct ConversationNotificationSettingsView: View {
 
                                 Spacer(minLength: 12)
 
-                                Button(action: {
-                                    updatePreference(muted: !(preference?.muted ?? false))
-                                }) {
-                                    Text(saving ? "Saving" : ((preference?.muted ?? false) ? "Muted" : "Notify"))
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor((preference?.muted ?? false) ? Color.zymText : .white)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 10)
-                                        .background((preference?.muted ?? false) ? Color.zymSurfaceSoft : Color.zymText)
-                                        .clipShape(Capsule())
-                                }
+                                Toggle("", isOn: Binding(
+                                    get: { !(preference?.muted ?? false) },
+                                    set: { nextValue in
+                                        updatePreference(muted: !nextValue)
+                                    }
+                                ))
+                                .labelsHidden()
+                                .tint(.green)
                                 .disabled(saving || loading)
                             }
                             .padding(.vertical, 2)
@@ -1310,61 +1316,40 @@ private struct ConversationNotificationSettingsView: View {
                     .zymAppear(delay: 0.08)
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Bubble theme")
-                            .font(.custom("Syne", size: 20))
-                            .foregroundColor(Color.zymText)
+                        DisclosureGroup(isExpanded: $bubbleThemeExpanded) {
+                            Text("Saved on this device for this chat.")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymSubtext)
+                                .padding(.top, 8)
 
-                        Text("Saved on this device for this chat.")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color.zymSubtext)
-
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            ForEach(conversationBubbleThemePresets) { preset in
-                                Button {
-                                    appState.setConversationBubbleThemeId(preset.id, for: conversation.id)
-                                    statusText = "Bubble theme updated."
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Text(preset.label)
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundColor(Color.zymText)
-                                            HStack(spacing: 6) {
-                                                Capsule()
-                                                    .fill(preset.incomingFill)
-                                                    .frame(width: 24, height: 10)
-                                                    .overlay(
-                                                        Capsule()
-                                                            .fill(preset.incomingText.opacity(0.8))
-                                                            .frame(width: 10, height: 3)
-                                                    )
-                                                Capsule()
-                                                    .fill(preset.outgoingFill)
-                                                    .frame(width: 24, height: 10)
-                                                    .overlay(
-                                                        Capsule()
-                                                            .fill(preset.outgoingText.opacity(0.8))
-                                                            .frame(width: 10, height: 3)
-                                                    )
-                                            }
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(conversationBubbleThemePresets) { preset in
+                                    ConversationBubbleThemeChip(
+                                        preset: preset,
+                                        selected: selectedBubbleTheme.id == preset.id,
+                                        onSelect: {
+                                            appState.setConversationBubbleThemeId(preset.id, for: conversation.id)
                                         }
-
-                                        Spacer(minLength: 8)
-
-                                        if selectedBubbleTheme.id == preset.id {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(Color.zymPrimaryDark)
-                                        }
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 11)
-                                    .background(Color.zymSurfaceSoft.opacity(selectedBubbleTheme.id == preset.id ? 0.96 : 0.72))
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    )
                                 }
-                                .buttonStyle(.plain)
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Message Bubble")
+                                        .font(.custom("Syne", size: 20))
+                                        .foregroundColor(Color.zymText)
+                                    Text(selectedBubbleTheme.label)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(Color.zymSubtext)
+                                }
+
+                                Spacer()
+
+                                ConversationBubbleThemePreview(preset: selectedBubbleTheme)
                             }
                         }
+                        .accentColor(Color.zymText)
                     }
                     .zymCard()
                     .zymAppear(delay: 0.1)
@@ -1431,12 +1416,12 @@ private struct ConversationNotificationSettingsView: View {
                 guard (200...299).contains(statusCode),
                       let data = data,
                       let payload = try? JSONDecoder().decode(ConversationNotificationPreferencePayload.self, from: data) else {
-                    statusText = "Failed to update chat notification settings."
+                    statusText = parseAPIError(data) ?? "Failed to update chat notification settings."
                     return
                 }
 
                 preference = payload
-                statusText = muted ? "This chat is muted." : "This chat will notify again."
+                statusText = ""
             }
         }.resume()
     }
@@ -1447,7 +1432,7 @@ private func conversationCoachDisplayName(_ coachId: String?) -> String {
 }
 
 private func splitConversationReplySegments(_ content: String?) -> [String] {
-    let text = String(content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let text = conversationSanitizedDisplayContent(content).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return [] }
     let normalized = text
         .replacingOccurrences(of: "\r\n", with: "\n")
@@ -1457,6 +1442,12 @@ private func splitConversationReplySegments(_ content: String?) -> [String] {
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
     return parts.isEmpty ? [text] : parts
+}
+
+private func conversationSanitizedDisplayContent(_ content: String?) -> String {
+    String(content ?? "")
+        .replacingOccurrences(of: "\u{FFFD}", with: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private func parseConversationDisplayDate(_ value: String?) -> Date? {
@@ -1584,7 +1575,7 @@ private struct ConversationMessageRow: View {
         if message.is_coach && !isMine {
             return splitConversationReplySegments(message.content)
         }
-        let text = String(message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = conversationSanitizedDisplayContent(message.content)
         return text.isEmpty ? [] : [text]
     }
 
@@ -1765,9 +1756,13 @@ private struct ConversationMarkdownText: View {
     let isMine: Bool
     let theme: ConversationBubbleThemePreset
 
+    private var displayContent: String {
+        conversationSanitizedDisplayContent(content)
+    }
+
     private var attributed: AttributedString? {
         try? AttributedString(
-            markdown: content,
+            markdown: displayContent,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )
     }
@@ -1775,12 +1770,12 @@ private struct ConversationMarkdownText: View {
     var body: some View {
         if let attributed {
             Text(attributed)
-                .font(.system(size: 15))
+                .font(.system(size: 15, design: .default))
                 .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
                 .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
         } else {
-            Text(content)
-                .font(.system(size: 15))
+            Text(displayContent)
+                .font(.system(size: 15, design: .default))
                 .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
                 .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
         }
