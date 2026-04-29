@@ -5,11 +5,16 @@ struct SocketChatMessage: Codable {
     let topic: String?
     let from_user_id: Int
     let content: String?
+    let content_b64: String?
     let created_at: String?
     let username: String?
     let avatar_url: String?
     let media_urls: [String]?
     let is_coach: Bool?
+
+    var decodedContent: String? {
+        stringFromUTF8Base64(content_b64) ?? content
+    }
 }
 
 struct LegacyWSMessage: Identifiable {
@@ -94,6 +99,9 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             "topic": topic,
             "content": content
         ]
+        if let contentB64 = utf8Base64String(content) {
+            payload["contentB64"] = contentB64
+        }
         if !mediaUrls.isEmpty {
             payload["mediaUrls"] = mediaUrls
         }
@@ -189,7 +197,7 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
                                   : nil)
                     ?? ((message.is_coach ?? false) ? "Coach" : "New message")
                 let snippet = {
-                    let text = String(message.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let text = String(message.decodedContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty { return text }
                     if let media = message.media_urls, !media.isEmpty {
                         return media.count == 1 ? "Sent an attachment." : "Sent \(media.count) attachments."
@@ -205,9 +213,9 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
                 }
                 DispatchQueue.main.async {
                     self.onEvent?(.messageCreated(topic: topic, message: message))
-                    if let content = message.content, !(message.is_coach ?? false) {
+                    if let content = message.decodedContent, !(message.is_coach ?? false) {
                         self.messages.append(LegacyWSMessage(role: "user", content: content))
-                    } else if let content = message.content {
+                    } else if let content = message.decodedContent {
                         self.messages.append(LegacyWSMessage(role: "assistant", content: content))
                     }
                 }

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getDB } from '../database/runtime-db.js';
 import { CoachService } from './coach-service.js';
-import { MessageService, buildCoachTopic } from './message-service.js';
+import { MessageService, buildCoachTopic, encodeUtf8Base64 } from './message-service.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { logger } from '../utils/logger.js';
 import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
@@ -466,6 +466,7 @@ ${stateContext}
         topic: input.topic,
         from_user_id: 0,
         content,
+        content_b64: encodeUtf8Base64(content),
         media_urls: [],
         mentions: [],
         created_at: new Date().toISOString(),

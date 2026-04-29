@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { AuthService } from '../services/auth-service.js';
 import { ActivityNotificationService } from '../services/activity-notification-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
-import { MessageService } from '../services/message-service.js';
+import { MessageService, decodeUtf8Base64, encodeUtf8Base64 } from '../services/message-service.js';
 import {
   mediaPathFromFileName,
   normalizeMediaStorageValue,
@@ -38,6 +38,8 @@ interface WSIncomingMessage {
   token?: string;
   topic?: string;
   content?: string;
+  contentB64?: string;
+  content_b64?: string;
   mediaUrls?: string[];
   mediaIds?: string[];
   isTyping?: boolean;
@@ -269,8 +271,10 @@ export class WSServer {
   private normalizeOutgoingMessage(message: unknown): unknown {
     if (!message || typeof message !== 'object') return message;
     const raw = message as Record<string, unknown>;
+    const content = typeof raw.content === 'string' ? raw.content : '';
     return {
       ...raw,
+      content_b64: typeof raw.content_b64 === 'string' ? raw.content_b64 : encodeUtf8Base64(content),
       avatar_url: this.mediaUrlForClient(raw.avatar_url),
       media_urls: this.mediaUrlsForClient(raw.media_urls),
     };
@@ -400,7 +404,8 @@ export class WSServer {
         return;
       }
 
-      const rawContent = String(msg.content || '').trim();
+      const decodedContent = decodeUtf8Base64(msg.contentB64) || decodeUtf8Base64(msg.content_b64);
+      const rawContent = String(decodedContent ?? msg.content ?? '').trim();
       if (rawContent.length > MAX_CHAT_MESSAGE_CHARACTERS) {
         this.send(ws, { type: 'error', message: `Message is too long. Keep it under ${MAX_CHAT_MESSAGE_CHARACTERS} characters.` });
         return;
@@ -440,6 +445,7 @@ export class WSServer {
         topic,
         from_user_id: userId,
         content,
+        content_b64: encodeUtf8Base64(content),
         media_urls: resolvedMediaUrls,
         mentions,
         created_at: new Date().toISOString(),

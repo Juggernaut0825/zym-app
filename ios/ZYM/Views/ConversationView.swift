@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import PhotosUI
 import AVKit
 import UniformTypeIdentifiers
@@ -198,17 +199,14 @@ struct ConversationView: View {
                             }
 
                             if let typingIndicatorState {
-                                HStack {
-                                    TypingIndicatorRow(
-                                        label: typingIndicatorState.label,
-                                        isCoach: typingIndicatorState.isCoach,
-                                        coachId: typingIndicatorState.coachId,
-                                        avatarURL: typingIndicatorState.avatarURL,
-                                        fallbackText: typingIndicatorState.fallbackText
-                                    )
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 12)
+                                TypingIndicatorRow(
+                                    label: typingIndicatorState.label,
+                                    isCoach: typingIndicatorState.isCoach,
+                                    coachId: typingIndicatorState.coachId,
+                                    avatarURL: typingIndicatorState.avatarURL,
+                                    fallbackText: typingIndicatorState.fallbackText
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 4)
                                 .transition(.opacity)
                             }
@@ -256,15 +254,21 @@ struct ConversationView: View {
                         }
                     }
 
-                    HStack(spacing: 10) {
+                    HStack(alignment: .bottom, spacing: 10) {
                         Button(action: { showMediaPicker = true }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 24))
                                 .foregroundColor(Color.zymPrimary)
                         }
+                        .frame(width: 32, height: 44)
 
-                        TextField("", text: $newMessage)
-                            .padding(12)
+                        TextField("Message", text: $newMessage, axis: .vertical)
+                            .lineLimit(1...5)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minHeight: 44, alignment: .center)
+                            .frame(maxWidth: .infinity)
                             .background(messageTooLong ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.82))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .accessibilityLabel("Message")
@@ -280,6 +284,7 @@ struct ConversationView: View {
 
                         Button(action: sendMessage) {
                             Text(isSending ? "..." : "Send")
+                                .frame(width: 52, height: 20)
                         }
                         .buttonStyle(ZYMPrimaryButton())
                         .disabled(isSending || messageTooLong)
@@ -451,7 +456,7 @@ struct ConversationView: View {
                     id: incomingMessage.id,
                     topic: topic,
                     from_user_id: incomingMessage.from_user_id,
-                    content: incomingMessage.content,
+                    content: incomingMessage.decodedContent,
                     created_at: createdAt,
                     username: incomingMessage.username ?? (isCoach ? conversationCoachDisplayName(resolvedCoachId) : "User"),
                     avatar_url: incomingMessage.avatar_url,
@@ -827,6 +832,7 @@ struct ConversationView: View {
 
         if !trimmed.isEmpty {
             body["content"] = trimmed
+            body["contentB64"] = utf8Base64String(trimmed)
         }
         if !mediaUrls.isEmpty {
             body["mediaUrls"] = mediaUrls
@@ -1445,9 +1451,82 @@ private func splitConversationReplySegments(_ content: String?) -> [String] {
 }
 
 private func conversationSanitizedDisplayContent(_ content: String?) -> String {
-    String(content ?? "")
-        .replacingOccurrences(of: "\u{FFFD}", with: "")
+    let mapped = String(content ?? "")
+        .map(conversationSanitizedCharacter)
+        .joined()
+    return conversationNormalizeEmojiPunctuation(mapped)
         .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func conversationSanitizedCharacter(_ character: Character) -> String {
+    let scalars = character.unicodeScalars
+    if scalars.count == 1, let scalar = scalars.first {
+        switch scalar.value {
+        case 0x2753, 0x2754:
+            return "?"
+        case 0x2755, 0x2757:
+            return "!"
+        case 0x2049:
+            return "!?"
+        case 0x203C:
+            return "!!"
+        default:
+            break
+        }
+    }
+
+    let hasEmojiBase = scalars.contains { scalar in
+        !conversationIsEmojiFormatScalar(scalar) && (scalar.properties.isEmoji || scalar.properties.isEmojiPresentation)
+    }
+    let hasEmojiPresentationSelector = scalars.contains { $0.value == 0xFE0F }
+    let stripEmojiPresentationSelector = conversationShouldStripEmojiPresentationSelector(from: scalars)
+    let filteredScalars = scalars.filter { scalar in
+        if scalar.value == 0xFFFD { return false }
+        if scalar.value == 0xFE0E { return false }
+        if scalar.value == 0xFE0F && stripEmojiPresentationSelector { return false }
+        if conversationIsEmojiFormatScalar(scalar) && !hasEmojiBase { return false }
+        return true
+    }
+    let emojiPresentationSelector = Unicode.Scalar(0xFE0F)!
+    var normalizedScalars = String.UnicodeScalarView()
+    for scalar in filteredScalars {
+        normalizedScalars.append(scalar)
+        if conversationShouldForceEmojiPresentation(for: scalar, hasSelector: hasEmojiPresentationSelector) {
+            normalizedScalars.append(emojiPresentationSelector)
+        }
+    }
+    return String(normalizedScalars)
+}
+
+private func conversationNormalizeEmojiPunctuation(_ content: String) -> String {
+    content
+        .replacingOccurrences(of: #"([?!。！？])\s+\?(?=\s|$)"#, with: "$1", options: .regularExpression)
+        .replacingOccurrences(of: #"([?!。！？])\?(?=\s|$)"#, with: "$1", options: .regularExpression)
+        .replacingOccurrences(of: #"([!！])\s+!(?=\s|$)"#, with: "$1", options: .regularExpression)
+        .replacingOccurrences(of: #"([!！])!(?=\s|$)"#, with: "$1", options: .regularExpression)
+}
+
+private func conversationShouldStripEmojiPresentationSelector(from scalars: String.UnicodeScalarView) -> Bool {
+    guard scalars.contains(where: { $0.value == 0xFE0F }) else { return false }
+    guard !scalars.contains(where: { $0.value == 0x20E3 }) else { return false }
+    guard let base = scalars.first(where: { !conversationIsEmojiFormatScalar($0) }) else { return false }
+    return base.value <= 0x7F
+}
+
+private func conversationIsEmojiFormatScalar(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar.value {
+    case 0xFE0F, 0x200D, 0x20E3, 0xE0020...0xE007F:
+        return true
+    default:
+        return false
+    }
+}
+
+private func conversationShouldForceEmojiPresentation(for scalar: Unicode.Scalar, hasSelector: Bool) -> Bool {
+    guard !hasSelector else { return false }
+    guard scalar.value > 0x7F else { return false }
+    guard scalar.properties.isEmoji, !scalar.properties.isEmojiPresentation else { return false }
+    return true
 }
 
 private func parseConversationDisplayDate(_ value: String?) -> Date? {
@@ -1761,7 +1840,8 @@ private struct ConversationMarkdownText: View {
     }
 
     private var attributed: AttributedString? {
-        try? AttributedString(
+        guard conversationContainsInlineMarkdownLink(displayContent) else { return nil }
+        return try? AttributedString(
             markdown: displayContent,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )
@@ -1774,11 +1854,169 @@ private struct ConversationMarkdownText: View {
                 .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
                 .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
         } else {
-            Text(displayContent)
-                .font(.system(size: 15, design: .default))
-                .foregroundColor(isMine ? theme.outgoingText : theme.incomingText)
-                .tint(isMine ? theme.outgoingText.opacity(0.92) : theme.incomingText.opacity(0.92))
+            ConversationEmojiSafeText(
+                content: displayContent,
+                textColor: UIColor(isMine ? theme.outgoingText : theme.incomingText),
+                fontSize: 15
+            )
         }
+    }
+}
+
+private func conversationContainsInlineMarkdownLink(_ content: String) -> Bool {
+    content.range(of: #"\[[^\]]+\]\(https?://[^)\s]+\)"#, options: .regularExpression) != nil
+}
+
+private struct ConversationEmojiSafeText: UIViewRepresentable {
+    let content: String
+    let textColor: UIColor
+    let fontSize: CGFloat
+
+    func makeUIView(context: Context) -> ConversationEmojiFallbackLabel {
+        let label = ConversationEmojiFallbackLabel()
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.backgroundColor = .clear
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    func updateUIView(_ label: ConversationEmojiFallbackLabel, context: Context) {
+        label.configure(
+            content,
+            textColor: textColor,
+            fontSize: fontSize
+        )
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: ConversationEmojiFallbackLabel, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width * 0.72
+        let targetSize = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let size = uiView.sizeThatFits(targetSize)
+        return CGSize(width: min(size.width, width), height: size.height)
+    }
+}
+
+private final class ConversationEmojiFallbackLabel: UILabel {
+    fileprivate static let imageCache = NSCache<NSString, UIImage>()
+    private var renderContent = ""
+    private var renderTextColor = UIColor.label
+    private var renderFontSize: CGFloat = 15
+    private var requestedEmojiKeys = Set<String>()
+
+    func configure(_ content: String, textColor: UIColor, fontSize: CGFloat) {
+        let shouldRender = content != renderContent || textColor != renderTextColor || fontSize != renderFontSize
+        renderContent = content
+        renderTextColor = textColor
+        renderFontSize = fontSize
+        if shouldRender {
+            attributedText = conversationEmojiSafeAttributedString(
+                content,
+                textColor: textColor,
+                fontSize: fontSize,
+                missingEmojiHandler: { [weak self] key in
+                    self?.requestEmojiImage(key)
+                }
+            )
+        }
+    }
+
+    private func requestEmojiImage(_ key: String) {
+        guard !requestedEmojiKeys.contains(key) else { return }
+        guard ConversationEmojiFallbackLabel.imageCache.object(forKey: key as NSString) == nil else {
+            rerender()
+            return
+        }
+        guard let url = URL(string: "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/\(key).png") else { return }
+        requestedEmojiKeys.insert(key)
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
+            guard let self else { return }
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard statusCode >= 200 && statusCode < 300,
+                  let data,
+                  let image = UIImage(data: data) else {
+                return
+            }
+            ConversationEmojiFallbackLabel.imageCache.setObject(image, forKey: key as NSString)
+            DispatchQueue.main.async {
+                self.rerender()
+            }
+        }.resume()
+    }
+
+    private func rerender() {
+        attributedText = conversationEmojiSafeAttributedString(
+            renderContent,
+            textColor: renderTextColor,
+            fontSize: renderFontSize,
+            missingEmojiHandler: { [weak self] key in
+                self?.requestEmojiImage(key)
+            }
+        )
+        invalidateIntrinsicContentSize()
+    }
+}
+
+private func conversationEmojiSafeAttributedString(
+    _ content: String,
+    textColor: UIColor,
+    fontSize: CGFloat,
+    missingEmojiHandler: (String) -> Void
+) -> NSAttributedString {
+    let baseFont = UIFont.systemFont(ofSize: fontSize)
+    let attributed = NSMutableAttributedString()
+
+    for character in content {
+        let text = String(character)
+        if conversationCharacterContainsEmoji(character),
+           let key = conversationTwemojiKey(for: character) {
+            if let image = ConversationEmojiFallbackLabel.imageCache.object(forKey: key as NSString) {
+                let attachment = NSTextAttachment()
+                attachment.image = image
+                let imageSize = fontSize + 2
+                attachment.bounds = CGRect(x: 0, y: -3, width: imageSize, height: imageSize)
+                attributed.append(NSAttributedString(attachment: attachment))
+            } else {
+                missingEmojiHandler(key)
+                attributed.append(NSAttributedString(
+                    string: text,
+                    attributes: [
+                        .font: UIFont(name: "AppleColorEmoji", size: fontSize) ?? baseFont,
+                        .foregroundColor: textColor,
+                    ]
+                ))
+            }
+        } else {
+            attributed.append(NSAttributedString(
+                string: text,
+                attributes: [
+                    .font: baseFont,
+                    .foregroundColor: textColor,
+                ]
+            ))
+        }
+    }
+
+    return attributed
+}
+
+private func conversationTwemojiKey(for character: Character) -> String? {
+    let codepoints = character.unicodeScalars.compactMap { scalar -> String? in
+        switch scalar.value {
+        case 0xFE0E, 0xFE0F:
+            return nil
+        default:
+            return String(scalar.value, radix: 16, uppercase: false)
+        }
+    }
+    return codepoints.isEmpty ? nil : codepoints.joined(separator: "-")
+}
+
+private func conversationCharacterContainsEmoji(_ character: Character) -> Bool {
+    character.unicodeScalars.contains { scalar in
+        scalar.properties.isEmojiPresentation || (scalar.properties.isEmoji && scalar.value > 0x7F)
     }
 }
 
@@ -2223,7 +2461,7 @@ func isVideoURL(_ url: String) -> Bool {
     return lower.contains(".mp4") || lower.contains(".mov") || lower.contains(".webm") || lower.contains(".m4v")
 }
 
-struct Message: Identifiable, Codable {
+struct Message: Identifiable, Decodable {
     let id: Int
     let topic: String?
     let from_user_id: Int
@@ -2233,9 +2471,61 @@ struct Message: Identifiable, Codable {
     let avatar_url: String?
     let media_urls: [String]?
     let is_coach: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case topic
+        case from_user_id
+        case content
+        case content_b64
+        case created_at
+        case username
+        case avatar_url
+        case media_urls
+        case is_coach
+    }
+
+    init(
+        id: Int,
+        topic: String?,
+        from_user_id: Int,
+        content: String?,
+        created_at: String,
+        username: String,
+        avatar_url: String?,
+        media_urls: [String]?,
+        is_coach: Bool
+    ) {
+        self.id = id
+        self.topic = topic
+        self.from_user_id = from_user_id
+        self.content = content
+        self.created_at = created_at
+        self.username = username
+        self.avatar_url = avatar_url
+        self.media_urls = media_urls
+        self.is_coach = is_coach
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawContent = try container.decodeIfPresent(String.self, forKey: .content)
+        let contentB64 = try container.decodeIfPresent(String.self, forKey: .content_b64)
+        self.init(
+            id: try container.decode(Int.self, forKey: .id),
+            topic: try container.decodeIfPresent(String.self, forKey: .topic),
+            from_user_id: try container.decode(Int.self, forKey: .from_user_id),
+            content: stringFromUTF8Base64(contentB64) ?? rawContent,
+            created_at: try container.decode(String.self, forKey: .created_at),
+            username: try container.decode(String.self, forKey: .username),
+            avatar_url: try container.decodeIfPresent(String.self, forKey: .avatar_url),
+            media_urls: try container.decodeIfPresent([String].self, forKey: .media_urls),
+            is_coach: try container.decode(Bool.self, forKey: .is_coach)
+        )
+    }
 }
 
-struct MessagesResponse: Codable {
+struct MessagesResponse: Decodable {
     let messages: [Message]
 }
 
@@ -2460,23 +2750,6 @@ struct ConversationProfileSheet: View {
                                 Text("Hobbies: \(profile.profile.hobbies ?? "Not set")")
                                     .font(.system(size: 14))
                                     .foregroundColor(Color.zymText)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .zymCard()
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Today Health")
-                                    .font(.custom("Syne", size: 18))
-                                    .foregroundColor(Color.zymText)
-                                if let health = profile.today_health {
-                                    Text("\(health.steps) steps · \(health.calories_burned) cal")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(Color.zymSubtext)
-                                } else {
-                                    Text("No synced health data yet")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(Color.zymSubtext)
-                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .zymCard()

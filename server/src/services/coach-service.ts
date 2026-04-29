@@ -27,7 +27,7 @@ function buildGuardrailPrompt() {
 - Use plain text. Inline markdown links are allowed only for citations or helpful resources, for example [Wiens et al. (2024)](https://example.com).
 - Do not use Markdown formatting like headings, bold text, or code fences.
 - Use only validated tool outputs when providing grounded guidance.
-- Avoid obscure or unsupported emoji. If emoji are not necessary, omit them.
+- Use only common facial emoji sparingly if it helps the tone. Never output invisible Unicode controls, unsupported emoji variants, Unicode replacement characters, or emoji-style punctuation such as ?️, !️, ❓, ❔, ⁉️, or ‼️.
 - If the available tools and visible conversation context are not enough to solve a request, say so plainly and redirect back to training, food, recovery, progress, or media-analysis topics.`;
 }
 
@@ -103,6 +103,17 @@ function collectLatestToolResults(messages: Message[]): Map<string, any> {
 function sanitizeCoachResponseText(text: string): string {
   return String(text || '')
     .replace(/\uFFFD/g, '')
+    .replace(/\uFE0E/g, '')
+    .replace(/([\u0000-\u007F])\uFE0F(?!\u20E3)/g, '$1')
+    .replace(/[\u2753\u2754]/g, '?')
+    .replace(/[\u2755\u2757]/g, '!')
+    .replace(/\u2049\uFE0F?/g, '!?')
+    .replace(/\u203C\uFE0F?/g, '!!')
+    .replace(/([?!。！？])\s+\?(?=\s|$)/g, '$1')
+    .replace(/([?!。！？])\?(?=\s|$)/g, '$1')
+    .replace(/([!！])\s+!(?=\s|$)/g, '$1')
+    .replace(/([!！])!(?=\s|$)/g, '$1')
+    .replace(/(^|\s)[\uFE0F\u200D\u20E3]+/g, '$1')
     .replace(/\*\*/g, '')
     .replace(/`/g, '')
     .replace(/\r\n/g, '\n')

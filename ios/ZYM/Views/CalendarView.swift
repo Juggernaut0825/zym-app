@@ -47,20 +47,6 @@ private struct CalendarTrainingDraft: Identifiable {
     }
 }
 
-private struct CalendarCheckInDraft {
-    var day: String
-    var weightKg: String
-    var bodyFatPct: String
-    var notes: String
-
-    init(day: String, checkIn: CoachCheckInRecord? = nil) {
-        self.day = day
-        self.weightKg = calendarDraftNumber(checkIn?.weight_kg)
-        self.bodyFatPct = calendarDraftNumber(checkIn?.body_fat_pct)
-        self.notes = calendarDraftString(checkIn?.notes, limit: 500)
-    }
-}
-
 private func calendarDraftString(_ value: String?, limit: Int = 120) -> String {
     String((value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(limit))
 }
@@ -93,24 +79,6 @@ private func calendarDate(from day: String) -> Date? {
     return formatter.date(from: day)
 }
 
-private func calendarFormattedDay(_ day: String) -> String {
-    guard let date = calendarDate(from: day) else { return day }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    formatter.dateFormat = "MMM d, yyyy"
-    return formatter.string(from: date)
-}
-
-private func calendarShortDay(_ day: String) -> String {
-    guard let date = calendarDate(from: day) else { return String(day.suffix(5)) }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    formatter.dateFormat = "MMM d"
-    return formatter.string(from: date)
-}
-
 private func calendarPickerDate(from day: String) -> Date {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -131,16 +99,49 @@ private func calendarRecentDays(count: Int, endingAt day: String) -> [String] {
     }
 }
 
-private func calendarMetric(_ value: Double?, suffix: String = "") -> String {
+private func calendarMetric(_ value: Double?, suffix: String = "", decimals: Int = 0) -> String {
     guard let value, value.isFinite else { return "--" }
-    let rounded = (value * 100).rounded() / 100
-    return "\(rounded)\(suffix)"
+    if decimals <= 0 {
+        return "\(Int(value.rounded()))\(suffix)"
+    }
+    return "\(String(format: "%.\(decimals)f", value))\(suffix)"
 }
 
-private func calendarSignedMetric(_ value: Double?, suffix: String = "") -> String {
+private func calendarSignedMetric(_ value: Double?, suffix: String = "", decimals: Int = 1) -> String {
     guard let value, value.isFinite else { return "--" }
-    let rounded = (value * 100).rounded() / 100
-    return "\(rounded > 0 ? "+" : "")\(rounded)\(suffix)"
+    let prefix = value > 0 ? "+" : ""
+    return "\(prefix)\(String(format: "%.\(decimals)f", value))\(suffix)"
+}
+
+private func calendarShortAxisLabel(_ day: String) -> String {
+    guard let date = calendarDate(from: day) else { return day }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.setLocalizedDateFormatFromTemplate("Md")
+    return formatter.string(from: date)
+}
+
+private enum CalendarTrendMetric: String, CaseIterable, Identifiable {
+    case weight
+    case bodyFat
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .weight: return "Weight"
+        case .bodyFat: return "Body fat"
+        }
+    }
+
+    var unit: String {
+        switch self {
+        case .weight: return " kg"
+        case .bodyFat: return "%"
+        }
+    }
+
+    var decimals: Int { 1 }
 }
 
 struct CalendarView: View {
@@ -156,9 +157,9 @@ struct CalendarView: View {
     @State private var didAutoSync = false
     @State private var mealDraft: CalendarMealDraft?
     @State private var trainingDraft: CalendarTrainingDraft?
-    @State private var checkInDraft = CalendarCheckInDraft(day: "")
     @State private var progressRange = 30
-    @State private var checkInEditorExpanded = false
+    @State private var trendMetric: CalendarTrendMetric = .weight
+    @State private var trendPickerExpanded = false
 
     private var effectiveDay: String {
         selectedDay
@@ -200,6 +201,50 @@ struct CalendarView: View {
         }
     }
 
+    private var bodyFatPoints: [(day: String, bodyFat: Double?)] {
+        progressDays.map { day in
+            let bodyFat = records?.records.first(where: { $0.day == day })?.check_in?.body_fat_pct
+            return (day: day, bodyFat: bodyFat)
+        }
+    }
+
+    private var trendPoints: [(day: String, value: Double?)] {
+        switch trendMetric {
+        case .weight:
+            return weightPoints.map { (day: $0.day, value: $0.weight) }
+        case .bodyFat:
+            return bodyFatPoints.map { (day: $0.day, value: $0.bodyFat) }
+        }
+    }
+
+    private var selectedOrLatestWeight: Double? {
+        selectedRecord?.check_in?.weight_kg ?? records?.progress?.latestWeightKg
+    }
+
+    private var selectedOrLatestBodyFat: Double? {
+        selectedRecord?.check_in?.body_fat_pct ?? records?.progress?.latestBodyFatPct
+    }
+
+    private var trendDelta: Double? {
+        if trendMetric == .weight && progressRange == 14 {
+            return records?.progress?.weight14dDelta
+        }
+        if trendMetric == .weight && progressRange == 30 {
+            return records?.progress?.weight30dDelta
+        }
+        let numeric = trendPoints.compactMap(\.value)
+        guard let first = numeric.first, let last = numeric.last else { return nil }
+        return last - first
+    }
+
+    private var statusNeedsAttention: Bool {
+        let normalized = syncStatus.lowercased()
+        return normalized.contains("fail")
+            || normalized.contains("denied")
+            || normalized.contains("request failed")
+            || normalized.contains("permission")
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -208,10 +253,8 @@ struct CalendarView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         headerCard
-                        statGrid
+                        summaryCard
                         trendCard
-                        dailyOverviewCard
-                        checkInCard
                         mealsCard
                         trainingCard
                     }
@@ -225,8 +268,7 @@ struct CalendarView: View {
         .sheet(item: $mealDraft) { draft in
             CalendarMealEditSheet(draft: draft) { updated in
                 mealDraft = updated
-            } onSave: {
-                saveMealDraft()
+                saveMealDraft(updated)
             }
         }
         .sheet(item: $trainingDraft) { draft in
@@ -238,102 +280,127 @@ struct CalendarView: View {
         }
         .onAppear {
             loadRecords()
-            resetCheckInDraft()
             if !didAutoSync {
                 didAutoSync = true
                 syncFromHealthKit(auto: true)
             }
         }
-        .onChange(of: effectiveDay) { _, _ in
-            resetCheckInDraft()
-        }
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(calendarFormattedDay(effectiveDay))
-                        .font(.custom("Syne", size: 24))
-                        .foregroundColor(Color.zymText)
-                        .lineLimit(1)
-                    Text("Coach records, health sync, and progress signals.")
-                        .font(.system(size: 14))
-                        .foregroundColor(Color.zymSubtext)
-                }
-
-                Spacer()
-
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 DatePicker("", selection: selectedDateBinding, displayedComponents: .date)
                     .datePickerStyle(.compact)
                     .labelsHidden()
-            }
 
-            HStack(spacing: 10) {
+                Spacer()
+
                 Button {
                     syncFromHealthKit(auto: false)
                 } label: {
-                    Label(isSyncing ? "Syncing" : "Sync", systemImage: "heart.text.square")
+                    Image(systemName: isSyncing ? "hourglass" : "heart.text.square")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
                 }
-                .buttonStyle(ZYMGhostButton())
+                .buttonStyle(CalendarCircleButtonStyle())
                 .disabled(isSyncing)
+                .accessibilityLabel(isSyncing ? "Syncing Health" : "Sync Health")
 
                 Button {
                     loadRecords()
                 } label: {
-                    Label(loadingRecords ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
                 }
-                .buttonStyle(ZYMGhostButton())
+                .buttonStyle(CalendarCircleButtonStyle())
                 .disabled(loadingRecords || saving)
-
-                Spacer()
+                .rotationEffect(.degrees(loadingRecords ? 180 : 0))
+                .animation(.zymSoft, value: loadingRecords)
+                .accessibilityLabel("Refresh Records")
             }
 
-            if !syncStatus.isEmpty {
-                Text(syncStatus.isEmpty ? "Health sync shows here." : syncStatus)
+            if !syncStatus.isEmpty && statusNeedsAttention {
+                Text(syncStatus)
                     .font(.system(size: 12))
-                    .foregroundColor(Color.zymSubtext)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
+    }
+
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Summary")
+                .font(.custom("Syne", size: 22))
+                .foregroundColor(Color.zymText)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                CalendarMetricTile(title: "Intake", value: calendarMetric(selectedRecord?.total_intake, suffix: " kcal"), systemImage: "fork.knife")
+                CalendarMetricTile(title: "Steps", value: selectedHealth.map { "\($0.steps)" } ?? "--", systemImage: "figure.walk")
+                CalendarMetricTile(title: "Weight", value: calendarMetric(selectedOrLatestWeight, suffix: " kg", decimals: 1), systemImage: "scalemass")
+                CalendarMetricTile(title: "Body fat", value: calendarMetric(selectedOrLatestBodyFat, suffix: "%", decimals: 1), systemImage: "percent")
             }
         }
         .zymCard()
     }
 
-    private var statGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            calendarStatCard(
-                title: "Intake",
-                value: calendarMetric(selectedRecord?.total_intake, suffix: " kcal"),
-                detail: "\(selectedMeals.count) meal\(selectedMeals.count == 1 ? "" : "s")"
-            )
-            calendarStatCard(
-                title: "Training",
-                value: calendarMetric(selectedRecord?.total_burned, suffix: " kcal"),
-                detail: "\(selectedTraining.count) entr\(selectedTraining.count == 1 ? "y" : "ies")"
-            )
-            calendarStatCard(
-                title: "Steps",
-                value: selectedHealth.map { "\($0.steps)" } ?? "--",
-                detail: selectedHealth?.synced_at == nil ? "No sync" : "Synced"
-            )
-            calendarStatCard(
-                title: "Weight",
-                value: calendarMetric(selectedRecord?.check_in?.weight_kg ?? records?.progress?.latestWeightKg, suffix: " kg"),
-                detail: selectedRecord?.check_in?.weight_kg == nil ? "Latest logged" : "Selected day"
-            )
-        }
-    }
-
     private var trendCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Weight Trend")
-                        .font(.custom("Syne", size: 20))
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Button {
+                        withAnimation(.zymQuick) {
+                            trendPickerExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(trendMetric.label)
+                                .font(.custom("Syne", size: 22))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .bold))
+                                .rotationEffect(.degrees(trendPickerExpanded ? 180 : 0))
+                        }
                         .foregroundColor(Color.zymText)
-                    Text(records?.progress?.statusLabel ?? "Need more check-ins")
-                        .font(.system(size: 13, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Text(trendDelta.map { "\(calendarSignedMetric($0, suffix: trendMetric.unit, decimals: trendMetric.decimals)) over \(progressRange)d" } ?? "More check-ins needed")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color.zymSubtext)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                 }
+
+                if trendPickerExpanded {
+                    HStack(spacing: 8) {
+                        ForEach(CalendarTrendMetric.allCases) { metric in
+                            Button {
+                                withAnimation(.zymQuick) {
+                                    trendMetric = metric
+                                    trendPickerExpanded = false
+                                }
+                            } label: {
+                                Text(metric.label)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(metric == trendMetric ? .white : Color.zymText)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(metric == trendMetric ? Color.zymPrimaryDark : Color.zymSurfaceSoft.opacity(0.82))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+
+            HStack {
                 Spacer()
                 Picker("Range", selection: $progressRange) {
                     Text("14d").tag(14)
@@ -344,90 +411,7 @@ struct CalendarView: View {
                 .frame(maxWidth: 220)
             }
 
-            CalendarWeightBars(points: weightPoints)
-
-            Text(records?.progress?.trendNarrative ?? "Log a few check-ins to see the trend.")
-                .font(.system(size: 14))
-                .foregroundColor(Color.zymSubtext)
-        }
-        .zymCard()
-    }
-
-    private var dailyOverviewCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Coach Record")
-                .font(.custom("Syne", size: 20))
-                .foregroundColor(Color.zymText)
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                calendarSummaryPill(
-                    title: "Check-in",
-                    value: "Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg"))"
-                )
-                calendarSummaryPill(
-                    title: "Body fat",
-                    value: calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%")
-                )
-                calendarSummaryPill(
-                    title: "Active",
-                    value: selectedHealth.map { "\($0.active_minutes) min" } ?? "--"
-                )
-                calendarSummaryPill(
-                    title: "Target",
-                    value: calendarMetric(records?.profile.daily_target, suffix: " kcal")
-                )
-            }
-
-            if let notes = selectedRecord?.check_in?.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(.system(size: 14))
-                    .foregroundColor(Color.zymSubtext)
-            }
-        }
-        .zymCard()
-    }
-
-    private var checkInCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            DisclosureGroup(isExpanded: $checkInEditorExpanded) {
-                VStack(spacing: 12) {
-                    HStack(spacing: 10) {
-                        calendarInput("Weight kg", text: $checkInDraft.weightKg, keyboard: .decimalPad)
-                        calendarInput("Body fat %", text: $checkInDraft.bodyFatPct, keyboard: .decimalPad)
-                    }
-
-                    TextEditor(text: $checkInDraft.notes)
-                        .frame(minHeight: 96)
-                        .padding(10)
-                        .background(Color.zymSurfaceSoft.opacity(0.76))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                    HStack {
-                        Button(saving ? "Saving..." : "Save check-in") {
-                            saveCheckInDraft()
-                        }
-                        .buttonStyle(ZYMPrimaryButton())
-                        .disabled(saving || loadingRecords)
-
-                        Button("Reset") {
-                            resetCheckInDraft()
-                        }
-                        .buttonStyle(ZYMGhostButton())
-                        .disabled(saving)
-                    }
-                }
-                .padding(.top, 8)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Check-in")
-                        .font(.custom("Syne", size: 20))
-                        .foregroundColor(Color.zymText)
-                    Text("Weight \(calendarMetric(selectedRecord?.check_in?.weight_kg, suffix: " kg")) · Body fat \(calendarMetric(selectedRecord?.check_in?.body_fat_pct, suffix: "%"))")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(Color.zymSubtext)
-                }
-            }
-            .accentColor(Color.zymText)
+            CalendarTrendLineChart(points: trendPoints)
         }
         .zymCard()
     }
@@ -526,38 +510,37 @@ struct CalendarView: View {
         .zymCard()
     }
 
-    private func calendarSummaryPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color.zymSubtext)
-            Text(value)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(Color.zymText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Color.zymSurfaceSoft.opacity(0.64))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
+    private struct CalendarMetricTile: View {
+        let title: String
+        let value: String
+        let systemImage: String
 
-    private func calendarStatCard(title: String, value: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.2)
-                .foregroundColor(Color.zymSubtext)
-            Text(value)
-                .font(.custom("Syne", size: 20))
-                .foregroundColor(Color.zymText)
-            Text(detail)
-                .font(.system(size: 12))
-                .foregroundColor(Color.zymSubtext)
+        var body: some View {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.74))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(value)
+                        .font(.custom("Syne", size: 18))
+                        .foregroundColor(Color.zymText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color.zymSubtext)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(Color.zymSurfaceSoft.opacity(0.64))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .zymCard()
     }
 
     private func calendarEmptyState(_ text: String) -> some View {
@@ -567,32 +550,6 @@ struct CalendarView: View {
             .frame(maxWidth: .infinity, minHeight: 120)
             .background(Color.zymSurfaceSoft.opacity(0.7))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func calendarInput(_ title: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        TextField(title, text: text)
-            .keyboardType(keyboard)
-            .padding(12)
-            .background(Color.zymSurfaceSoft.opacity(0.76))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func calendarOverviewRow(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color.zymText)
-                .frame(width: 66, alignment: .leading)
-            Text(detail)
-                .font(.system(size: 13))
-                .foregroundColor(Color.zymSubtext)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func resetCheckInDraft() {
-        checkInDraft = CalendarCheckInDraft(day: effectiveDay, checkIn: selectedRecord?.check_in)
     }
 
     private func loadRecords() {
@@ -608,7 +565,6 @@ struct CalendarView: View {
                 loadingRecords = false
                 if let decoded {
                     records = decoded
-                    resetCheckInDraft()
                 } else {
                     syncStatus = "Failed to load calendar records."
                 }
@@ -616,27 +572,8 @@ struct CalendarView: View {
         }.resume()
     }
 
-    private func saveCheckInDraft() {
-        guard let userId = appState.userId,
-              let url = apiURL("/coach/records/check-in/update") else { return }
-
-        var body: [String: Any] = [
-            "userId": userId,
-            "day": checkInDraft.day,
-            "timezone": TimeZone.current.identifier,
-        ]
-        if let weight = Double(checkInDraft.weightKg) { body["weight_kg"] = weight }
-        if let bodyFat = Double(checkInDraft.bodyFatPct) { body["body_fat_pct"] = bodyFat }
-        let trimmedNotes = checkInDraft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedNotes.isEmpty { body["notes"] = trimmedNotes }
-
-        submit(pathURL: url, body: body, successMessage: "Check-in saved.") {
-            loadRecords()
-        }
-    }
-
-    private func saveMealDraft() {
-        guard let draft = mealDraft,
+    private func saveMealDraft(_ updatedDraft: CalendarMealDraft? = nil) {
+        guard let draft = updatedDraft ?? mealDraft,
               let userId = appState.userId,
               let url = apiURL("/coach/records/meal/update") else { return }
 
@@ -646,12 +583,11 @@ struct CalendarView: View {
             "mealId": draft.mealId,
             "timezone": TimeZone.current.identifier,
         ]
-        if !draft.description.isEmpty { body["description"] = draft.description }
-        if let calories = Double(draft.calories) { body["calories"] = calories }
-        if let protein = Double(draft.proteinG) { body["protein_g"] = protein }
-        if let carbs = Double(draft.carbsG) { body["carbs_g"] = carbs }
-        if let fat = Double(draft.fatG) { body["fat_g"] = fat }
-        if !draft.time.isEmpty { body["time"] = draft.time }
+        body["description"] = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let calories = Double(draft.calories.trimmingCharacters(in: .whitespacesAndNewlines)) { body["calories"] = calories }
+        if let protein = Double(draft.proteinG.trimmingCharacters(in: .whitespacesAndNewlines)) { body["protein_g"] = protein }
+        if let carbs = Double(draft.carbsG.trimmingCharacters(in: .whitespacesAndNewlines)) { body["carbs_g"] = carbs }
+        if let fat = Double(draft.fatG.trimmingCharacters(in: .whitespacesAndNewlines)) { body["fat_g"] = fat }
 
         submit(pathURL: url, body: body, successMessage: "Meal updated.") {
             mealDraft = nil
@@ -770,81 +706,165 @@ struct CalendarView: View {
     }
 }
 
-private struct CalendarWeightBars: View {
-    let points: [(day: String, weight: Double?)]
+private struct CalendarCircleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(Color.zymText)
+            .background(Color.zymSurfaceSoft.opacity(configuration.isPressed ? 0.98 : 0.76))
+            .clipShape(Circle())
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+    }
+}
 
-    private var numericWeights: [Double] {
-        points.compactMap(\.weight)
+private struct CalendarTrendLineChart: View {
+    let points: [(day: String, value: Double?)]
+
+    private var plottedValues: [(index: Int, day: String, value: Double)] {
+        points.enumerated().compactMap { index, point in
+            guard let value = point.value else { return nil }
+            return (index: index, day: point.day, value: value)
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if numericWeights.count < 2 {
-                Text("Add two weigh-ins to see the trend.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-                    .frame(maxWidth: .infinity, minHeight: 140)
-                    .background(Color.zymSurfaceSoft.opacity(0.7))
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.zymSurfaceSoft.opacity(0.58))
+
+            if plottedValues.count < 2 {
+                VStack(spacing: 8) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(Color.zymSubtext)
+                    Text("Two check-ins unlock the trend.")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                }
             } else {
                 GeometryReader { proxy in
-                    let maxWeight = (numericWeights.max() ?? 0) + 0.8
-                    let minWeight = (numericWeights.min() ?? 0) - 0.8
-                    let range = max(0.8, maxWeight - minWeight)
+                    let axisHeight: CGFloat = 28
+                    let plotSize = CGSize(width: proxy.size.width, height: max(1, proxy.size.height - axisHeight))
+                    let chartPoints = normalizedChartPoints(in: plotSize)
+                    let axisY = plotSize.height + 5
 
-                    HStack(alignment: .bottom, spacing: 6) {
-                        ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-                            VStack(spacing: 6) {
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(point.weight == nil ? Color.gray.opacity(0.2) : Color.zymText.opacity(index == points.count - 1 ? 1 : 0.4))
-                                    .frame(
-                                        width: max(8, (proxy.size.width / CGFloat(max(points.count, 1))) - 6),
-                                        height: point.weight.map { max(14, CGFloat(($0 - minWeight) / range) * 110) } ?? 14
-                                    )
-                                if index == 0 || index == points.count - 1 || index % max(1, points.count / 4) == 0 {
-                                    Text(calendarShortDay(point.day))
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(Color.zymSubtext)
-                                } else {
-                                    Text(" ")
-                                        .font(.system(size: 10))
-                                }
+                    ZStack {
+                        Path { path in
+                            path.move(to: CGPoint(x: 18, y: axisY))
+                            path.addLine(to: CGPoint(x: max(18, proxy.size.width - 18), y: axisY))
+                        }
+                        .stroke(Color.zymLine.opacity(0.92), lineWidth: 1)
+
+                        Path { path in
+                            guard let first = chartPoints.first else { return }
+                            path.move(to: first.point)
+                            for item in chartPoints.dropFirst() {
+                                path.addLine(to: item.point)
                             }
                         }
+                        .stroke(Color.zymText, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+
+                        ForEach(chartPoints, id: \.index) { item in
+                            Circle()
+                                .fill(item.index == chartPoints.last?.index ? Color.zymText : Color.white)
+                                .overlay(Circle().stroke(Color.zymText.opacity(0.82), lineWidth: 2))
+                                .frame(width: item.index == chartPoints.last?.index ? 10 : 8, height: item.index == chartPoints.last?.index ? 10 : 8)
+                                .position(item.point)
+                        }
+
+                        ForEach(chartPoints, id: \.index) { item in
+                            Path { path in
+                                path.move(to: CGPoint(x: item.point.x, y: axisY - 4))
+                                path.addLine(to: CGPoint(x: item.point.x, y: axisY + 4))
+                            }
+                            .stroke(Color.zymSubtext.opacity(0.55), lineWidth: 1)
+                        }
+
+                        ForEach(axisLabels(from: chartPoints), id: \.index) { item in
+                            Text(calendarShortAxisLabel(item.day))
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(Color.zymSubtext)
+                                .position(x: item.point.x, y: axisY + 15)
+                        }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
-                .frame(height: 150)
             }
+        }
+        .frame(height: 168)
+    }
+
+    private func normalizedChartPoints(in size: CGSize) -> [(index: Int, day: String, point: CGPoint)] {
+        let values = plottedValues.map(\.value)
+        let minValue = values.min() ?? 0
+        let maxValue = values.max() ?? minValue
+        let range = max(0.5, maxValue - minValue)
+        let maxIndex = max(points.count - 1, 1)
+        let horizontalInset: CGFloat = 18
+        let verticalInset: CGFloat = 18
+        let drawableWidth = max(1, size.width - horizontalInset * 2)
+        let drawableHeight = max(1, size.height - verticalInset * 2)
+
+        return plottedValues.map { item in
+            let x = horizontalInset + (CGFloat(item.index) / CGFloat(maxIndex) * drawableWidth)
+            let yRatio = CGFloat((item.value - minValue) / range)
+            let y = verticalInset + ((1 - yRatio) * drawableHeight)
+            return (index: item.index, day: item.day, point: CGPoint(x: x, y: y))
+        }
+    }
+
+    private func axisLabels(from chartPoints: [(index: Int, day: String, point: CGPoint)]) -> [(index: Int, day: String, point: CGPoint)] {
+        guard chartPoints.count > 3 else { return chartPoints }
+        let lastIndex = chartPoints.count - 1
+        let middleIndex = lastIndex / 2
+        let wanted = Set([0, middleIndex, lastIndex])
+        return chartPoints.enumerated().compactMap { offset, item in
+            wanted.contains(offset) ? item : nil
         }
     }
 }
 
 private struct CalendarMealEditSheet: View {
     let draft: CalendarMealDraft
-    let onChange: (CalendarMealDraft) -> Void
-    let onSave: () -> Void
+    let onSave: (CalendarMealDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var localDraft: CalendarMealDraft
 
-    init(draft: CalendarMealDraft, onChange: @escaping (CalendarMealDraft) -> Void, onSave: @escaping () -> Void) {
+    init(draft: CalendarMealDraft, onSave: @escaping (CalendarMealDraft) -> Void) {
         self.draft = draft
-        self.onChange = onChange
         self.onSave = onSave
         _localDraft = State(initialValue: draft)
     }
 
     var body: some View {
         NavigationView {
-            Form {
-                Section("Meal") {
-                    TextField("Description", text: $localDraft.description)
-                    TextField("Calories", text: $localDraft.calories)
-                    TextField("Protein g", text: $localDraft.proteinG)
-                    TextField("Carbs g", text: $localDraft.carbsG)
-                    TextField("Fat g", text: $localDraft.fatG)
-                    TextField("Time", text: $localDraft.time)
+            ZStack {
+                Color.white.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Logged")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(Color.zymSubtext)
+                            CalendarMealReadOnlyField(title: "Time", value: localDraft.time.isEmpty ? "--:--" : localDraft.time)
+                        }
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Editable")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(Color.zymSubtext)
+
+                            CalendarMealTextField(title: "Description", text: $localDraft.description)
+
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                CalendarMealNumberField(title: "Calories", unit: "kcal", text: $localDraft.calories)
+                                CalendarMealNumberField(title: "Protein", unit: "g", text: $localDraft.proteinG)
+                                CalendarMealNumberField(title: "Carbs", unit: "g", text: $localDraft.carbsG)
+                                CalendarMealNumberField(title: "Fat", unit: "g", text: $localDraft.fatG)
+                            }
+                        }
+                    }
+                    .padding(18)
                 }
             }
             .navigationTitle("Edit Meal")
@@ -854,13 +874,94 @@ private struct CalendarMealEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onChange(localDraft)
-                        onSave()
+                        onSave(trimmedDraft)
                         dismiss()
                     }
                 }
             }
         }
+    }
+
+    private var trimmedDraft: CalendarMealDraft {
+        var next = localDraft
+        next.description = String(next.description.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+        next.calories = next.calories.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.proteinG = next.proteinG.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.carbsG = next.carbsG.trimmingCharacters(in: .whitespacesAndNewlines)
+        next.fatG = next.fatG.trimmingCharacters(in: .whitespacesAndNewlines)
+        return next
+    }
+}
+
+private struct CalendarMealTextField: View {
+    let title: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.zymSubtext)
+            TextField(title, text: $text, axis: .vertical)
+                .font(.system(size: 16))
+                .foregroundColor(Color.zymText)
+                .lineLimit(2...4)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.zymSurfaceSoft.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+}
+
+private struct CalendarMealNumberField: View {
+    let title: String
+    let unit: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+                Spacer(minLength: 4)
+                Text(unit)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext.opacity(0.78))
+            }
+
+            TextField("0", text: $text)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(Color.zymText)
+                .keyboardType(.decimalPad)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.zymSurfaceSoft.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+}
+
+private struct CalendarMealReadOnlyField: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color.zymSubtext)
+            Spacer()
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Color.zymText)
+        }
+        .padding(12)
+        .background(Color.zymSurfaceSoft.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

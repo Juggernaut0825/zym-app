@@ -15,7 +15,7 @@ struct LoginView: View {
     @State private var showVerifyEmail = false
     @State private var verificationEmail = ""
     @State private var verificationSentOnAppear = false
-    @State private var authConsentAccepted = false
+    @State private var authConsentAccepted = true
     @State private var appleSignInCoordinator: AppleSignInCoordinator?
     @State private var googleAuthSession: ASWebAuthenticationSession?
     @EnvironmentObject var appState: AppState
@@ -121,49 +121,21 @@ struct LoginView: View {
 
                     HStack(spacing: 18) {
                         Button(action: startAppleSignIn) {
-                            SocialLoginCircle {
-                                Image(systemName: "apple.logo")
-                                    .font(.system(size: 25, weight: .semibold))
-                                    .foregroundColor(.white)
-                            }
-                            .background(Color.black)
-                            .clipShape(Circle())
+                            SocialLoginImage(name: "SignInWithAppleMark", size: 54)
                         }
                         .buttonStyle(.plain)
                         .disabled(pending)
                         .accessibilityLabel("Continue with Apple")
 
                         Button(action: startGoogleSignIn) {
-                            SocialLoginCircle {
-                                GoogleLogoMark()
-                            }
-                            .background(Color.white.opacity(0.94))
-                            .clipShape(Circle())
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.zymLine, lineWidth: 1)
-                            )
+                            SocialLoginImage(name: "SignInWithGoogleMark", size: 54)
                         }
                         .buttonStyle(.plain)
                         .disabled(pending)
                         .accessibilityLabel("Continue with Google")
                     }
 
-                    Button {
-                        authConsentAccepted.toggle()
-                    } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: authConsentAccepted ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(authConsentAccepted ? Color.zymPrimaryDark : Color.zymSubtext)
-                            Text("I understand ZYM AI Coach is not medical advice and I agree to the Terms and Health Disclaimer.")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.zymSubtext)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .buttonStyle(.plain)
+                    AuthConsentCheckbox(isAccepted: $authConsentAccepted, action: "By logging in")
                 }
 
                 HStack(spacing: 10) {
@@ -233,6 +205,11 @@ struct LoginView: View {
         }
         guard !password.isEmpty else {
             errorMessage = "Please enter your password."
+            showError = true
+            return
+        }
+        guard authConsentAccepted else {
+            errorMessage = "Please agree to ZYM's Privacy Policy and Terms before logging in."
             showError = true
             return
         }
@@ -326,6 +303,11 @@ struct LoginView: View {
 
     private func startAppleSignIn() {
         if pending { return }
+        guard authConsentAccepted else {
+            errorMessage = "Please agree to ZYM's Privacy Policy and Terms before continuing with Apple."
+            showError = true
+            return
+        }
         let request = ASAuthorizationAppleIDProvider().createRequest()
         request.requestedScopes = [.fullName, .email]
         let coordinator = AppleSignInCoordinator { result in
@@ -414,6 +396,11 @@ struct LoginView: View {
 
     private func startGoogleSignIn() {
         if pending { return }
+        guard authConsentAccepted else {
+            errorMessage = "Please agree to ZYM's Privacy Policy and Terms before continuing with Google."
+            showError = true
+            return
+        }
         pending = true
         showError = false
 
@@ -677,36 +664,18 @@ private struct GoogleMobileConfigResponse: Decodable {
     let redirectScheme: String?
 }
 
-private struct SocialLoginCircle<Content: View>: View {
-    @ViewBuilder var content: Content
+private struct SocialLoginImage: View {
+    let name: String
+    let size: CGFloat
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.clear)
-            content
-        }
-        .frame(width: 54, height: 54)
-        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 5)
-    }
-}
-
-private struct GoogleLogoMark: View {
-    var body: some View {
-        Text("G")
-            .font(.system(size: 26, weight: .bold))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.259, green: 0.522, blue: 0.957),
-                        Color(red: 0.918, green: 0.263, blue: 0.208),
-                        Color(red: 0.984, green: 0.737, blue: 0.020),
-                        Color(red: 0.204, green: 0.659, blue: 0.325),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+        Image(name)
+            .resizable()
+            .renderingMode(.original)
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 5)
     }
 }
 

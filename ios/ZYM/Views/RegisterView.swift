@@ -6,7 +6,7 @@ struct RegisterView: View {
     @State private var username = ""
     @State private var email = ""
     @State private var password = ""
-    @State private var acceptedHealthDisclaimer = false
+    @State private var acceptedTerms = true
     @State private var pending = false
     @State private var errorMessage = ""
     @State private var showVerifyEmail = false
@@ -62,18 +62,7 @@ struct RegisterView: View {
                         .foregroundColor(Color.zymText)
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle(isOn: $acceptedHealthDisclaimer) {
-                        Text("I understand ZYM AI Coach is not medical advice. If I have injuries, medical conditions, severe pain, chest pain, dizziness, or urgent symptoms, I should stop and seek professional or emergency care.")
-                            .font(.system(size: 13))
-                            .foregroundColor(Color.zymSubtext)
-                    }
-                    .toggleStyle(.switch)
-
-                    Link("Read health disclaimer", destination: URL(string: "https://zym8.com/health-disclaimer")!)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(Color.zymPrimaryDark)
-                }
+                AuthConsentCheckbox(isAccepted: $acceptedTerms, action: "By creating an account")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .background(Color.white.opacity(0.78))
@@ -133,8 +122,8 @@ struct RegisterView: View {
             errorMessage = "Please enter a valid email address."
             return
         }
-        guard acceptedHealthDisclaimer else {
-            errorMessage = "Please confirm the health disclaimer before creating your account."
+        guard acceptedTerms else {
+            errorMessage = "Please agree to ZYM's Privacy Policy and Terms before creating your account."
             return
         }
         guard let url = apiURL("/auth/register") else { return }

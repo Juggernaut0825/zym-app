@@ -1,6 +1,41 @@
 import SwiftUI
 
 let zymHealthDisclaimerVersion = "2026-03-26"
+let zymPrivacyURL = URL(string: "https://zym8.com/privacy.html")!
+let zymTermsURL = URL(string: "https://zym8.com/terms.html")!
+
+private func zymConsentMarkdown(action: String) -> String {
+    "\(action), I agree to ZYM's [Privacy Policy](\(zymPrivacyURL.absoluteString)) and [Terms](\(zymTermsURL.absoluteString))."
+}
+
+struct AuthConsentCheckbox: View {
+    @Binding var isAccepted: Bool
+    let action: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                isAccepted.toggle()
+            } label: {
+                Image(systemName: isAccepted ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundColor(isAccepted ? Color.zymPrimaryDark : Color.zymSubtext)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isAccepted ? "Agreement selected" : "Agreement not selected")
+
+            Text(.init(zymConsentMarkdown(action: action)))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color.zymSubtext)
+                .tint(Color.zymPrimaryDark)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+    }
+}
 
 func parseAPIErrorMessage(from data: Data?) -> String? {
     guard let data else { return nil }

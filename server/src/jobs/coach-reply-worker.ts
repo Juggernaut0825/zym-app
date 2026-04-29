@@ -1,4 +1,4 @@
-import { MessageService } from '../services/message-service.js';
+import { MessageService, encodeUtf8Base64 } from '../services/message-service.js';
 import { CoachService } from '../services/coach-service.js';
 import { logger } from '../utils/logger.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
@@ -77,6 +77,7 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
         topic: job.topic,
         from_user_id: 0,
         content: aiResponse,
+        content_b64: encodeUtf8Base64(aiResponse),
         media_urls: [],
         mentions: [],
         created_at: new Date().toISOString(),

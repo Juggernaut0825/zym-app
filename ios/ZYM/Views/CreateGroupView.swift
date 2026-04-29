@@ -4,7 +4,8 @@ struct CreateGroupView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var appState: AppState
     @State private var groupName = ""
-    @State private var coachEnabled = true
+    @State private var selectedCoachId = "zj"
+    @State private var coachPickerExpanded = false
     @State private var inviteQuery = ""
     @State private var inviteResults: [Friend] = []
     @State private var invitees: [Friend] = []
@@ -30,14 +31,10 @@ struct CreateGroupView: View {
                             )
                             .cornerRadius(12)
 
-                        Toggle("Enable AI Coach", isOn: $coachEnabled)
-                            .padding(12)
-                            .background(Color.zymSurface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.zymLine, lineWidth: 1)
-                            )
-                            .cornerRadius(12)
+                        GroupCoachPickerCard(
+                            selectedCoachId: $selectedCoachId,
+                            expanded: $coachPickerExpanded
+                        )
 
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Invite Members")
@@ -127,6 +124,11 @@ struct CreateGroupView: View {
         .onChange(of: inviteQuery) { _, value in
             scheduleInviteSearch(for: value)
         }
+        .onAppear {
+            if appState.selectedCoach == "lc" {
+                selectedCoachId = "lc"
+            }
+        }
     }
 
     func createGroup() {
@@ -145,7 +147,7 @@ struct CreateGroupView: View {
         let body = [
             "name": groupName.trimmingCharacters(in: .whitespacesAndNewlines),
             "ownerId": userId,
-            "coachEnabled": coachEnabled ? (appState.selectedCoach ?? "zj") : "none"
+            "coachEnabled": selectedCoachId
         ] as [String : Any]
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -277,6 +279,104 @@ struct CreateGroupView: View {
                 inviteResults = response.users.filter { !excludedIds.contains($0.id) }
             }
         }.resume()
+    }
+}
+
+private struct GroupCoachPickerCard: View {
+    @Binding var selectedCoachId: String
+    @Binding var expanded: Bool
+
+    private let coaches: [(id: String, name: String, detail: String)] = [
+        ("zj", "ZJ", "Analytical coach"),
+        ("lc", "LC", "Direct coach")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    GroupCoachAvatar(coachId: selectedCoachId)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AI Coach")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.zymText)
+                        Text(selectedCoachId.uppercased())
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color.zymSubtext)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                }
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                HStack(spacing: 12) {
+                    ForEach(coaches, id: \.id) { coach in
+                        Button {
+                            withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
+                                selectedCoachId = coach.id
+                                expanded = false
+                            }
+                        } label: {
+                            VStack(spacing: 7) {
+                                GroupCoachAvatar(coachId: coach.id, selected: selectedCoachId == coach.id)
+                                Text(coach.name)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color.zymText)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.zymSurfaceSoft.opacity(selectedCoachId == coach.id ? 0.95 : 0.55))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(selectedCoachId == coach.id ? Color.zymCoachAccent(coach.id) : Color.zymLine, lineWidth: selectedCoachId == coach.id ? 1.5 : 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(12)
+        .background(Color.zymSurface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.zymLine, lineWidth: 1)
+        )
+        .cornerRadius(12)
+    }
+}
+
+private struct GroupCoachAvatar: View {
+    let coachId: String
+    var selected = false
+
+    var body: some View {
+        Text(coachId.uppercased())
+            .font(.system(size: 12, weight: .black))
+            .foregroundColor(selected ? .white : Color.zymCoachInk(coachId))
+            .frame(width: 40, height: 40)
+            .background(
+                Circle()
+                    .fill(selected ? Color.zymCoachAccent(coachId) : Color.zymCoachSoft(coachId).opacity(0.85))
+            )
+            .overlay(
+                Circle()
+                    .stroke(selected ? Color.zymCoachAccentDark(coachId) : Color.white.opacity(0.72), lineWidth: 1)
+            )
     }
 }
 

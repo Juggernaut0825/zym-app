@@ -9,7 +9,7 @@ import { AuthService, EmailVerificationRequiredError } from '../services/auth-se
 import { authEmailService } from '../services/auth-email-service.js';
 import { CommunityService } from '../services/community-service.js';
 import { MediaService } from '../services/media-service.js';
-import { MessageService, buildP2PTopic } from '../services/message-service.js';
+import { MessageService, buildP2PTopic, decodeUtf8Base64, encodeUtf8Base64 } from '../services/message-service.js';
 import { ActivityNotificationService } from '../services/activity-notification-service.js';
 import { FriendService } from '../services/friend-service.js';
 import { GroupService } from '../services/group-service.js';
@@ -167,6 +167,17 @@ app.use((req, res, next) => {
   if (isProduction && (req.secure || isSecureProxy)) {
     res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
   }
+  next();
+});
+
+app.use((_req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = ((body?: any) => {
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    return json(body);
+  }) as typeof res.json;
   next();
 });
 
@@ -2142,10 +2153,14 @@ app.post('/location/profile', requireSameUserIdFromBody('userId'), APIGateway.va
 
 app.get('/location/nearby/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
   const userId = toUserId(req.params.userId);
-  const nearby = LocationService.getNearbyUsers(userId).map((item) => ({
-    ...item,
-    avatar_url: mediaUrlForClient(req, item.avatar_url),
-  }));
+  const nearby = LocationService.getNearbyUsers(userId).map((item) => {
+    const avatarAsset = item.avatar_url ? mediaAssetService.getByStorageValue(item.avatar_url) : null;
+    const canViewAvatar = item.friendship_status === 'accepted' || avatarAsset?.visibility === 'public';
+    return {
+      ...item,
+      avatar_url: canViewAvatar ? mediaUrlForClient(req, item.avatar_url) : null,
+    };
+  });
   res.json({ users: nearby });
 });
 
@@ -2843,7 +2858,8 @@ app.post('/messages/send',
   try {
     const fromUserId = toUserId(req.body.fromUserId);
     const topic = String(req.body.topic || '').trim();
-    const content = String(req.body.content || '').trim().slice(0, MAX_CHAT_MESSAGE_CHARACTERS);
+    const decodedContent = decodeUtf8Base64(req.body.contentB64) || decodeUtf8Base64(req.body.content_b64);
+    const content = String(decodedContent ?? req.body.content ?? '').trim().slice(0, MAX_CHAT_MESSAGE_CHARACTERS);
     const clientMessageId = String(req.body.clientMessageId || '').trim().slice(0, 80) || null;
     const mediaUrls = sanitizeMediaUrls(req.body.mediaUrls, 5);
     const mediaIds = sanitizeMediaIds(req.body.mediaIds, 5);
@@ -2899,15 +2915,16 @@ app.post('/messages/send',
       topic,
       clientMessageId,
       message: deliveredMessage || {
-      id: messageId,
-      topic,
-      from_user_id: fromUserId,
-      content,
-      media_urls: deliveredMediaUrls,
-      mentions,
-      reply_to: null,
-      created_at: new Date().toISOString(),
-      username: req.body.username || `User ${fromUserId}`,
+        id: messageId,
+        topic,
+        from_user_id: fromUserId,
+        content,
+        content_b64: encodeUtf8Base64(content),
+        media_urls: deliveredMediaUrls,
+        mentions,
+        reply_to: null,
+        created_at: new Date().toISOString(),
+        username: req.body.username || `User ${fromUserId}`,
         avatar_url: null,
         is_coach: false,
         client_message_id: clientMessageId,
@@ -3243,19 +3260,11 @@ app.get('/profile/public/:userId', async (req, res) => {
     });
   }
 
-  const todayTimezone = user.timezone && isValidTimeZone(String(user.timezone))
-    ? String(user.timezone)
-    : 'UTC';
-  const today = localDayForTimezone(new Date(), todayTimezone);
-  const todayHealth = db
-    .prepare('SELECT steps, calories_burned, active_minutes, synced_at FROM health_data WHERE user_id = ? AND date = ?')
-    .get(targetUserId, today) as any;
-
   const recentPosts = db.prepare(`
     SELECT p.id, p.user_id, p.type, p.content, p.media_urls, p.created_at, p.visibility,
       (SELECT COUNT(1) FROM post_reactions pr WHERE pr.post_id = p.id) AS reaction_count
     FROM posts p
-    WHERE p.user_id = ?
+    WHERE p.user_id = ? AND p.visibility IN ('public', 'friends')
     ORDER BY p.created_at DESC
     LIMIT 16
   `).all(targetUserId).map((post: any) => ({
@@ -3279,15 +3288,7 @@ app.get('/profile/public/:userId', async (req, res) => {
       avatar_url: mediaUrlForClient(req, user.avatar_url),
       background_url: mediaUrlForClient(req, user.background_url),
     },
-    today_health: todayHealth
-      ? {
-          date: today,
-          steps: Number(todayHealth.steps || 0),
-          calories_burned: Number(todayHealth.calories_burned || 0),
-          active_minutes: Number(todayHealth.active_minutes || 0),
-          synced_at: String(todayHealth.synced_at || ''),
-        }
-      : null,
+    today_health: null,
     recent_posts: recentPosts,
   });
 });

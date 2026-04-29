@@ -7,6 +7,7 @@ export interface ParsedMessage {
   topic: string;
   from_user_id: number;
   content: string | null;
+  content_b64: string | null;
   media_urls: string[];
   mentions: string[];
   reply_to: number | null;
@@ -39,6 +40,26 @@ function parseJsonArray(value: unknown): string[] {
     return Array.isArray(parsed) ? parsed.map(item => String(item)) : [];
   } catch {
     return [];
+  }
+}
+
+export function encodeUtf8Base64(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  if (!text) return null;
+  return Buffer.from(text, 'utf8').toString('base64');
+}
+
+export function decodeUtf8Base64(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 64_000) return null;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return null;
+
+  try {
+    return Buffer.from(normalized, 'base64').toString('utf8');
+  } catch {
+    return null;
   }
 }
 
@@ -269,6 +290,7 @@ export class MessageService {
       topic: row.topic,
       from_user_id: Number(row.from_user_id),
       content: row.content || null,
+      content_b64: encodeUtf8Base64(row.content),
       media_urls: parseJsonArray(row.media_urls),
       mentions: parseJsonArray(row.mentions),
       reply_to: row.reply_to || null,

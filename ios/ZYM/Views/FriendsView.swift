@@ -735,7 +735,11 @@ struct AddFriendView: View {
             }
 
             if let sharedLocation {
-                NearbyUsersMapView(viewerLocation: sharedLocation, users: nearbyUsers)
+                NearbyUsersMapView(
+                    viewerLocation: sharedLocation,
+                    users: nearbyUsers,
+                    onOpenUser: openNearbyProfile
+                )
                     .frame(height: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(
@@ -757,7 +761,7 @@ struct AddFriendView: View {
             }
 
             HStack {
-                Text(nearbyLoading ? "Loading people nearby..." : "\(nearbyUsers.count) nearby")
+                Text(nearbyLoading ? "Loading people nearby..." : "\(nearbyUsers.count) within 80 km")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Color.zymSubtext)
                 Spacer()
@@ -1599,21 +1603,24 @@ private final class NearbyMapAnnotation: NSObject, MKAnnotation {
     let title: String?
     let subtitle: String?
     let isViewer: Bool
+    let user: NearbyUserPayload?
 
-    init(coordinate: CLLocationCoordinate2D, title: String, subtitle: String?, isViewer: Bool) {
+    init(coordinate: CLLocationCoordinate2D, title: String, subtitle: String?, isViewer: Bool, user: NearbyUserPayload? = nil) {
         self.coordinate = coordinate
         self.title = title
         self.subtitle = subtitle
         self.isViewer = isViewer
+        self.user = user
     }
 }
 
 private struct NearbyUsersMapView: UIViewRepresentable {
     let viewerLocation: StoredUserLocationPayload
     let users: [NearbyUserPayload]
+    let onOpenUser: (NearbyUserPayload) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(self)
     }
 
     func makeUIView(context: Context) -> MKMapView {
@@ -1626,6 +1633,7 @@ private struct NearbyUsersMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ mapView: MKMapView, context: Context) {
+        context.coordinator.parent = self
         mapView.removeAnnotations(mapView.annotations)
 
         let viewerCoordinate = CLLocationCoordinate2D(
@@ -1654,7 +1662,8 @@ private struct NearbyUsersMapView: UIViewRepresentable {
                     coordinate: coordinate,
                     title: user.username,
                     subtitle: nearbyDistanceText(user.distance_km),
-                    isViewer: false
+                    isViewer: false,
+                    user: user
                 )
             )
         }
@@ -1694,16 +1703,134 @@ private struct NearbyUsersMapView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
+        var parent: NearbyUsersMapView
+
+        init(_ parent: NearbyUsersMapView) {
+            self.parent = parent
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard let annotation = annotation as? NearbyMapAnnotation else { return nil }
-            let identifier = annotation.isViewer ? "viewer" : "nearby"
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView
-                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: NearbyAvatarAnnotationView.reuseIdentifier) as? NearbyAvatarAnnotationView
+                ?? NearbyAvatarAnnotationView(annotation: annotation, reuseIdentifier: NearbyAvatarAnnotationView.reuseIdentifier)
             view.annotation = annotation
-            view.markerTintColor = annotation.isViewer ? UIColor(Color.zymPrimaryDark) : UIColor(Color.zymSecondary)
-            view.glyphImage = UIImage(systemName: annotation.isViewer ? "person.fill" : "figure.walk")
-            view.canShowCallout = true
             return view
+        }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let annotation = view.annotation as? NearbyMapAnnotation,
+                  let user = annotation.user else { return }
+            parent.onOpenUser(user)
+            mapView.deselectAnnotation(annotation, animated: true)
+        }
+    }
+}
+
+private final class NearbyAvatarAnnotationView: MKAnnotationView {
+    static let reuseIdentifier = "nearby-avatar"
+
+    private let imageView = UIImageView()
+    private var representedAvatarURL: URL?
+
+    override var annotation: MKAnnotation? {
+        didSet {
+            configure()
+        }
+    }
+
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        setup()
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+        configure()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        imageView.frame = bounds
+    }
+
+    private func setup() {
+        bounds = CGRect(x: 0, y: 0, width: 46, height: 46)
+        centerOffset = CGPoint(x: 0, y: -20)
+        canShowCallout = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = false
+        addSubview(imageView)
+    }
+
+    private func configure() {
+        guard let annotation = annotation as? NearbyMapAnnotation else { return }
+
+        let fallback = annotation.isViewer ? "YOU" : initials(for: annotation.title ?? "")
+        let fill = annotation.isViewer ? UIColor(Color.zymPrimaryDark) : UIColor(Color.zymSecondary)
+        representedAvatarURL = nil
+        imageView.image = avatarImage(source: nil, fallback: fallback, fill: fill)
+
+        guard let user = annotation.user,
+              let url = resolveRemoteURL(user.avatar_url) else { return }
+        representedAvatarURL = url
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self,
+                  let data,
+                  let source = UIImage(data: data) else { return }
+            DispatchQueue.main.async {
+                guard self.representedAvatarURL == url else { return }
+                self.imageView.image = self.avatarImage(source: source, fallback: fallback, fill: fill)
+            }
+        }.resume()
+    }
+
+    private func initials(for value: String) -> String {
+        let parts = value
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+        let text = String(parts).uppercased()
+        return text.isEmpty ? "?" : text
+    }
+
+    private func avatarImage(source: UIImage?, fallback: String, fill: UIColor) -> UIImage {
+        let size = CGSize(width: 46, height: 46)
+        let circle = CGRect(x: 3, y: 3, width: 40, height: 40)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            let path = UIBezierPath(ovalIn: circle)
+            context.cgContext.saveGState()
+            path.addClip()
+            if let source {
+                source.draw(in: circle)
+            } else {
+                fill.setFill()
+                path.fill()
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: fallback.count > 2 ? 9 : 13, weight: .black),
+                    .foregroundColor: UIColor.white
+                ]
+                let textSize = fallback.size(withAttributes: attributes)
+                fallback.draw(
+                    at: CGPoint(
+                        x: circle.midX - textSize.width / 2,
+                        y: circle.midY - textSize.height / 2
+                    ),
+                    withAttributes: attributes
+                )
+            }
+            context.cgContext.restoreGState()
+
+            UIColor.white.setStroke()
+            path.lineWidth = 3
+            path.stroke()
+
+            UIColor(Color.zymLine).setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
     }
 }

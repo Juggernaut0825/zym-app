@@ -8,14 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		12ED1F8D74B4EFA699ADBBDB /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9C4752E53D4931D33ABB63 /* InboxView.swift */; };
-			24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */; };
-			2C1A7D6B4E2F9A0100A1B2C3 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */; };
-			2F36C85D56BA0DAA9A4531B1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E21EC2DA70234A6B1CC728A8 /* Foundation.framework */; };
-			34E9C1025A6B7C8D90ABCDEF /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */; };
+		24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */; };
+		2C1A7D6B4E2F9A0100A1B2C3 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */; };
+		2F36C85D56BA0DAA9A4531B1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E21EC2DA70234A6B1CC728A8 /* Foundation.framework */; };
+		34E9C1025A6B7C8D90ABCDEF /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */; };
 		3D990E2FD78D1C53327F4997 /* CreatePostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E953F40CD0755DFA2272B07 /* CreatePostView.swift */; };
-		A11F0E2B3C4D5E6F70000001 /* CoachWelcomeFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */; };
-		A11F0E2B3C4D5E6F70000005 /* AuthSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */; };
-		A11F0E2B3C4D5E6F70000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */; };
 		700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */; };
 		70DE2935BEC343D85E049018 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */; };
 		77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */; };
@@ -26,6 +23,9 @@
 		98C10EF3662F6A0B4D129931 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7650D1583361CD88A0543424 /* AppState.swift */; };
 		9A75F1662455211AC9D82DAF /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6CC540213497006A295B2E1 /* RegisterView.swift */; };
 		A026086ABE5CC0A7752222CE /* FeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC61CF138FD5E4180092DB82 /* FeedView.swift */; };
+		A11F0E2B3C4D5E6F70000001 /* CoachWelcomeFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */; };
+		A11F0E2B3C4D5E6F70000005 /* AuthSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */; };
+		A11F0E2B3C4D5E6F70000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */; };
 		A5E96CAFDC3B09E07A29EC0E /* APIResponses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBA823B57936AAADB82FE2A /* APIResponses.swift */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		BD61835EA67486247630D80B /* ZYMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC0AD496B349508F2DACC2B /* ZYMApp.swift */; };
 		CD4BA61072A48CE5D1453411 /* CreateGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */; };
@@ -36,11 +36,11 @@
 /* Begin PBXFileReference section */
 		0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WebSocketManager.swift; path = ZYM/Services/WebSocketManager.swift; sourceTree = "<group>"; };
 		19B9B981ABA4CAE059FB13B5 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
-			29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreateGroupView.swift; path = ZYM/Views/CreateGroupView.swift; sourceTree = "<group>"; };
-			29E78D6AD1A2DA7C9152A4E6 /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FriendsView.swift; path = ZYM/Views/FriendsView.swift; sourceTree = "<group>"; };
-			2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CalendarView.swift; path = ZYM/Views/CalendarView.swift; sourceTree = "<group>"; };
-			34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HealthKitManager.swift; path = ZYM/Services/HealthKitManager.swift; sourceTree = "<group>"; };
-			3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ChatView.swift; path = ZYM/Views/ChatView.swift; sourceTree = "<group>"; };
+		29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreateGroupView.swift; path = ZYM/Views/CreateGroupView.swift; sourceTree = "<group>"; };
+		29E78D6AD1A2DA7C9152A4E6 /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FriendsView.swift; path = ZYM/Views/FriendsView.swift; sourceTree = "<group>"; };
+		2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CalendarView.swift; path = ZYM/Views/CalendarView.swift; sourceTree = "<group>"; };
+		34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = HealthKitManager.swift; path = ZYM/Services/HealthKitManager.swift; sourceTree = "<group>"; };
+		3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ChatView.swift; path = ZYM/Views/ChatView.swift; sourceTree = "<group>"; };
 		3E3AB9DAFE367D7AC79E74DA /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = FriendsView.swift; path = ZYM/Views/FriendsView.swift; sourceTree = "<group>"; };
 		3FBA823B57936AAADB82FE2A /* APIResponses.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIResponses.swift; path = ZYM/Models/APIResponses.swift; sourceTree = "<group>"; };
 		4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = ZYM/Views/ProfileView.swift; sourceTree = "<group>"; };
@@ -88,13 +88,13 @@
 			children = (
 				9F9455F05EA97DAFBC4A2508 /* LoginView.swift */,
 				F6CC540213497006A295B2E1 /* RegisterView.swift */,
-					A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */,
-					F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */,
-					A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */,
-					2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */,
-					3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */,
-					FC61CF138FD5E4180092DB82 /* FeedView.swift */,
-					4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */,
+				A11F0E2B3C4D5E6F70000006 /* AuthSupportViews.swift */,
+				F6EB0913C3C5A3F4A41C434F /* CoachSelectView.swift */,
+				A11F0E2B3C4D5E6F70000002 /* CoachWelcomeFlowView.swift */,
+				2C1A7D6B4E2F9A0100A1B2C4 /* CalendarView.swift */,
+				3BAC7CE2A2A44F0C4DB5A087 /* ChatView.swift */,
+				FC61CF138FD5E4180092DB82 /* FeedView.swift */,
+				4B93916C53EBC1BAAA5968A3 /* ProfileView.swift */,
 				C80E1E94A8C87935A3B5FC2C /* MainTabView.swift */,
 				CC9C4752E53D4931D33ABB63 /* InboxView.swift */,
 				5BFDBFD201B7C1B70BF1471F /* ConversationView.swift */,
@@ -155,13 +155,13 @@
 			name = ZYM;
 			sourceTree = "<group>";
 		};
-			BC2B14D539FEFC57C6452CA1 /* Services */ = {
-				isa = PBXGroup;
-				children = (
-					34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */,
-					0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */,
-				);
-				name = Services;
+		BC2B14D539FEFC57C6452CA1 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				34E9C1025A6B7C8D90ABCDE0 /* HealthKitManager.swift */,
+				0FB2F69F67BB7B6B2DCB8A7B /* WebSocketManager.swift */,
+			);
+			name = Services;
 			sourceTree = "<group>";
 		};
 		D710A9B77586A5C5BB7F023A /* Frameworks */ = {
@@ -208,6 +208,11 @@
 			attributes = {
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					F99B0537C56773C440B7A541 = {
+						DevelopmentTeam = RL9XM5F4VU;
+					};
+				};
 			};
 			buildConfigurationList = F8BF53F31C1838C08ADD7730 /* Build configuration list for PBXProject "ZYM" */;
 			compatibilityVersion = "Xcode 3.2";
@@ -218,8 +223,6 @@
 				Base,
 			);
 			mainGroup = 8E89A70C95EF31757DA32DA9;
-			minimizedProjectReferenceProxies = 0;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = 661BDC0178CE3A07AABDD031 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -252,11 +255,11 @@
 				E40934E3D10D01642281B039 /* CoachSelectView.swift in Sources */,
 				7A2CC21A04186119F18BA02C /* ChatView.swift in Sources */,
 				A026086ABE5CC0A7752222CE /* FeedView.swift in Sources */,
-					700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */,
-					24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */,
-					2C1A7D6B4E2F9A0100A1B2C3 /* CalendarView.swift in Sources */,
-					34E9C1025A6B7C8D90ABCDEF /* HealthKitManager.swift in Sources */,
-					77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */,
+				700BADF10F64CEC26A84FEEB /* ProfileView.swift in Sources */,
+				24AE7B4AE30BEAC061EEDC4C /* MainTabView.swift in Sources */,
+				2C1A7D6B4E2F9A0100A1B2C3 /* CalendarView.swift in Sources */,
+				34E9C1025A6B7C8D90ABCDEF /* HealthKitManager.swift in Sources */,
+				77816F46CA4C1EE85E8A778E /* WebSocketManager.swift in Sources */,
 				12ED1F8D74B4EFA699ADBBDB /* InboxView.swift in Sources */,
 				70DE2935BEC343D85E049018 /* ConversationView.swift in Sources */,
 				3D990E2FD78D1C53327F4997 /* CreatePostView.swift in Sources */,
@@ -278,12 +281,17 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = RL9XM5F4VU;
 				INFOPLIST_FILE = ZYM/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZYM;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = com.zym.app;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zym8.app;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -356,12 +364,19 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = ZYM/ZYM.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = RL9XM5F4VU;
 				INFOPLIST_FILE = ZYM/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZYM;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = com.zym.app;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zym8.app;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -417,8 +432,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

@@ -78,6 +78,22 @@ func applyAuthorizationHeader(_ request: inout URLRequest, token: String?) {
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 }
 
+func utf8Base64String(_ value: String?) -> String? {
+    guard let value, !value.isEmpty, let data = value.data(using: .utf8) else { return nil }
+    return data.base64EncodedString()
+}
+
+func stringFromUTF8Base64(_ value: String?) -> String? {
+    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !value.isEmpty,
+          let data = Data(base64Encoded: value),
+          let decoded = String(data: data, encoding: .utf8),
+          !decoded.isEmpty else {
+        return nil
+    }
+    return decoded
+}
+
 func authorizedDataTask(
     appState: AppState,
     request: URLRequest,
