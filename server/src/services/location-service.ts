@@ -20,6 +20,7 @@ export interface NearbyUserSummary {
   id: number;
   public_uuid: string | null;
   username: string;
+  display_name: string;
   avatar_url: string | null;
   bio: string | null;
   fitness_goal: string | null;
@@ -333,7 +334,9 @@ export class LocationService {
 
     const rows = getDB()
       .prepare(`
-        SELECT id, public_uuid, username, avatar_url, bio, fitness_goal,
+        SELECT id, public_uuid, username,
+               COALESCE(NULLIF(TRIM(display_name), ''), username) AS display_name,
+               avatar_url, bio, fitness_goal,
                location_label, location_city, location_latitude, location_longitude,
                location_precision, location_shared, location_updated_at
         FROM users
@@ -360,7 +363,8 @@ export class LocationService {
         return {
           id: Number(row.id),
           public_uuid: normalizeText(row.public_uuid, 80) || null,
-          username: normalizeText(row.username, 80) || `User ${Number(row.id)}`,
+          username: normalizeText(row.display_name, 80) || normalizeText(row.username, 80) || `User ${Number(row.id)}`,
+          display_name: normalizeText(row.display_name, 80) || normalizeText(row.username, 80) || `User ${Number(row.id)}`,
           avatar_url: normalizeText(row.avatar_url, 2048) || null,
           bio: normalizeText(row.bio, 240) || null,
           fitness_goal: normalizeText(row.fitness_goal, 160) || null,

@@ -407,7 +407,10 @@ struct ConversationRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack(alignment: .topTrailing) {
-                if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
+                if conversation.isCoach {
+                    CoachAvatar(coach: conversation.coachId ?? "zj", state: .idle, size: 50)
+                        .frame(width: 50, height: 50)
+                } else if let avatar = conversation.avatarUrl, let url = resolveRemoteURL(avatar) {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
@@ -580,14 +583,8 @@ struct AddCoachView: View {
                             let isEnabled = enabledCoachIds.contains(coach.id)
 
                             HStack(alignment: .top, spacing: 12) {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color.zymCoachAccent(coach.id))
+                                CoachAvatar(coach: coach.id, state: isEnabled ? .selected : .idle, size: 52)
                                     .frame(width: 52, height: 52)
-                                    .overlay(
-                                        Text(coach.id.uppercased())
-                                            .font(.system(size: 13, weight: .bold))
-                                            .foregroundColor(.white)
-                                    )
 
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(spacing: 8) {

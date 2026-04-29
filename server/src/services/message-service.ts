@@ -13,6 +13,7 @@ export interface ParsedMessage {
   reply_to: number | null;
   created_at: string;
   username: string;
+  display_name: string;
   avatar_url: string | null;
   is_coach: boolean;
 }
@@ -205,7 +206,13 @@ export class MessageService {
         if (parsed.userA !== currentUserId && parsed.userB !== currentUserId) return null;
 
         const otherUserId = parsed.userA === currentUserId ? parsed.userB : parsed.userA;
-        const user = db.prepare('SELECT id, username, avatar_url FROM users WHERE id = ?').get(otherUserId) as any;
+        const user = db.prepare(`
+          SELECT id, username,
+            COALESCE(NULLIF(TRIM(display_name), ''), username) AS display_name,
+            avatar_url
+          FROM users
+          WHERE id = ?
+        `).get(otherUserId) as any;
         const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(item.topic) as any;
         const unreadRow = unreadCountStmt.get(item.topic, currentUserId, item.topic, currentUserId) as { count?: number } | undefined;
         const mentionRow = unreadMentionStmt.get(currentUserId, item.topic) as { count?: number } | undefined;
@@ -213,7 +220,8 @@ export class MessageService {
         return {
           topic: item.topic,
           other_user_id: String(otherUserId),
-          username: user?.username || `User ${otherUserId}`,
+          username: user?.display_name || user?.username || `User ${otherUserId}`,
+          display_name: user?.display_name || user?.username || `User ${otherUserId}`,
           avatar_url: user?.avatar_url || null,
           last_message_at: normalizeTimestamp(item.last_message_at),
           last_message_preview: preview?.content || '',
@@ -277,7 +285,9 @@ export class MessageService {
   static async getMessages(topic: string, limit = 80): Promise<ParsedMessage[]> {
     const db = getDB();
     const rows = db.prepare(`
-      SELECT m.*, u.username, u.avatar_url
+      SELECT m.*, u.username,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+        u.avatar_url
       FROM messages m
       LEFT JOIN users u ON u.id = m.from_user_id
       WHERE m.topic = ?
@@ -295,7 +305,8 @@ export class MessageService {
       mentions: parseJsonArray(row.mentions),
       reply_to: row.reply_to || null,
       created_at: normalizeTimestamp(row.created_at) || String(row.created_at || ''),
-      username: row.from_user_id === 0 ? 'Coach' : (row.username || `User ${row.from_user_id}`),
+      username: row.from_user_id === 0 ? 'Coach' : (row.display_name || row.username || `User ${row.from_user_id}`),
+      display_name: row.from_user_id === 0 ? 'Coach' : (row.display_name || row.username || `User ${row.from_user_id}`),
       avatar_url: row.avatar_url || null,
       is_coach: Number(row.from_user_id) === 0,
     }));
@@ -442,9 +453,9 @@ export class MessageService {
           mn.is_read,
           mn.created_at,
           m.from_user_id AS message_actor_id,
-          mu.username AS message_actor_username,
+          COALESCE(NULLIF(TRIM(mu.display_name), ''), mu.username) AS message_actor_username,
           pc.user_id AS comment_actor_id,
-          cu.username AS comment_actor_username
+          COALESCE(NULLIF(TRIM(cu.display_name), ''), cu.username) AS comment_actor_username
         FROM mention_notifications mn
         LEFT JOIN messages m ON m.id = mn.message_id
         LEFT JOIN users mu ON mu.id = m.from_user_id

@@ -55,7 +55,11 @@ export class FriendService {
   static async getFriends(userId: string) {
     const db = getDB();
     return db.prepare(`
-      SELECT DISTINCT u.id, u.username, u.avatar_url
+      SELECT DISTINCT u.id,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS username,
+        u.username AS account_username,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+        u.avatar_url
       FROM users u
       JOIN friendships f
         ON (
@@ -63,14 +67,18 @@ export class FriendService {
           OR (f.friend_id = ? AND f.user_id = u.id)
         )
       WHERE f.status = 'accepted'
-      ORDER BY u.username ASC
+      ORDER BY display_name ASC, u.username ASC
     `).all(userId, userId);
   }
 
   static async getPendingRequests(userId: string) {
     const db = getDB();
     return db.prepare(`
-      SELECT u.id, u.username, u.avatar_url
+      SELECT u.id,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS username,
+        u.username AS account_username,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+        u.avatar_url
       FROM users u
       JOIN friendships f ON f.user_id = u.id
       WHERE f.friend_id = ? AND f.status = 'pending'

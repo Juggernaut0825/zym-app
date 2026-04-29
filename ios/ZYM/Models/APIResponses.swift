@@ -67,6 +67,7 @@ struct AuthLoginResponse: Codable {
     let refreshToken: String
     let userId: Int
     let username: String?
+    let display_name: String?
     let selectedCoach: String?
     let enabledCoaches: [String]?
     let timezone: String?

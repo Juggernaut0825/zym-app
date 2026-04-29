@@ -677,6 +677,7 @@ private struct ProfileEditSheet: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
+    @State private var displayName = ""
     @State private var bio = ""
     @State private var fitnessGoal = ""
     @State private var hobbies = ""
@@ -693,6 +694,7 @@ private struct ProfileEditSheet: View {
         NavigationView {
             Form {
                 Section("Profile") {
+                    TextField("Display name", text: $displayName)
                     TextField("Bio", text: $bio, axis: .vertical)
                         .lineLimit(3...6)
                     TextField("Fitness goal", text: $fitnessGoal)
@@ -760,6 +762,7 @@ private struct ProfileEditSheet: View {
             }
         }
         .onAppear {
+            displayName = profile?.display_name ?? profile?.username ?? appState.username ?? ""
             bio = profile?.bio ?? ""
             fitnessGoal = profile?.fitness_goal ?? ""
             hobbies = profile?.hobbies ?? ""
@@ -893,6 +896,7 @@ private struct ProfileEditSheet: View {
         applyAuthorizationHeader(&request, token: appState.token)
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "userId": userId,
+            "display_name": displayName,
             "bio": bio,
             "fitness_goal": fitnessGoal,
             "hobbies": hobbies,
@@ -1931,7 +1935,7 @@ private struct ProfileHeroCard: View {
     let onPresentMedia: (String?) -> Void
 
     private var username: String {
-        let value = String(profile?.username ?? fallbackUsername).trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = String(profile?.display_name ?? profile?.username ?? fallbackUsername).trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "User" : value
     }
 
@@ -2159,6 +2163,7 @@ struct APIProfile: Codable {
     let id: Int
     let public_uuid: String?
     let username: String
+    let display_name: String?
     let avatar_url: String?
     let background_url: String?
     let bio: String?

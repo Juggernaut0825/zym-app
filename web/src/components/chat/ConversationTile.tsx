@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { CoachAvatar } from '@/components/onboarding/CoachAvatar';
 
 export type ConversationTileType = 'coach' | 'dm' | 'group';
 
@@ -77,6 +78,8 @@ function ConversationTileComponent({
                 alt={name}
                 style={{ width: 36, height: 36, borderRadius: 14, objectFit: 'cover' }}
               />
+            ) : item.type === 'coach' ? (
+              <CoachAvatar coach={coachId} state="idle" size={40} />
             ) : (
               <div className={`flex size-9 items-center justify-center rounded-[13px] text-[13px] font-semibold sm:size-10 sm:rounded-[15px] sm:text-sm ${avatarTone}`}>
                 {avatarInitial(name)}
@@ -95,6 +98,8 @@ function ConversationTileComponent({
                 alt={name}
                 style={{ width: 36, height: 36, borderRadius: 14, objectFit: 'cover' }}
               />
+            ) : item.type === 'coach' ? (
+              <CoachAvatar coach={coachId} state="idle" size={40} />
             ) : (
               <div className={`flex size-9 items-center justify-center rounded-[13px] text-[13px] font-semibold sm:size-10 sm:rounded-[15px] sm:text-sm ${avatarTone}`}>
                 {avatarInitial(name)}

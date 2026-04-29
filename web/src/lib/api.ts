@@ -160,6 +160,7 @@ export interface LoginResponse {
   token: string;
   refreshToken: string;
   username: string;
+  display_name?: string | null;
   selectedCoach: 'zj' | 'lc' | null;
   enabledCoaches?: Array<'zj' | 'lc'>;
   timezone?: string | null;
@@ -750,6 +751,7 @@ export async function getPublicProfile(userId: number): Promise<PublicProfileRes
 
 export async function updateProfile(payload: {
   userId: number;
+  display_name?: string;
   bio?: string;
   fitness_goal?: string;
   hobbies?: string;

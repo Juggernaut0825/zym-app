@@ -55,6 +55,8 @@ target/
 !.env.example
 !**/.env.example
 !**/.env.*.example
+*.p8
+AuthKey_*.p8
 
 # Build / runtime outputs
 dist/
@@ -71,6 +73,7 @@ coverage/
 
 # App runtime data
 server/data/
+server/*.db
 server/skills/z/data/
 server/skills/z/scripts/__pycache__/
 server/src/knowledge/local-vector-index.json

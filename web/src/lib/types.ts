@@ -12,6 +12,7 @@ export interface AuthPayload {
   token: string;
   refreshToken: string;
   username: string;
+  display_name?: string | null;
   selectedCoach: 'zj' | 'lc' | null;
   enabledCoaches?: Array<'zj' | 'lc'>;
 }
@@ -30,6 +31,7 @@ export interface AuthSession {
 export interface UserSummary {
   id: number;
   username: string;
+  display_name?: string | null;
   avatar_url?: string | null;
   bio?: string | null;
   fitness_goal?: string | null;
@@ -53,6 +55,7 @@ export interface InboxDM {
   topic: string;
   other_user_id: string;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   last_message_at: string | null;
   last_message_preview: string;
@@ -88,6 +91,7 @@ export interface ChatMessage {
   reply_to: number | null;
   created_at: string;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   is_coach: boolean;
   client_message_id?: string | null;
@@ -96,6 +100,7 @@ export interface ChatMessage {
 export interface Friend {
   id: number;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
 }
 
@@ -110,6 +115,7 @@ export interface RequestsResponse {
 export interface GroupMember {
   id: number;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   role: string;
 }
@@ -126,6 +132,7 @@ export interface FeedPost {
   viewer_has_liked?: boolean;
   content: string | null;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   reaction_count: number;
   comment_count?: number;
@@ -143,6 +150,7 @@ export interface FeedComment {
   post_id: number;
   user_id: number;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   content: string;
   created_at: string;
@@ -202,6 +210,7 @@ export interface NearbyUser {
   id: number;
   public_uuid: string | null;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   bio: string | null;
   fitness_goal: string | null;
@@ -288,7 +297,9 @@ export interface HealthMomentumResponse {
 
 export interface Profile {
   id: number;
+  public_uuid?: string | null;
   username: string;
+  display_name?: string | null;
   avatar_url: string | null;
   background_url: string | null;
   bio: string | null;

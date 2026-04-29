@@ -1,5 +1,7 @@
 import { MessageService, encodeUtf8Base64 } from '../services/message-service.js';
 import { CoachService } from '../services/coach-service.js';
+import { ActivityNotificationService } from '../services/activity-notification-service.js';
+import { PushNotificationService } from '../services/push-notification-service.js';
 import { logger } from '../utils/logger.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import {
@@ -39,7 +41,10 @@ async function publishCoachLifecycle(topic: string, active: boolean): Promise<vo
 }
 
 export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<void> {
-  const participantUserIds = Array.from(new Set(job.participantUserIds.filter((value) => Number.isInteger(value) && value > 0)));
+  const participantUserIds = Array.from(new Set([
+    ...job.participantUserIds,
+    job.userId,
+  ].filter((value) => Number.isInteger(value) && value > 0)));
 
   await publishCoachLifecycle(job.topic, true);
   try {
@@ -67,7 +72,22 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
       },
     });
 
-    await MessageService.sendMessage(0, job.topic, aiResponse, []);
+    const messageId = await MessageService.sendMessage(0, job.topic, aiResponse, []);
+    const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+      0,
+      job.topic,
+      messageId,
+      aiResponse,
+      participantUserIds,
+    );
+    void PushNotificationService.sendMessageNotifications({
+      actorUserId: 0,
+      recipientUserIds: activityNotificationTargets,
+      topic: job.topic,
+      messageId,
+      snippet: aiResponse,
+    }).catch((error) => logger.warn('[jobs] failed to send coach push notification', error));
+
     const [coachMessage] = await MessageService.getMessages(job.topic, 1);
     await publishRealtimeEventSafely({
       type: 'message_created',
@@ -86,7 +106,10 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
     if (participantUserIds.length > 0) {
       await publishRealtimeEventSafely({
         type: 'inbox_updated',
-        userIds: participantUserIds,
+        userIds: Array.from(new Set([
+          ...participantUserIds,
+          ...activityNotificationTargets,
+        ])),
       }, 'coach-inbox-updated');
     }
   } catch (error) {

@@ -1,7 +1,25 @@
 import SwiftUI
+import UIKit
+
+final class ZYMAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        AppNotificationManager.shared.handleRemoteDeviceToken(deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        AppNotificationManager.shared.refreshAuthorizationStatus()
+    }
+}
 
 @main
 struct ZYMApp: App {
+    @UIApplicationDelegateAdaptor(ZYMAppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var notificationManager = AppNotificationManager.shared
     @State private var showLaunchSplash = true

@@ -458,7 +458,7 @@ struct ConversationView: View {
                     from_user_id: incomingMessage.from_user_id,
                     content: incomingMessage.decodedContent,
                     created_at: createdAt,
-                    username: incomingMessage.username ?? (isCoach ? conversationCoachDisplayName(resolvedCoachId) : "User"),
+                    username: incomingMessage.display_name ?? incomingMessage.username ?? (isCoach ? conversationCoachDisplayName(resolvedCoachId) : "User"),
                     avatar_url: incomingMessage.avatar_url,
                     media_urls: incomingMessage.media_urls ?? [],
                     is_coach: isCoach
@@ -604,14 +604,18 @@ struct ConversationView: View {
             infoNotice = "Message is too long to send. Keep it under \(maxMessageCharacters) characters."
             return
         }
-        if newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draftAttachments.isEmpty { return }
+        let draftText = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if draftText.isEmpty && draftAttachments.isEmpty { return }
 
         isSending = true
+        newMessage = ""
+        lastTypingSent = false
+        wsManager.sendTyping(topic: conversation.id, isTyping: false)
 
         if !draftAttachments.isEmpty {
-            uploadMediaAndSend(userId: userId)
+            uploadMediaAndSend(userId: userId, draftText: draftText)
         } else {
-            sendTextMessage(userId: userId, mediaUrls: [])
+            sendTextMessage(userId: userId, draftText: draftText, mediaUrls: [])
         }
     }
 
@@ -651,7 +655,7 @@ struct ConversationView: View {
         }
     }
 
-    private func uploadMediaAndSend(userId: Int) {
+    private func uploadMediaAndSend(userId: Int, draftText: String) {
         var mediaUrls: [String] = []
         var mediaIds: [String] = []
         let lock = NSLock()
@@ -673,12 +677,13 @@ struct ConversationView: View {
         }
 
         group.notify(queue: .main) {
-            if mediaUrls.isEmpty && mediaIds.isEmpty && newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if mediaUrls.isEmpty && mediaIds.isEmpty && draftText.isEmpty {
                 isSending = false
+                newMessage = draftText
                 infoNotice = "Selected media could not be prepared for upload."
                 return
             }
-            sendTextMessage(userId: userId, mediaUrls: mediaUrls, mediaIds: mediaIds)
+            sendTextMessage(userId: userId, draftText: draftText, mediaUrls: mediaUrls, mediaIds: mediaIds)
             clearDraftAttachments()
         }
     }
@@ -813,9 +818,10 @@ struct ConversationView: View {
         }.resume()
     }
 
-    private func sendTextMessage(userId: Int, mediaUrls: [String], mediaIds: [String] = []) {
+    private func sendTextMessage(userId: Int, draftText: String, mediaUrls: [String], mediaIds: [String] = []) {
         guard let url = apiURL("/messages/send") else {
             isSending = false
+            newMessage = draftText
             return
         }
 
@@ -824,15 +830,14 @@ struct ConversationView: View {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuthorizationHeader(&request, token: appState.token)
 
-        let trimmed = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         var body: [String: Any] = [
             "fromUserId": userId,
             "topic": conversation.id
         ]
 
-        if !trimmed.isEmpty {
-            body["content"] = trimmed
-            body["contentB64"] = utf8Base64String(trimmed)
+        if !draftText.isEmpty {
+            body["content"] = draftText
+            body["contentB64"] = utf8Base64String(draftText)
         }
         if !mediaUrls.isEmpty {
             body["mediaUrls"] = mediaUrls
@@ -847,17 +852,20 @@ struct ConversationView: View {
             DispatchQueue.main.async {
                 defer { isSending = false }
                 if let error {
+                    if newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        newMessage = draftText
+                    }
                     infoNotice = error.localizedDescription
                     return
                 }
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard statusCode >= 200 && statusCode < 300 else {
+                    if newMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        newMessage = draftText
+                    }
                     infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to send message."
                     return
                 }
-                newMessage = ""
-                lastTypingSent = false
-                wsManager.sendTyping(topic: conversation.id, isTyping: false)
                 loadMessages()
             }
         }.resume()
@@ -1782,9 +1790,14 @@ private struct ConversationAvatarBadge: View {
     let fallbackText: String
 
     var body: some View {
-        avatarContent
-            .frame(width: 34, height: 34)
-            .clipShape(Circle())
+        if isCoach {
+            CoachAvatar(coach: coachId, state: .idle, size: 34)
+                .frame(width: 34, height: 34)
+        } else {
+            avatarContent
+                .frame(width: 34, height: 34)
+                .clipShape(Circle())
+        }
     }
 
     @ViewBuilder
@@ -2480,6 +2493,7 @@ struct Message: Identifiable, Decodable {
         case content_b64
         case created_at
         case username
+        case display_name
         case avatar_url
         case media_urls
         case is_coach
@@ -2517,7 +2531,8 @@ struct Message: Identifiable, Decodable {
             from_user_id: try container.decode(Int.self, forKey: .from_user_id),
             content: stringFromUTF8Base64(contentB64) ?? rawContent,
             created_at: try container.decode(String.self, forKey: .created_at),
-            username: try container.decode(String.self, forKey: .username),
+            username: try container.decodeIfPresent(String.self, forKey: .display_name)
+                ?? container.decode(String.self, forKey: .username),
             avatar_url: try container.decodeIfPresent(String.self, forKey: .avatar_url),
             media_urls: try container.decodeIfPresent([String].self, forKey: .media_urls),
             is_coach: try container.decode(Bool.self, forKey: .is_coach)
@@ -2532,6 +2547,7 @@ struct MessagesResponse: Decodable {
 struct ConversationGroupMember: Identifiable, Codable {
     let id: Int
     let username: String
+    let display_name: String?
     let avatar_url: String?
     let role: String
 }
@@ -2552,6 +2568,7 @@ struct ConversationPublicProfileResponse: Codable {
 struct ConversationPublicProfile: Codable {
     let id: Int
     let username: String
+    let display_name: String?
     let avatar_url: String?
     let background_url: String?
     let bio: String?

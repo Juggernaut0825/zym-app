@@ -3,6 +3,8 @@ import path from 'path';
 import { getDB } from '../database/runtime-db.js';
 import { CoachService } from './coach-service.js';
 import { MessageService, buildCoachTopic, encodeUtf8Base64 } from './message-service.js';
+import { ActivityNotificationService } from './activity-notification-service.js';
+import { PushNotificationService } from './push-notification-service.js';
 import { publishRealtimeEvent } from '../realtime/realtime-event-bus.js';
 import { logger } from '../utils/logger.js';
 import { formatProcessMemoryUsage } from '../utils/process-metrics.js';
@@ -442,6 +444,21 @@ ${stateContext}
     }
 
     const messageId = await MessageService.sendMessage(0, input.topic, content, []);
+    const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+      0,
+      input.topic,
+      messageId,
+      content,
+      [input.userId],
+    );
+    void PushNotificationService.sendMessageNotifications({
+      actorUserId: 0,
+      recipientUserIds: activityNotificationTargets,
+      topic: input.topic,
+      messageId,
+      snippet: content,
+    }).catch((error) => logger.warn('[outreach] failed to send coach push notification', error));
+
     getDB()
       .prepare(`
         INSERT INTO coach_outreach_events (user_id, trigger_type, dedupe_key, coach_id, local_day, payload, message_id)
@@ -474,7 +491,10 @@ ${stateContext}
     });
     await publishRealtimeEvent({
       type: 'inbox_updated',
-      userIds: [input.userId],
+      userIds: Array.from(new Set([
+        input.userId,
+        ...activityNotificationTargets,
+      ])),
     });
 
     logger.info(`[outreach] sent trigger=${input.triggerType} user=${input.userId} coach=${input.coachId}`);

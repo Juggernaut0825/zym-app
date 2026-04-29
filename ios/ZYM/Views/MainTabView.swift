@@ -59,16 +59,23 @@ struct MainTabView: View {
         }
         .onAppear {
             notificationManager.requestAuthorizationIfNeeded()
+            notificationManager.registerForRemoteNotificationsIfAuthorized()
+            notificationManager.submitDeviceTokenIfPossible(appState: appState)
             presentCoachWelcomeIfNeeded()
         }
         .onChange(of: appState.isLoggedIn) { _, isLoggedIn in
             if isLoggedIn {
                 notificationManager.requestAuthorizationIfNeeded()
+                notificationManager.registerForRemoteNotificationsIfAuthorized()
+                notificationManager.submitDeviceTokenIfPossible(appState: appState)
                 presentCoachWelcomeIfNeeded(force: true)
             } else {
                 showCoachWelcome = false
                 hasPresentedWelcomeThisSession = false
             }
+        }
+        .onChange(of: notificationManager.remoteDeviceToken) { _, _ in
+            notificationManager.submitDeviceTokenIfPossible(appState: appState)
         }
         .onChange(of: appState.requestedTabIndex) { _, nextTab in
             guard let nextTab else { return }

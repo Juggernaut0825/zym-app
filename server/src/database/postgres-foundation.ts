@@ -96,6 +96,11 @@ export const POSTGRES_FOUNDATION_TABLES: PostgresFoundationTable[] = [
     name: 'media_asset_attachments',
     orderBy: "media_asset_id ASC, entity_type ASC, COALESCE(entity_id, 0) ASC, COALESCE(entity_key, '') ASC",
   },
+  {
+    name: 'push_device_tokens',
+    orderBy: 'id ASC',
+    identityColumn: 'id',
+  },
 ];
 
 export const POSTGRES_FOUNDATION_TABLE_NAMES = POSTGRES_FOUNDATION_TABLES.map((table) => table.name);

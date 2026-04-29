@@ -40,7 +40,11 @@ export class GroupService {
   static async getMembers(groupId: string) {
     const db = getDB();
     return db.prepare(`
-      SELECT u.id, u.username, u.avatar_url, gm.role
+      SELECT u.id,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS username,
+        u.username AS account_username,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+        u.avatar_url, gm.role
       FROM users u
       JOIN group_members gm ON u.id = gm.user_id
       WHERE gm.group_id = ?

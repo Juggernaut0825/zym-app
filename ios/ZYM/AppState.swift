@@ -258,6 +258,10 @@ final class AppNotificationManager: NSObject, ObservableObject, UNUserNotificati
     static let shared = AppNotificationManager()
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var remoteDeviceToken: String?
+
+    private let remoteDeviceTokenKey = "zym.remoteDeviceToken"
+    private let remoteDeviceEnvironmentKey = "zym.remoteDeviceEnvironment"
 
     var systemNotificationsEnabled: Bool {
         switch authorizationStatus {
@@ -274,6 +278,7 @@ final class AppNotificationManager: NSObject, ObservableObject, UNUserNotificati
 
     private override init() {
         super.init()
+        remoteDeviceToken = UserDefaults.standard.string(forKey: remoteDeviceTokenKey)
         UNUserNotificationCenter.current().delegate = self
         refreshAuthorizationStatus()
     }
@@ -298,8 +303,60 @@ final class AppNotificationManager: NSObject, ObservableObject, UNUserNotificati
 
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
                 self.refreshAuthorizationStatus()
+                self.registerForRemoteNotificationsIfAuthorized()
             }
         }
+    }
+
+    func registerForRemoteNotificationsIfAuthorized() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional
+                    || settings.authorizationStatus == .ephemeral else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func handleRemoteDeviceToken(_ deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        let environment = currentRemoteNotificationEnvironment()
+        UserDefaults.standard.set(token, forKey: remoteDeviceTokenKey)
+        UserDefaults.standard.set(environment, forKey: remoteDeviceEnvironmentKey)
+        DispatchQueue.main.async {
+            self.remoteDeviceToken = token
+        }
+    }
+
+    func submitDeviceTokenIfPossible(appState: AppState) {
+        guard appState.isLoggedIn,
+              let userId = appState.userId,
+              let token = remoteDeviceToken ?? UserDefaults.standard.string(forKey: remoteDeviceTokenKey),
+              !token.isEmpty,
+              let url = apiURL("/notifications/device-token") else { return }
+
+        let environment = UserDefaults.standard.string(forKey: remoteDeviceEnvironmentKey)
+            ?? currentRemoteNotificationEnvironment()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "platform": "ios",
+            "deviceToken": token,
+            "environment": environment,
+        ])
+        authorizedDataTask(appState: appState, request: request).resume()
+    }
+
+    private func currentRemoteNotificationEnvironment() -> String {
+#if DEBUG
+        return "sandbox"
+#else
+        return "production"
+#endif
     }
 
     func toggleSystemNotifications(_ enabled: Bool) {
@@ -584,6 +641,7 @@ class AppState: ObservableObject {
             URLSession.shared.dataTask(with: request) { data, response, _ in
                 var nextToken: String?
                 var nextRefreshToken: String?
+                var nextUsername: String?
                 var nextSelectedCoach: String?
                 var nextTimezone: String?
                 var shouldLogout = false
@@ -600,6 +658,11 @@ class AppState: ObservableObject {
                         if let refreshed = payload["refreshToken"] as? String, !refreshed.isEmpty {
                             nextRefreshToken = refreshed
                         }
+                        if let displayName = payload["display_name"] as? String, !displayName.isEmpty {
+                            nextUsername = displayName
+                        } else if let username = payload["username"] as? String, !username.isEmpty {
+                            nextUsername = username
+                        }
                         if let selectedCoach = payload["selectedCoach"] as? String, !selectedCoach.isEmpty {
                             nextSelectedCoach = selectedCoach
                         }
@@ -614,6 +677,9 @@ class AppState: ObservableObject {
                         self.token = nextToken
                         if let nextRefreshToken {
                             self.refreshToken = nextRefreshToken
+                        }
+                        if let nextUsername {
+                            self.username = nextUsername
                         }
                         if let nextSelectedCoach {
                             self.selectedCoach = nextSelectedCoach

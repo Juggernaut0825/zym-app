@@ -4,6 +4,7 @@ const TOKEN_KEY = 'token';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 const USER_ID_KEY = 'userId';
 const USERNAME_KEY = 'username';
+const DISPLAY_NAME_KEY = 'displayName';
 const COACH_KEY = 'selectedCoach';
 
 export function getAuth(): AuthPayload | null {
@@ -13,11 +14,12 @@ export function getAuth(): AuthPayload | null {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
   const userId = Number(localStorage.getItem(USER_ID_KEY));
   const username = localStorage.getItem(USERNAME_KEY) || '';
+  const displayName = localStorage.getItem(DISPLAY_NAME_KEY) || '';
   const rawCoach = String(localStorage.getItem(COACH_KEY) || '').trim().toLowerCase();
   const selectedCoach = rawCoach === 'zj' || rawCoach === 'lc' ? rawCoach : null;
 
   if (!token || !refreshToken || !Number.isInteger(userId) || userId <= 0) return null;
-  return { token, refreshToken, userId, username, selectedCoach };
+  return { token, refreshToken, userId, username, display_name: displayName || null, selectedCoach };
 }
 
 export function setAuth(payload: AuthPayload): void {
@@ -30,6 +32,11 @@ export function setAuth(payload: AuthPayload): void {
   localStorage.setItem(REFRESH_TOKEN_KEY, payload.refreshToken);
   localStorage.setItem(USER_ID_KEY, String(payload.userId));
   localStorage.setItem(USERNAME_KEY, payload.username);
+  if (payload.display_name) {
+    localStorage.setItem(DISPLAY_NAME_KEY, payload.display_name);
+  } else {
+    localStorage.removeItem(DISPLAY_NAME_KEY);
+  }
   if (payload.selectedCoach === 'zj' || payload.selectedCoach === 'lc') {
     localStorage.setItem(COACH_KEY, payload.selectedCoach);
   } else if (fallbackCoach) {
@@ -53,5 +60,6 @@ export function clearAuth(): void {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_ID_KEY);
   localStorage.removeItem(USERNAME_KEY);
+  localStorage.removeItem(DISPLAY_NAME_KEY);
   localStorage.removeItem(COACH_KEY);
 }

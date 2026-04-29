@@ -63,6 +63,7 @@ import { ConversationTile } from '@/components/chat/ConversationTile';
 import { CoachCalendarPanel } from '@/components/chat/CoachCalendarPanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
 import { WelcomeFlow } from '@/components/onboarding/WelcomeFlow';
+import { CoachAvatar } from '@/components/onboarding/CoachAvatar';
 import {
   ActivityNotification,
   AppSocketEvent,
@@ -298,7 +299,7 @@ function buildSearchPromptSuggestions(query: string, posts: FeedPost[], trending
       }
     });
 
-    const source = [post.username, post.content].filter(Boolean).join(' ');
+    const source = [displayUserName(post, ''), post.username, post.content].filter(Boolean).join(' ');
     const words = source.match(/[a-z0-9#]+/gi) || [];
     words.forEach((word, index) => {
       const lowered = word.toLowerCase().replace(/^#/, '');
@@ -425,6 +426,13 @@ function displayNameFromTopic(topic: string): string {
   if (topic.startsWith('grp_')) return 'Group';
   if (topic.startsWith('coach_')) return 'Coach';
   return 'DM';
+}
+
+function displayUserName(user: { display_name?: string | null; username?: string | null } | null | undefined, fallback = 'User'): string {
+  const displayName = String(user?.display_name || '').trim();
+  if (displayName) return displayName;
+  const username = String(user?.username || '').trim();
+  return username || fallback;
 }
 
 function normalizeCoachId(value: unknown): CoachId | null {
@@ -797,6 +805,7 @@ function MessageAvatarBadge(props: {
   label: string;
   background: string;
   color: string;
+  coachId?: CoachId | null;
   hidden?: boolean;
   onClick?: () => void;
   interactiveLabel?: string;
@@ -806,6 +815,7 @@ function MessageAvatarBadge(props: {
     label,
     background,
     color,
+    coachId,
     hidden = false,
     onClick,
     interactiveLabel,
@@ -815,7 +825,9 @@ function MessageAvatarBadge(props: {
   const shellClassName = `mt-1 flex size-7 items-center justify-center rounded-full text-[10px] font-semibold sm:size-8 sm:text-xs ${hidden ? 'opacity-0' : ''}`;
   const content = (
     <>
-      {!hidden && resolvedUrl ? (
+      {!hidden && coachId ? (
+        <CoachAvatar coach={coachId} state="idle" size={32} />
+      ) : !hidden && resolvedUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={resolvedUrl}
@@ -1060,7 +1072,7 @@ export default function AppPage() {
   const [syncPending, setSyncPending] = useState(false);
 
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [profileDraft, setProfileDraft] = useState({ bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
+  const [profileDraft, setProfileDraft] = useState({ display_name: '', bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
   const [profilePending, setProfilePending] = useState(false);
   const [profileAvatarUploading, setProfileAvatarUploading] = useState(false);
   const [profileBackgroundUploading, setProfileBackgroundUploading] = useState(false);
@@ -1265,7 +1277,7 @@ export default function AppPage() {
     if (!query) return feed;
     return feed.filter((post) => {
       const hashtags = extractHashtagsFromText(post.content).map((item) => `#${item}`);
-      const haystack = [post.username, post.type, post.content, ...hashtags].filter(Boolean).join(' ').toLowerCase();
+      const haystack = [displayUserName(post, ''), post.username, post.type, post.content, ...hashtags].filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(query);
     });
   }, [communityQuery, feed]);
@@ -1347,7 +1359,7 @@ export default function AppPage() {
   const filteredLeaderboard = useMemo(() => {
     const query = leaderboardQuery.trim().toLowerCase();
     if (!query) return leaderboard;
-    return leaderboard.filter((entry) => entry.username.toLowerCase().includes(query));
+    return leaderboard.filter((entry) => displayUserName(entry, entry.username).toLowerCase().includes(query));
   }, [leaderboard, leaderboardQuery]);
 
   const hasInlineCoachReveal = useMemo(
@@ -1387,9 +1399,9 @@ export default function AppPage() {
         ? activeGroupMembers.find((member) => member.id === numericId)
         : null;
       const messageName = Number.isFinite(numericId)
-        ? [...messages].reverse().find((message) => message.from_user_id === numericId)?.username
+        ? displayUserName([...messages].reverse().find((message) => message.from_user_id === numericId), '')
         : '';
-      const name = groupMember?.username
+      const name = displayUserName(groupMember, '')
         || messageName
         || (activeConversation?.type === 'dm' ? activeConversation.name : 'Someone');
       const avatarUrl = groupMember?.avatar_url
@@ -1961,7 +1973,7 @@ export default function AppPage() {
     }
 
     setAuthUserId(auth.userId);
-    setAuthUsername(auth.username);
+    setAuthUsername(displayUserName({ username: auth.username, display_name: auth.display_name }, auth.username || 'User'));
     setAuthSelectedCoach(auth.selectedCoach);
     setSelectedCoach(bootstrapCoach);
     selectedCoachRef.current = bootstrapCoach;
@@ -2042,7 +2054,7 @@ export default function AppPage() {
   }, []);
 
   useEffect(() => {
-    const relevantAuthKeys = new Set(['token', 'refreshToken', 'userId', 'username', 'selectedCoach']);
+    const relevantAuthKeys = new Set(['token', 'refreshToken', 'userId', 'username', 'displayName', 'selectedCoach']);
     const checkStoredAuth = (message = 'Session changed in another tab. Reloading...') => {
       const currentUserId = authUserIdRef.current;
       if (!currentUserId) return;
@@ -2493,7 +2505,7 @@ export default function AppPage() {
       const friendPlaceholders: Conversation[] = sourceFriends
         .map((friend) => ({
           topic: buildP2PTopic(userId, friend.id),
-          name: friend.username,
+          name: displayUserName(friend, friend.username),
           type: 'dm' as const,
           subtitle: 'Friend',
           preview: 'Start chatting',
@@ -2519,7 +2531,7 @@ export default function AppPage() {
         })),
         ...inbox.dms.map((item) => ({
           topic: item.topic,
-          name: item.username,
+          name: displayUserName(item, item.username),
           type: 'dm' as const,
           subtitle: 'Direct Message',
           preview: item.last_message_preview,
@@ -2696,6 +2708,7 @@ export default function AppPage() {
       const result = await getProfile(userId);
       setProfile(result);
       setProfileDraft({
+        display_name: displayUserName(result, authUsername || 'User'),
         bio: result.bio || '',
         fitness_goal: result.fitness_goal || '',
         hobbies: result.hobbies || '',
@@ -2785,11 +2798,17 @@ export default function AppPage() {
 
     const optimisticId = -Date.now();
     const clientMessageId = createClientMessageId();
+    const text = composer.trim();
+    const filesToUpload = attachments;
 
     try {
       setPendingSend(true);
-      const uploadedMedia = attachments.length > 0
-        ? await Promise.all(attachments.map((file) => uploadFile(file, {
+      setComposer('');
+      setAttachments([]);
+      setComposerActionsOpen(false);
+
+      const uploadedMedia = filesToUpload.length > 0
+        ? await Promise.all(filesToUpload.map((file) => uploadFile(file, {
             source: 'web_message',
             visibility: 'private',
           })))
@@ -2798,12 +2817,6 @@ export default function AppPage() {
       const uploadedMediaIds = uploadedMedia
         .map((item) => item.mediaId)
         .filter((item): item is string => Boolean(item));
-      const text = composer.trim();
-
-      setComposer('');
-      setAttachments([]);
-      setComposerActionsOpen(false);
-
       const optimistic: ChatMessage = {
         id: optimisticId,
         topic: activeTopic,
@@ -2842,6 +2855,8 @@ export default function AppPage() {
       const nextMessages = messagesRef.current.filter((item) => item.id !== optimisticId && item.client_message_id !== clientMessageId);
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
+      setComposer((current) => (current.trim() ? current : text));
+      setAttachments((current) => (current.length > 0 ? current : filesToUpload));
       setError(err.message || 'Failed to send message.');
     } finally {
       setPendingSend(false);
@@ -2862,7 +2877,7 @@ export default function AppPage() {
   async function handleAddFriend(user: UserSummary) {
     try {
       await addFriend({ userId: authUserId, friendId: user.id });
-      showNotice(`Friend request sent to ${user.username}.`);
+      showNotice(`Friend request sent to ${displayUserName(user, user.username)}.`);
       setFriendQuery('');
       setFriendSearchResult([]);
       const rows = await loadFriendsData();
@@ -3020,7 +3035,7 @@ export default function AppPage() {
       await addGroupMember({ groupId: activeConversation.groupId, userId: candidate.id });
       setActiveGroupInviteQuery('');
       setActiveGroupInviteSuggestions([]);
-      showNotice(`Invited ${candidate.username}.`);
+      showNotice(`Invited ${displayUserName(candidate, candidate.username)}.`);
       await loadActiveGroupMembers(activeConversation.groupId);
       await loadInbox();
     } catch (err: any) {
@@ -3036,7 +3051,7 @@ export default function AppPage() {
     try {
       setActiveGroupRemovePendingId(member.id);
       await removeGroupMember({ groupId: activeConversation.groupId, userId: member.id });
-      showNotice(`Removed ${member.username}.`);
+      showNotice(`Removed ${displayUserName(member, member.username)}.`);
       await loadActiveGroupMembers(activeConversation.groupId);
       await loadInbox();
     } catch (err: any) {
@@ -3496,6 +3511,7 @@ export default function AppPage() {
       setProfilePending(true);
       await updateProfile({
         userId: profile.id,
+        display_name: profileDraft.display_name,
         bio: profileDraft.bio,
         fitness_goal: profileDraft.fitness_goal,
         hobbies: profileDraft.hobbies,
@@ -3723,7 +3739,7 @@ export default function AppPage() {
             }
             : prev
         ));
-        showNotice(`Friend request sent to ${viewedProfile.username}.`);
+        showNotice(`Friend request sent to ${displayUserName(viewedProfile, viewedProfile.username)}.`);
         return;
       }
 
@@ -3741,7 +3757,7 @@ export default function AppPage() {
             }
             : prev
         ));
-        showNotice(`Friend request from ${viewedProfile.username} accepted.`);
+        showNotice(`Friend request from ${displayUserName(viewedProfile, viewedProfile.username)} accepted.`);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to update profile action.');
@@ -4088,6 +4104,8 @@ export default function AppPage() {
                           objectFit: 'cover',
                         }}
                       />
+                    ) : activeConversation?.type === 'coach' ? (
+                      <CoachAvatar coach={activeConversationCoach} state="selected" size={isWideMessageLayout ? 40 : 34} />
                     ) : (
                       <span className="text-sm font-semibold sm:text-base">{avatarInitial(activeConversation?.name || 'Chat')}</span>
                     )}
@@ -4187,7 +4205,7 @@ export default function AppPage() {
                   const showMetaLine = !compact || mine;
                   const counterpartyName = message.is_coach
                     ? coachDisplayName(activeConversationCoach)
-                    : message.username || (activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
+                    : displayUserName(message, activeConversation?.type === 'coach' ? coachDisplayName(activeConversationCoach) : 'User');
                   const senderLabel = mine ? 'You' : counterpartyName;
                   const avatarText = avatarInitial(counterpartyName);
                   const counterpartyAvatarUrl = !mine && !message.is_coach
@@ -4225,6 +4243,7 @@ export default function AppPage() {
                         label={avatarText}
                         background={message.is_coach ? activeCoachAvatarTone.background : 'rgba(148,163,184,0.16)'}
                         color={message.is_coach ? activeCoachAvatarTone.text : 'rgb(71 85 105)'}
+                        coachId={message.is_coach ? activeConversationCoach : null}
                         hidden={compact}
                         onClick={!compact && !message.is_coach && message.from_user_id > 0
                           ? () => {
@@ -4457,6 +4476,7 @@ export default function AppPage() {
   const renderProfileViewerPage = (surface: ProfileViewerState['surface']) => {
     const embedded = surface === 'message-pane';
     const viewerProfile = profileViewer.data?.profile;
+    const viewerProfileName = displayUserName(viewerProfile, 'User');
     const viewerPosts = profileViewer.data?.recent_posts || [];
     const viewerHealth = profileViewer.data?.today_health;
     const primaryActionLabel = profileViewerPrimaryActionLabel();
@@ -4483,7 +4503,7 @@ export default function AppPage() {
               <h2 className="truncate text-[1.02rem] font-semibold text-slate-900 sm:text-[1.2rem]">
                 {profileViewer.type === 'coach'
                   ? coachDisplayName(profileViewer.coachId || 'zj')
-                  : viewerProfile?.username || 'User'}
+                  : viewerProfileName}
               </h2>
             </div>
           </div>
@@ -4508,9 +4528,12 @@ export default function AppPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').ink }}>
                     AI Coach
                   </p>
-                  <h3 className="mt-3 text-[2rem] font-semibold tracking-tight text-slate-900">
-                    {coachDisplayName(profileViewer.coachId || 'zj')}
-                  </h3>
+                  <div className="mt-4 flex items-center gap-4">
+                    <CoachAvatar coach={(profileViewer.coachId || 'zj') as CoachId} state="selected" size={76} />
+                    <h3 className="text-[2rem] font-semibold tracking-tight text-slate-900">
+                      {coachDisplayName(profileViewer.coachId || 'zj')}
+                    </h3>
+                  </div>
                   <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 sm:text-base">
                     {coachTheme((profileViewer.coachId || 'zj') as 'zj' | 'lc').description}
                   </p>
@@ -4529,7 +4552,7 @@ export default function AppPage() {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={resolveApiAssetUrl(viewerProfile.background_url)}
-                        alt={`${viewerProfile.username} background`}
+                        alt={`${viewerProfileName} background`}
                         className="h-[190px] w-full object-cover sm:h-[240px]"
                       />
                     ) : (
@@ -4546,7 +4569,7 @@ export default function AppPage() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={resolveApiAssetUrl(viewerProfile.avatar_url)}
-                            alt={viewerProfile.username}
+                            alt={viewerProfileName}
                             className="size-20 rounded-[26px] object-cover shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:size-24 sm:rounded-[30px]"
                           />
                         ) : (
@@ -4554,13 +4577,13 @@ export default function AppPage() {
                             className="grid size-20 place-items-center rounded-[26px] text-xl font-semibold text-white shadow-[0_16px_36px_rgba(15,23,42,0.12)] sm:size-24 sm:rounded-[30px] sm:text-2xl"
                             style={{ background: neutralTheme.gradient }}
                           >
-                            {avatarInitial(viewerProfile.username)}
+                            {avatarInitial(viewerProfileName)}
                           </div>
                         )}
 
                         <div className="min-w-0 pb-1">
                           <h3 className="truncate text-[1.7rem] font-semibold tracking-tight text-slate-900 sm:text-[2.1rem]">
-                            {viewerProfile.username}
+                            {viewerProfileName}
                           </h3>
                           <p className="mt-1 text-sm text-slate-500">
                             {viewerProfile.fitness_goal || viewerProfile.bio || 'No intro yet.'}
@@ -4603,7 +4626,7 @@ export default function AppPage() {
                                 'user',
                                 viewerProfile.id,
                                 'inappropriate_behavior',
-                                `Reported user ${viewerProfile.username} from profile viewer`,
+                                `Reported user ${viewerProfileName} from profile viewer`,
                               );
                             }}
                           >
@@ -4678,7 +4701,7 @@ export default function AppPage() {
                                     key={mediaUrl}
                                     type="button"
                                     className="post-media-item"
-                                    onClick={() => openMediaLightbox(mediaUrl, `${viewerProfile.username}'s post media`)}
+                                    onClick={() => openMediaLightbox(mediaUrl, `${viewerProfileName}'s post media`)}
                                   >
                                     {isVideoUrl(mediaUrl) ? (
                                       <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 180 }} />
@@ -4865,11 +4888,11 @@ export default function AppPage() {
                             || feed.find((post) => post.user_id === authUserId)?.avatar_url
                             || '',
                           )}
-                          alt={authUsername || profile?.username || 'Your avatar'}
+                          alt={displayUserName(profile, authUsername || 'Your avatar')}
                           className="h-full w-full rounded-full object-cover"
                         />
                       ) : (
-                        avatarInitial(authUsername || profile?.username || 'U')
+                        avatarInitial(displayUserName(profile, authUsername || 'U'))
                       )}
                     </div>
                     <div className="min-w-0">
@@ -5036,6 +5059,7 @@ export default function AppPage() {
               {filteredFeed.map((post) => {
                 const postHashtags = extractHashtagsFromText(post.content);
                 const postLocationLabel = feedLocationLabel(post);
+                const postName = displayUserName(post, post.username);
                 return (
                   <article key={post.id} className="rounded-[24px] bg-white/42 p-4 backdrop-blur-xl transition hover:bg-white/56 sm:rounded-[30px] sm:p-5">
                     <header className="flex items-start justify-between gap-3">
@@ -5043,7 +5067,7 @@ export default function AppPage() {
                         type="button"
                         className="flex min-w-0 items-center gap-3 text-left transition hover:opacity-90"
                         onClick={() => void openPublicProfile(post.user_id)}
-                        aria-label={`Open ${post.username} profile`}
+                        aria-label={`Open ${postName} profile`}
                       >
                         <div
                           className="flex size-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold sm:size-11"
@@ -5056,16 +5080,16 @@ export default function AppPage() {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={resolveApiAssetUrl(post.avatar_url)}
-                              alt={post.username}
+                              alt={postName}
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
                           ) : (
-                            avatarInitial(post.username)
+                            avatarInitial(postName)
                           )}
                         </div>
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <strong className="truncate text-[13px] text-slate-900 sm:text-sm">{post.username}</strong>
+                            <strong className="truncate text-[13px] text-slate-900 sm:text-sm">{postName}</strong>
                             <span className="text-xs text-slate-400">{formatTime(post.created_at)}</span>
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-2">
@@ -5160,7 +5184,7 @@ export default function AppPage() {
                               key={mediaUrl}
                               type="button"
                               className="overflow-hidden rounded-[18px] bg-white/60 shadow-[0_14px_30px_rgba(15,23,42,0.06)] sm:rounded-[22px]"
-                              onClick={() => openMediaLightbox(mediaUrl, `${post.username}'s post media`)}
+                              onClick={() => openMediaLightbox(mediaUrl, `${postName}'s post media`)}
                             >
                               {isVideoUrl(mediaUrl) ? (
                                 <video src={mediaUrl} muted playsInline preload="metadata" style={{ width: '100%', maxHeight: 220 }} />
@@ -5213,7 +5237,9 @@ export default function AppPage() {
                       <section className="mt-3 rounded-[18px] bg-white/62 p-3 sm:mt-4 sm:rounded-[22px] sm:p-4">
                         <div className="space-y-3">
                           {commentLoadingPostIds.includes(post.id) ? <p className="text-sm text-slate-500">Loading comments...</p> : null}
-                          {(postCommentsById[post.id] || []).map((comment) => (
+                          {(postCommentsById[post.id] || []).map((comment) => {
+                            const commentName = displayUserName(comment, comment.username);
+                            return (
                             <article key={comment.id} className="rounded-[18px] bg-white/86 px-3 py-2.5 sm:rounded-2xl sm:px-4 sm:py-3">
                               <div className="flex items-start gap-3">
                                 <button
@@ -5224,17 +5250,17 @@ export default function AppPage() {
                                     color: neutralTheme.ink,
                                   }}
                                   onClick={() => void openPublicProfile(comment.user_id)}
-                                  aria-label={`Open ${comment.username} profile`}
+                                  aria-label={`Open ${commentName} profile`}
                                 >
                                   {comment.avatar_url ? (
                                     // eslint-disable-next-line @next/next/no-img-element
                                     <img
                                       src={resolveApiAssetUrl(comment.avatar_url)}
-                                      alt={comment.username}
+                                      alt={commentName}
                                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                     />
                                   ) : (
-                                    avatarInitial(comment.username)
+                                    avatarInitial(commentName)
                                   )}
                                 </button>
                                 <div className="min-w-0 flex-1">
@@ -5244,7 +5270,7 @@ export default function AppPage() {
                                       className="truncate text-left text-[13px] font-semibold text-slate-700 transition hover:text-slate-900 sm:text-sm"
                                       onClick={() => void openPublicProfile(comment.user_id)}
                                     >
-                                      {comment.username}
+                                      {commentName}
                                     </button>
                                     <span>{formatTime(comment.created_at)}</span>
                                   </div>
@@ -5252,7 +5278,8 @@ export default function AppPage() {
                                 </div>
                               </div>
                             </article>
-                          ))}
+                            );
+                          })}
                           {!commentLoadingPostIds.includes(post.id) && (postCommentsById[post.id] || []).length === 0 ? (
                             <p className="text-sm text-slate-500">No comments yet. Start the conversation.</p>
                           ) : null}
@@ -5485,7 +5512,7 @@ export default function AppPage() {
                 />
               ) : (
                 <div className="flex size-24 items-center justify-center rounded-full text-3xl font-bold text-white ring-4 ring-white sm:size-32 sm:text-4xl" style={{ background: selectedCoachTheme.gradient }}>
-                  {avatarInitial(authUsername || profile?.username || 'User')}
+                  {avatarInitial(displayUserName(profile, authUsername || 'User'))}
                 </div>
               )}
               <span className="absolute bottom-1.5 right-1.5 size-6 rounded-full border-4 border-white bg-emerald-500 sm:bottom-2 sm:right-2 sm:size-8" />
@@ -5494,9 +5521,9 @@ export default function AppPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <h2 className="text-[1.7rem] font-bold tracking-tight text-slate-900 sm:text-3xl">{authUsername || profile?.username || 'User'}</h2>
+                  <h2 className="text-[1.7rem] font-bold tracking-tight text-slate-900 sm:text-3xl">{displayUserName(profile, authUsername || 'User')}</h2>
                   <p className="mt-1.5 text-[13px] text-slate-500 sm:mt-2 sm:text-sm">
-                    ID: {authUserId} • {enabledCoaches.length > 0 ? `${enabledCoaches.length} coach chat${enabledCoaches.length > 1 ? 's' : ''} enabled` : 'No coach chats enabled yet'}
+                    ID: {profile?.public_uuid || authUserId} • {enabledCoaches.length > 0 ? `${enabledCoaches.length} coach chat${enabledCoaches.length > 1 ? 's' : ''} enabled` : 'No coach chats enabled yet'}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2.5 sm:gap-3">
@@ -5556,6 +5583,12 @@ export default function AppPage() {
             <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Edit Profile</h2>
             <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Changes sync to iOS and web for the same account.</p>
             <div className="mt-4 grid gap-2.5 sm:mt-5 sm:gap-3">
+                <input
+                  className="input-shell"
+                  placeholder="Display name"
+                  value={profileDraft.display_name}
+                  onChange={(event) => setProfileDraft((prev) => ({ ...prev, display_name: event.target.value }))}
+                />
                 <textarea
                   className="input-shell min-h-[96px]"
                   placeholder="Bio"
@@ -5584,23 +5617,15 @@ export default function AppPage() {
             <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Coach Chats</h2>
             <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Enable or open coaches from the Community `+` menu. Each coach keeps a separate conversation history.</p>
             <div className="mt-4 flex flex-wrap gap-2.5 sm:mt-5">
-              {enabledCoaches.length > 0 ? enabledCoaches.map((coach) => {
-                const avatarTheme = coachAvatarTheme(coach);
-                return (
+              {enabledCoaches.length > 0 ? enabledCoaches.map((coach) => (
                   <span
                     key={coach}
                     className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
                   >
-                    <span
-                      className="inline-flex size-6 items-center justify-center rounded-full text-[11px] font-bold"
-                      style={{ background: avatarTheme.background, color: avatarTheme.text }}
-                    >
-                      {coach.toUpperCase()}
-                    </span>
+                    <CoachAvatar coach={coach} state="idle" size={24} />
                     {coachDisplayName(coach)}
                   </span>
-                );
-              }) : (
+                )) : (
                 <p className="text-sm text-slate-500">No coach chats enabled yet.</p>
               )}
             </div>
@@ -5808,9 +5833,9 @@ export default function AppPage() {
               >
                 {profileDraft.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={resolveApiAssetUrl(profileDraft.avatar_url)} alt={authUsername || 'Profile'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img src={resolveApiAssetUrl(profileDraft.avatar_url)} alt={displayUserName(profile, authUsername || 'Profile')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  avatarInitial(authUsername || profile?.username || 'U')
+                  avatarInitial(displayUserName(profile, authUsername || 'U'))
                 )}
               </button>
             </div>
@@ -5879,16 +5904,10 @@ export default function AppPage() {
             <div className="grid gap-3">
               {coachCatalog.map((coach) => {
                 const enabled = enabledCoaches.includes(coach.id);
-                const avatarTheme = coachAvatarTheme(coach.id);
                 return (
                   <article key={coach.id} className="rounded-[22px] border border-slate-200/80 bg-white px-4 py-4">
                     <div className="flex items-start gap-3">
-                      <div
-                        className="flex size-12 shrink-0 items-center justify-center rounded-[16px] text-sm font-bold"
-                        style={{ background: avatarTheme.background, color: avatarTheme.text }}
-                      >
-                        {coach.id.toUpperCase()}
-                      </div>
+                      <CoachAvatar coach={coach.id} state={enabled ? 'selected' : 'idle'} size={52} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <strong className="text-base text-slate-900">{coach.label}</strong>
@@ -5993,7 +6012,7 @@ export default function AppPage() {
                 activeGroupMembers.map((member) => (
                   <div key={member.id} className="flex items-center justify-between gap-3 rounded-[22px] border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">{member.username}</p>
+                      <p className="text-sm font-semibold text-slate-800">{displayUserName(member, member.username)}</p>
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{member.role}</p>
                     </div>
                     {activeGroupMyRole === 'owner' && member.role !== 'owner' ? (
@@ -6036,7 +6055,7 @@ export default function AppPage() {
                     {activeGroupInviteSuggestions.slice(0, 6).map((user) => (
                       <div key={user.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/95 px-3 py-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                          <p className="text-sm font-semibold text-slate-800">{displayUserName(user, user.username)}</p>
                           <p className="text-xs text-slate-500">Ready to invite</p>
                         </div>
                         <button
@@ -6130,7 +6149,7 @@ export default function AppPage() {
                         onClick={() => handleRemoveGroupInvitee(member.id)}
                         title="Remove invitee"
                       >
-                        <span>{member.username}</span>
+                        <span>{displayUserName(member, member.username)}</span>
                         <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
                       </button>
                     ))}
@@ -6157,7 +6176,7 @@ export default function AppPage() {
                         onClick={() => handleAddGroupInvitee(user)}
                       >
                         <div>
-                          <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                          <p className="text-sm font-semibold text-slate-800">{displayUserName(user, user.username)}</p>
                           <p className="text-xs text-slate-500">Tap to add to the new group</p>
                         </div>
                         <span className="material-symbols-outlined text-slate-400">person_add</span>

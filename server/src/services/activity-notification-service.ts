@@ -241,7 +241,7 @@ export class ActivityNotificationService {
           an.is_read,
           an.created_at,
           an.actor_user_id,
-          u.username AS actor_username
+          COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS actor_username
         FROM activity_notifications an
         LEFT JOIN users u ON u.id = an.actor_user_id
         WHERE an.user_id = ?

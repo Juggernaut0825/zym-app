@@ -14,6 +14,160 @@ private struct CoachWelcomeSetupState {
     var notes = ""
 }
 
+enum CoachAvatarState {
+    case idle
+    case talking
+    case selected
+    case celebrate
+}
+
+struct CoachAvatar: View {
+    let coach: String
+    let state: CoachAvatarState
+    let size: CGFloat
+    var bubbleText: String = ""
+    var showBubble: Bool = false
+
+    @State private var animated = false
+
+    private var normalizedCoach: String { coach == "lc" ? "lc" : "zj" }
+    private var isLC: Bool { normalizedCoach == "lc" }
+    private var accent: Color { Color.zymCoachAccent(normalizedCoach) }
+    private var accentDark: Color { Color.zymCoachAccentDark(normalizedCoach) }
+    private var soft: Color { Color.zymCoachSoft(normalizedCoach) }
+    private var ink: Color { Color.zymCoachInk(normalizedCoach) }
+
+    private var animation: Animation {
+        if isLC {
+            return .easeInOut(duration: state == .celebrate ? 0.62 : 1.1)
+        }
+        return .easeInOut(duration: state == .celebrate ? 0.9 : 1.9)
+    }
+
+    private var scale: CGFloat {
+        switch state {
+        case .selected:
+            return animated ? (isLC ? 1.045 : 1.025) : 1
+        case .celebrate:
+            return animated ? (isLC ? 1.08 : 1.04) : 0.99
+        case .talking:
+            return animated ? (isLC ? 1.035 : 1.018) : 0.995
+        case .idle:
+            return animated ? (isLC ? 1.018 : 1.012) : 1
+        }
+    }
+
+    private var yOffset: CGFloat {
+        if isLC {
+            return animated ? -2 : 1
+        }
+        return animated ? -5 : 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: showBubble ? 10 : 0) {
+            avatar
+            if showBubble && !bubbleText.isEmpty {
+                Text(bubbleText)
+                    .font(.system(size: max(12, size * 0.13), weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 11)
+                    .background(Color.white.opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(accent.opacity(isLC ? 0.22 : 0.16), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+            }
+        }
+        .onAppear {
+            guard !animated else { return }
+            withAnimation(animation.repeatForever(autoreverses: true)) {
+                animated = true
+            }
+        }
+    }
+
+    private var avatar: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.44), lineWidth: max(1, size * 0.012))
+                .scaleEffect(x: isLC ? 1.03 : 1.12, y: isLC ? 1.08 : 0.94)
+                .rotationEffect(.degrees(isLC ? 18 : -16))
+
+            Circle()
+                .stroke(Color.white.opacity(0.28), lineWidth: max(1, size * 0.01))
+                .scaleEffect(x: isLC ? 0.92 : 0.96, y: isLC ? 1.04 : 1.1)
+                .rotationEffect(.degrees(isLC ? -18 : 20))
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [soft.opacity(0.96), accent.opacity(0.95), accentDark.opacity(0.98)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .fill(Color.white.opacity(0.44))
+                        .frame(width: size * 0.24, height: size * 0.24)
+                        .offset(x: -size * 0.18, y: -size * 0.21)
+                )
+
+            face
+                .frame(width: size * 0.68, height: size * 0.68)
+        }
+        .frame(width: size, height: size)
+        .scaleEffect(scale)
+        .offset(y: yOffset)
+        .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.28 : 0.16), radius: size * 0.18, x: 0, y: size * 0.1)
+    }
+
+    private var face: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: Color.black.opacity(0.04), radius: 10, x: 0, y: 6)
+
+            eye(x: -0.17)
+            eye(x: 0.17)
+            brow(x: -0.17, angle: isLC ? 14 : -5)
+            brow(x: 0.17, angle: isLC ? -14 : 5)
+
+            Capsule()
+                .fill(ink.opacity(0.58))
+                .frame(width: size * 0.14, height: (state == .talking && animated) ? size * 0.08 : size * 0.035)
+                .offset(y: size * 0.1)
+
+            Text(normalizedCoach.uppercased())
+                .font(.system(size: size * 0.11, weight: .black))
+                .tracking(1)
+                .foregroundColor(ink)
+                .offset(y: size * 0.22)
+        }
+    }
+
+    private func eye(x: CGFloat) -> some View {
+        Capsule()
+            .fill(Color.zymText.opacity(0.82))
+            .frame(width: size * 0.055, height: size * 0.075)
+            .offset(x: size * x, y: -size * 0.08)
+    }
+
+    private func brow(x: CGFloat, angle: Double) -> some View {
+        Capsule()
+            .fill(Color.zymText.opacity(isLC ? 0.34 : 0.22))
+            .frame(width: size * 0.12, height: size * 0.024)
+            .rotationEffect(.degrees(angle))
+            .offset(x: size * x, y: -size * 0.17)
+    }
+}
+
 struct CoachWelcomeFlowView: View {
     @Binding var isPresented: Bool
     let onComplete: (() -> Void)?
@@ -26,14 +180,18 @@ struct CoachWelcomeFlowView: View {
     @State private var errorText = ""
     @State private var state = CoachWelcomeSetupState()
 
-    private let totalSteps = 5
+    private let totalSteps = 4
 
     private var progress: Double {
         Double(step + 1) / Double(totalSteps)
     }
 
+    private var selectedCoach: String {
+        state.coach.isEmpty ? (appState.selectedCoach ?? "zj") : state.coach
+    }
+
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             ZYMBackgroundLayer().ignoresSafeArea()
 
             ScrollView {
@@ -54,52 +212,68 @@ struct CoachWelcomeFlowView: View {
                             .foregroundColor(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-
-                    HStack(spacing: 12) {
-                        Button("Back") {
-                            withAnimation(.zymSoft) {
-                                step = max(0, step - 1)
-                            }
-                        }
-                        .buttonStyle(ZYMGhostButton())
-                        .disabled(step == 0 || pending || loadingExisting)
-
-                        Spacer()
-
-                        if step < totalSteps - 1 {
-                            Button("Continue") {
-                                guard canContinue else {
-                                    errorText = "Finish this step before continuing."
-                                    return
-                                }
-                                errorText = ""
-                                withAnimation(.zymSoft) {
-                                    step = min(totalSteps - 1, step + 1)
-                                }
-                            }
-                            .buttonStyle(ZYMPrimaryButton())
-                            .disabled(pending || loadingExisting)
-                        } else {
-                            Button(pending ? "Saving..." : "Enter ZYM") {
-                                saveAndFinish()
-                            }
-                            .buttonStyle(ZYMPrimaryButton())
-                            .disabled(pending || loadingExisting)
-                        }
-                    }
-                    .padding(.bottom, 8)
                 }
                 .padding(18)
+                .padding(.bottom, 104)
             }
+
+            footerBar
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear(perform: loadExisting)
     }
 
     private var canContinue: Bool {
-        if step == 2 {
+        if step == 1 {
             return !state.coach.isEmpty
         }
         return true
+    }
+
+    private var footerBar: some View {
+        HStack(spacing: 12) {
+            Button("Back") {
+                withAnimation(.zymSoft) {
+                    step = max(0, step - 1)
+                }
+            }
+            .buttonStyle(ZYMGhostButton())
+            .disabled(step == 0 || pending || loadingExisting)
+
+            Spacer()
+
+            if step < totalSteps - 1 {
+                Button("Continue") {
+                    guard canContinue else {
+                        errorText = "Choose a coach before continuing."
+                        return
+                    }
+                    errorText = ""
+                    withAnimation(.zymSoft) {
+                        step = min(totalSteps - 1, step + 1)
+                    }
+                }
+                .buttonStyle(ZYMPrimaryButton())
+                .disabled(pending || loadingExisting)
+            } else {
+                Button(pending ? "Saving..." : "Enter ZYM") {
+                    saveAndFinish()
+                }
+                .buttonStyle(ZYMPrimaryButton())
+                .disabled(pending || loadingExisting)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0), Color.white.opacity(0.92), Color.white],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     private var headerCard: some View {
@@ -151,103 +325,97 @@ struct CoachWelcomeFlowView: View {
     private var currentStepView: some View {
         switch step {
         case 0:
-            introStep
+            meetCoachesStep
         case 1:
-            previewStep
-        case 2:
             coachStep
-        case 3:
+        case 2:
             basicsStep
         default:
             readyStep
         }
     }
 
-    private var introStep: some View {
+    private var meetCoachesStep: some View {
         VStack(spacing: 14) {
-            coachSampleCard(
-                title: "What people type",
-                accent: Color.zymPrimary,
+            coachIntroCard(
+                coach: "zj",
                 lines: [
-                    "I am 179 cm, 83 kg, want to cut, and train 4 days a week.",
-                    "Can you help me plan meals and tell me what to train today?",
+                    "I'm ZJ. I'll help you stay consistent without making fitness feel overwhelming.",
+                    "Tell us your goal, schedule, meals, and training context."
                 ]
             )
 
-            coachSampleCard(
-                title: "What you get back",
-                accent: Color.zymSecondary,
+            coachIntroCard(
+                coach: "lc",
                 lines: [
-                    "Meal guidance with calories, protein direction, and a believable structure for the day.",
-                    "A structured training plan with sets, reps, rest time, and movement demos.",
-                    "Sharper follow-up coaching because the coach already knows your baseline and goal.",
+                    "I'm LC. I'll keep you accountable and push you when you start drifting.",
+                    "Then we turn that into daily meals, workouts, check-ins, and feedback."
                 ]
             )
         }
     }
 
-    private var previewStep: some View {
-        VStack(spacing: 14) {
-            coachSampleCard(
-                title: "Input example",
-                accent: Color.zymSecondary,
-                lines: [
-                    "I want a simple upper-body workout for today. I am trying to cut, my shoulders are a little uneven, and I do not want a huge complicated plan.",
-                ]
+    private func coachIntroCard(coach: String, lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CoachAvatar(
+                coach: coach,
+                state: .talking,
+                size: 104,
+                bubbleText: lines.first ?? "",
+                showBubble: true
             )
 
-            coachSampleCard(
-                title: "Output example",
-                accent: Color.zymPrimary,
-                lines: [
-                    "Upper A",
-                    "1. Incline dumbbell press · 4 sets · 8 reps · 90 sec rest",
-                    "2. Chest-supported row · 4 sets · 10 reps · 75 sec rest",
-                    "3. Cable lateral raise · 3 sets · 12 reps · 60 sec rest",
-                    "4. One-arm dumbbell shoulder press · 3 sets · 8 reps each side · 75 sec rest",
-                ]
-            )
+            if lines.count > 1 {
+                Text(lines[1])
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color.zymCoachInk(coach))
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Color.zymCoachSoft(coach).opacity(0.74))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
         }
+        .zymCard()
     }
 
     private var coachStep: some View {
-        HStack(spacing: 12) {
+        VStack(spacing: 12) {
             coachCard(
                 coach: "zj",
-                badge: "Encouraging",
-                description: "Thoughtful, supportive, and steady. Best when you want consistency without feeling judged.",
-                sample: "I will help you keep momentum without overcomplicating your day."
+                badge: "Gentle encouragement",
+                description: "Warm, supportive, and steady.",
+                sample: "I'll help you keep momentum without overcomplicating your day."
             )
             coachCard(
                 coach: "lc",
-                badge: "Strict",
-                description: "Direct, sharper, and more demanding. Best when you want structure and accountability.",
-                sample: "I will push you to stop drifting and start executing."
+                badge: "Tough accountability",
+                description: "Direct, sharp, and demanding.",
+                sample: "I'll push you to stop drifting and start executing."
             )
         }
     }
 
     private var basicsStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
+            CoachAvatar(
+                coach: selectedCoach,
+                state: state.goal.isEmpty && state.trainingDays.isEmpty ? .idle : .talking,
+                size: 92,
+                bubbleText: coachProfilePrompt,
+                showBubble: true
+            )
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 welcomeInputField("Height", text: $state.height, keyboard: .decimalPad)
                 welcomeInputField("Weight", text: $state.weight, keyboard: .decimalPad)
                 welcomeInputField("Age", text: $state.age, keyboard: .numberPad)
-            }
-
-            HStack(spacing: 10) {
                 welcomeMenu("Gender", selection: $state.gender, options: coachGenderOptions)
                 welcomeMenu("Body fat range", selection: $state.bodyFatRange, options: coachBodyFatRangeOptions.map {
                     CoachOption(value: $0.value, label: $0.label, description: nil)
                 })
-            }
-
-            HStack(spacing: 10) {
                 welcomeMenu("Training days / week", selection: $state.trainingDays, options: coachTrainingDayOptions)
                 welcomeMenu("Activity level", selection: $state.activityLevel, options: coachActivityLevelOptions)
-            }
-
-            HStack(spacing: 10) {
                 welcomeMenu("Goal", selection: $state.goal, options: coachGoalOptions)
                 welcomeMenu("Experience level", selection: $state.experienceLevel, options: coachExperienceLevelOptions)
             }
@@ -261,38 +429,82 @@ struct CoachWelcomeFlowView: View {
                         .stroke(Color.zymLine, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            Text("Tell the agent your height, weight, age, goals, injuries, food preferences, or sport focus so it knows you better from the first reply.")
-                .font(.system(size: 13))
-                .foregroundColor(Color.zymSubtext)
         }
         .zymCard()
     }
 
     private var readyStep: some View {
-        VStack(spacing: 14) {
-            coachSampleCard(
-                title: "Saved context",
-                accent: Color.zymPrimary,
-                lines: [
-                    "Coach: \(state.coach.isEmpty ? "Not selected" : state.coach.uppercased())",
-                    "Goal: \(state.goal.isEmpty ? "Not set" : state.goal)",
-                    "Height: \(state.height.isEmpty ? "Not set" : state.height)",
-                    "Weight: \(state.weight.isEmpty ? "Not set" : state.weight)",
-                    "Age: \(state.age.isEmpty ? "Not set" : state.age)",
-                    "Experience: \(state.experienceLevel.isEmpty ? "Not set" : state.experienceLevel)",
-                ]
+        VStack(alignment: .leading, spacing: 14) {
+            CoachAvatar(
+                coach: selectedCoach,
+                state: .celebrate,
+                size: 118,
+                bubbleText: selectedCoach == "lc"
+                    ? "Profile saved. Now stop guessing and start executing."
+                    : "You're ready. I'll help you build this step by step.",
+                showBubble: true
             )
 
-            coachSampleCard(
-                title: "What happens next",
-                accent: Color.zymSecondary,
-                lines: [
-                    "The coach can now shape meal feedback, calorie guidance, and training advice around the profile you just saved.",
-                    "You can still review or update your check-ins, meals, training, and health sync later inside Calendar.",
-                ]
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                Text("COACH PROFILE CARD")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundColor(Color.zymSubtext)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    readySummaryTile("Coach", state.coach.isEmpty ? "Not selected" : state.coach.uppercased())
+                    readySummaryTile("Goal", optionLabel(state.goal, options: coachGoalOptions))
+                    readySummaryTile("Height", state.height)
+                    readySummaryTile("Weight", state.weight)
+                    readySummaryTile("Age", state.age)
+                    readySummaryTile("Training days", optionLabel(state.trainingDays, options: coachTrainingDayOptions))
+                    readySummaryTile("Activity", optionLabel(state.activityLevel, options: coachActivityLevelOptions))
+                    readySummaryTile("Experience", optionLabel(state.experienceLevel, options: coachExperienceLevelOptions))
+                }
+
+                if !state.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(state.notes.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.zymText)
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.white.opacity(0.84))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
         }
+        .zymCard()
+    }
+
+    private func readySummaryTile(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1.2)
+                .foregroundColor(Color.zymSubtext)
+            Text(value.isEmpty ? "Not set" : value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.zymText)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.white.opacity(0.86))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var coachProfilePrompt: String {
+        if !state.trainingDays.isEmpty {
+            return "I'll build your weekly structure around your available days."
+        }
+        if !state.goal.isEmpty {
+            return "Got it. I'll shape your plan around this goal."
+        }
+        return selectedCoach == "lc"
+            ? "Give me the basics. I'll use this to set your calories and training structure."
+            : "Let's set your baseline so I can guide you from the first reply."
     }
 
     private func coachCard(coach: String, badge: String, description: String, sample: String) -> some View {
@@ -304,29 +516,33 @@ struct CoachWelcomeFlowView: View {
                 state.coach = coach
             }
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(badge.uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundColor(Color.zymCoachInk(coach))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.82))
-                    .clipShape(Capsule())
+            HStack(alignment: .top, spacing: 14) {
+                CoachAvatar(coach: coach, state: isSelected ? .selected : .idle, size: 78)
 
-                Text(coach.uppercased())
-                    .font(.custom("Syne", size: 32))
-                    .foregroundColor(Color.zymText)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(badge.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundColor(Color.zymCoachInk(coach))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.82))
+                        .clipShape(Capsule())
 
-                Text(description)
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-                    .multilineTextAlignment(.leading)
+                    Text(coach.uppercased())
+                        .font(.custom("Syne", size: 30))
+                        .foregroundColor(Color.zymText)
 
-                Text(sample)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color.zymCoachInk(coach))
-                    .multilineTextAlignment(.leading)
+                    Text(description)
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.zymSubtext)
+                        .multilineTextAlignment(.leading)
+
+                    Text(sample)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.zymCoachInk(coach))
+                        .multilineTextAlignment(.leading)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
@@ -334,45 +550,21 @@ struct CoachWelcomeFlowView: View {
                 LinearGradient(
                     colors: [
                         Color.white.opacity(0.96),
-                        Color.zymCoachSoft(coach).opacity(isSelected ? 0.82 : 0.64),
+                        Color.zymCoachSoft(coach).opacity(isSelected ? 0.86 : 0.58),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(accent.opacity(isSelected ? 0.34 : 0.16), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accent.opacity(isSelected ? 0.42 : 0.16), lineWidth: isSelected ? 2 : 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: accent.opacity(isSelected ? 0.18 : 0.06), radius: 16, x: 0, y: 10)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .scaleEffect(isSelected ? (coach == "lc" ? 1.018 : 1.01) : 1)
+            .shadow(color: accent.opacity(isSelected ? 0.2 : 0.06), radius: 18, x: 0, y: 10)
         }
         .buttonStyle(.plain)
-    }
-
-    private func coachSampleCard(title: String, accent: Color, lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.4)
-                .foregroundColor(Color.zymSubtext)
-
-            ForEach(lines, id: \.self) { line in
-                Text(line)
-                    .font(.system(size: 14, weight: title == "Output example" && line == "Upper A" ? .semibold : .regular))
-                    .foregroundColor(Color.zymText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.88))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(accent.opacity(0.14), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-        }
-        .zymCard()
     }
 
     private func welcomeInputField(_ placeholder: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
@@ -400,8 +592,11 @@ struct CoachWelcomeFlowView: View {
         } label: {
             HStack {
                 Text(selection.wrappedValue.isEmpty ? label : (options.first(where: { $0.value == selection.wrappedValue })?.label ?? selection.wrappedValue))
+                    .font(.system(size: 13))
                     .foregroundColor(selection.wrappedValue.isEmpty ? Color.zymSubtext : Color.zymText)
-                Spacer()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Spacer(minLength: 6)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Color.zymSubtext)
@@ -416,23 +611,26 @@ struct CoachWelcomeFlowView: View {
         }
     }
 
+    private func optionLabel(_ value: String, options: [CoachOption]) -> String {
+        guard !value.isEmpty else { return "" }
+        return options.first(where: { $0.value == value })?.label ?? value
+    }
+
     private var stepTitle: String {
         switch step {
-        case 0: return "See what this turns into"
-        case 1: return "Preview the outcome"
-        case 2: return "Choose your coach"
-        case 3: return "Fill the basics"
+        case 0: return "Meet your coaches"
+        case 1: return "Choose your coach"
+        case 2: return "Build your coach profile"
         default: return "You are ready"
         }
     }
 
     private var stepSubtitle: String {
         switch step {
-        case 0: return "A quick setup makes the first conversation feel guided instead of blank."
-        case 1: return "ZYM works better when you know what kind of recipes, plans, and check-ins it can produce."
-        case 2: return "Pick the coaching energy you want to hear every day."
-        case 3: return "Tell the agent your height, weight, age, goal, and training context so it can personalize your output."
-        default: return "We will save this into your coach profile so meals, plans, and feedback feel tailored from the start."
+        case 0: return "A quick hello from the two coaching styles inside ZYM."
+        case 1: return "Pick the voice you want to hear when the day gets noisy."
+        case 2: return "Give your coach enough context to make the first plan useful."
+        default: return "Your coach profile is ready to guide meals, workouts, check-ins, and feedback."
         }
     }
 
@@ -483,7 +681,7 @@ struct CoachWelcomeFlowView: View {
               let updateURL = apiURL("/coach/records/profile/update"),
               !state.coach.isEmpty else {
             errorText = "Choose a coach before finishing setup."
-            step = 2
+            step = 1
             return
         }
 

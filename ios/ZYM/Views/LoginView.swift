@@ -262,7 +262,7 @@ struct LoginView: View {
 
             DispatchQueue.main.async {
                 pending = false
-                appState.username = loginResponse.username ?? trimmedIdentifier
+                appState.username = loginResponse.display_name ?? loginResponse.username ?? trimmedIdentifier
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId
@@ -382,7 +382,7 @@ struct LoginView: View {
 
             DispatchQueue.main.async {
                 pending = false
-                appState.username = loginResponse.username
+                appState.username = loginResponse.display_name ?? loginResponse.username
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId
@@ -645,7 +645,7 @@ struct LoginView: View {
 
             DispatchQueue.main.async {
                 pending = false
-                appState.username = loginResponse.username ?? appState.username
+                appState.username = loginResponse.display_name ?? loginResponse.username ?? appState.username
                 appState.token = loginResponse.token
                 appState.refreshToken = loginResponse.refreshToken
                 appState.userId = loginResponse.userId

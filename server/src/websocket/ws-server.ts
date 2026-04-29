@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { AuthService } from '../services/auth-service.js';
 import { ActivityNotificationService } from '../services/activity-notification-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
+import { PushNotificationService } from '../services/push-notification-service.js';
 import { MessageService, decodeUtf8Base64, encodeUtf8Base64 } from '../services/message-service.js';
 import {
   mediaPathFromFileName,
@@ -439,6 +440,13 @@ export class WSServer {
         content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
         participants,
       );
+      void PushNotificationService.sendMessageNotifications({
+        actorUserId: userId,
+        recipientUserIds: activityNotificationTargets,
+        topic,
+        messageId,
+        snippet: content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
+      }).catch((error) => logger.warn('[ws] failed to send push notification', error));
       const [created] = await MessageService.getMessages(topic, 1);
       this.broadcastMessage(topic, created || {
         id: messageId,

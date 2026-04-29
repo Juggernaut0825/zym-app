@@ -20,6 +20,7 @@ import { ModerationService } from '../services/moderation-service.js';
 import { MediaAssetService } from '../services/media-asset-service.js';
 import { SecurityEventService } from '../services/security-event-service.js';
 import { LocationService, type LocationSelection } from '../services/location-service.js';
+import { PushNotificationService } from '../services/push-notification-service.js';
 import { knowledgeIngestionService } from '../services/knowledge-ingestion-service.js';
 import { coachTypedToolsService } from '../services/coach-typed-tools-service.js';
 import { AdminAuthService } from '../services/admin-auth-service.js';
@@ -107,6 +108,11 @@ const mediaAssetService = MediaAssetService.createFromEnvironment({ uploadsDir }
 const MODERATION_TARGET_TYPES = ['user', 'post', 'message', 'group'] as const;
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
+
+function displayNameSql(prefix = ''): string {
+  const columnPrefix = prefix ? `${prefix}.` : '';
+  return `COALESCE(NULLIF(TRIM(${columnPrefix}display_name), ''), ${columnPrefix}username)`;
+}
 
 function normalizeOrigin(raw: unknown): string {
   return String(raw || '').trim().replace(/\/+$/, '');
@@ -1494,7 +1500,7 @@ app.post('/auth/login',
     }
 
     const db = getDB();
-    const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(result.userId) as any;
+    const user = db.prepare(`SELECT id, username, ${displayNameSql()} AS display_name, timezone FROM users WHERE id = ?`).get(result.userId) as any;
     const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
     const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
     if (Array.isArray(result.revokedSessionIds) && result.revokedSessionIds.length > 0) {
@@ -1514,6 +1520,7 @@ app.post('/auth/login',
     res.json({
       ...result,
       username: user?.username,
+      display_name: user?.display_name || user?.username || null,
       selectedCoach,
       enabledCoaches,
       timezone: user?.timezone || null,
@@ -1574,7 +1581,7 @@ app.post('/auth/google',
       }
 
       const db = getDB();
-      const user = db.prepare('SELECT id, username, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+      const user = db.prepare(`SELECT id, username, ${displayNameSql()} AS display_name, timezone, email FROM users WHERE id = ?`).get(result.userId) as any;
       const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
       const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
 
@@ -1589,6 +1596,7 @@ app.post('/auth/google',
       res.json({
         ...result,
         username: user?.username,
+        display_name: user?.display_name || user?.username || null,
         selectedCoach,
         enabledCoaches,
         timezone: user?.timezone || null,
@@ -1641,7 +1649,7 @@ app.post('/auth/apple',
       }
 
       const db = getDB();
-      const user = db.prepare('SELECT id, username, timezone, email FROM users WHERE id = ?').get(result.userId) as any;
+      const user = db.prepare(`SELECT id, username, ${displayNameSql()} AS display_name, timezone, email FROM users WHERE id = ?`).get(result.userId) as any;
       const selectedCoach = resolveSelectedCoachForUser(Number(result.userId));
       const enabledCoaches = resolveEnabledCoachesForUser(Number(result.userId));
 
@@ -1656,6 +1664,7 @@ app.post('/auth/apple',
       res.json({
         ...result,
         username: user?.username,
+        display_name: user?.display_name || user?.username || null,
         selectedCoach,
         enabledCoaches,
         timezone: user?.timezone || null,
@@ -1713,13 +1722,14 @@ app.post('/auth/refresh',
     }
 
     const db = getDB();
-    const user = db.prepare('SELECT id, username, timezone FROM users WHERE id = ?').get(refreshed.userId) as any;
+    const user = db.prepare(`SELECT id, username, ${displayNameSql()} AS display_name, timezone FROM users WHERE id = ?`).get(refreshed.userId) as any;
     const selectedCoach = resolveSelectedCoachForUser(Number(refreshed.userId));
     const enabledCoaches = resolveEnabledCoachesForUser(Number(refreshed.userId));
 
     res.json({
       ...refreshed,
       username: user?.username,
+      display_name: user?.display_name || user?.username || null,
       selectedCoach,
       enabledCoaches,
       timezone: user?.timezone || null,
@@ -2070,12 +2080,17 @@ app.get('/users/search', (req, res) => {
     return res.json({ users: [] });
   }
 
-  const users = getDB().prepare(
-    'SELECT id, public_uuid, username, avatar_url FROM users WHERE username LIKE ? ORDER BY username ASC LIMIT 12',
-  ).all(`%${q}%`).map((row: any) => ({
+  const users = getDB().prepare(`
+    SELECT id, public_uuid, ${displayNameSql()} AS username, username AS account_username, ${displayNameSql()} AS display_name, avatar_url
+    FROM users
+    WHERE username LIKE ? OR display_name LIKE ?
+    ORDER BY display_name ASC, username ASC
+    LIMIT 12
+  `).all(`%${q}%`, `%${q}%`).map((row: any) => ({
     id: Number(row.id),
     public_uuid: String(row.public_uuid || '').trim() || null,
     username: String(row.username || ''),
+    display_name: String(row.display_name || row.username || ''),
     avatar_url: mediaUrlForClient(req, row.avatar_url),
   }));
   res.json({ users });
@@ -2087,7 +2102,7 @@ app.get('/users/public/:id', (req, res) => {
   const db = getDB();
 
   const user = db
-    .prepare('SELECT id, public_uuid, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?')
+    .prepare(`SELECT id, public_uuid, ${displayNameSql()} AS username, username AS account_username, ${displayNameSql()} AS display_name, avatar_url, bio, fitness_goal FROM users WHERE id = ?`)
     .get(targetUserId) as any;
   if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -2096,6 +2111,7 @@ app.get('/users/public/:id', (req, res) => {
     id: user.id,
     public_uuid: String(user.public_uuid || '').trim() || null,
     username: user.username,
+    display_name: user.display_name || user.username,
     avatar_url: mediaUrlForClient(req, user.avatar_url),
     bio: user.bio,
     fitness_goal: user.fitness_goal,
@@ -2172,12 +2188,13 @@ app.get('/users/:id', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const user = getDB().prepare('SELECT id, public_uuid, username, avatar_url, bio, fitness_goal FROM users WHERE id = ?').get(targetUserId) as any;
+  const user = getDB().prepare(`SELECT id, public_uuid, ${displayNameSql()} AS username, username AS account_username, ${displayNameSql()} AS display_name, avatar_url, bio, fitness_goal FROM users WHERE id = ?`).get(targetUserId) as any;
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({
     id: Number(user.id),
     public_uuid: String(user.public_uuid || '').trim() || null,
     username: String(user.username || ''),
+    display_name: String(user.display_name || user.username || ''),
     avatar_url: mediaUrlForClient(req, user.avatar_url),
     bio: user.bio || null,
     fitness_goal: user.fitness_goal || null,
@@ -2316,6 +2333,15 @@ app.post('/community/react',
       : [];
 
     if (notificationUsers.length > 0) {
+      void PushNotificationService.sendCommunityNotifications({
+        actorUserId: userId,
+        recipientUserIds: notificationUsers,
+        sourceType: 'post_reaction',
+        sourceId: reactionResult.reactionId || 0,
+        postId,
+        snippet: 'liked your post',
+      }).catch((error) => logger.warn('[api] failed to send community push notification', error));
+
       await publishRealtimeEventSafely({
         type: 'inbox_updated',
         userIds: notificationUsers,
@@ -2402,6 +2428,15 @@ app.post('/community/comment',
     ...activityNotificationUsers,
   ]));
   if (realtimeNotificationUsers.length > 0) {
+    void PushNotificationService.sendCommunityNotifications({
+      actorUserId: userId,
+      recipientUserIds: realtimeNotificationUsers,
+      sourceType: 'post_comment',
+      sourceId: commentId,
+      postId,
+      snippet: content,
+    }).catch((error) => logger.warn('[api] failed to send community push notification', error));
+
     await publishRealtimeEventSafely({
       type: 'inbox_updated',
       userIds: realtimeNotificationUsers,
@@ -2629,6 +2664,34 @@ app.post('/notifications/feed/read', requireSameUserIdFromBody('userId'), APIGat
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map((item: unknown) => Number(item)) : [];
   const changed = ActivityNotificationService.markNotificationsRead(userId, ids);
   res.json({ success: true, updated: changed });
+});
+
+app.post('/notifications/device-token', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  platform: { type: 'string', minLength: 2, maxLength: 20 },
+  deviceToken: { required: true, type: 'string', minLength: 32, maxLength: 512 },
+  environment: { type: 'string', minLength: 6, maxLength: 20 },
+}), (req, res) => {
+  const userId = toUserId(req.body.userId);
+  const ok = PushNotificationService.registerDeviceToken({
+    userId,
+    platform: String(req.body.platform || 'ios'),
+    deviceToken: String(req.body.deviceToken || ''),
+    environment: String(req.body.environment || ''),
+  });
+  if (!ok) {
+    return res.status(400).json({ error: 'Invalid device token' });
+  }
+  res.json({ success: true });
+});
+
+app.post('/notifications/device-token/remove', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
+  userId: { required: true, type: 'number', integer: true, min: 1 },
+  deviceToken: { required: true, type: 'string', minLength: 32, maxLength: 512 },
+}), (req, res) => {
+  const userId = toUserId(req.body.userId);
+  const removed = PushNotificationService.unregisterDeviceToken(userId, String(req.body.deviceToken || ''));
+  res.json({ success: true, removed });
 });
 
 app.get('/notifications/preferences/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
@@ -2899,6 +2962,13 @@ app.post('/messages/send',
       content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
       participants,
     );
+    void PushNotificationService.sendMessageNotifications({
+      actorUserId: fromUserId,
+      recipientUserIds: activityNotificationTargets,
+      topic,
+      messageId,
+      snippet: content || (resolvedMediaUrls.length > 0 ? 'Sent an attachment' : 'New message'),
+    }).catch((error) => logger.warn('[api] failed to send push notification', error));
     const [newMessage] = (await MessageService.getMessages(topic, 1));
     const deliveredMediaUrls = mediaUrlsForClient(req, resolvedMediaUrls);
     const deliveredMessage = newMessage
@@ -2925,6 +2995,7 @@ app.post('/messages/send',
         reply_to: null,
         created_at: new Date().toISOString(),
         username: req.body.username || `User ${fromUserId}`,
+        display_name: req.body.display_name || req.body.username || `User ${fromUserId}`,
         avatar_url: null,
         is_coach: false,
         client_message_id: clientMessageId,
@@ -2969,7 +3040,7 @@ app.post('/messages/send',
 app.post('/friends/add', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
   userId: { required: true, type: 'number', integer: true, min: 1 },
   friendId: { type: 'number', integer: true, min: 1 },
-  username: { type: 'string', minLength: 1, maxLength: 40 },
+  username: { type: 'string', minLength: 1, maxLength: 120 },
   connectCode: { type: 'string', minLength: 4, maxLength: 256 },
 }), async (req, res) => {
   try {
@@ -2980,7 +3051,7 @@ app.post('/friends/add', requireSameUserIdFromBody('userId'), APIGateway.validat
     }
 
     if (!friendId && req.body.username) {
-      const user = getDB().prepare('SELECT id FROM users WHERE username = ?').get(String(req.body.username).trim()) as any;
+      const user = getDB().prepare('SELECT id FROM users WHERE lower(username) = ?').get(String(req.body.username).trim().toLowerCase()) as any;
       friendId = user?.id;
     }
 
@@ -3027,11 +3098,11 @@ app.post('/friends/resolve-connect', APIGateway.rateLimit(60, 10 * 60_000, 'frie
     if (!userId) {
       return res.status(404).json({ error: 'Connect code not found' });
     }
-    const user = getDB().prepare('SELECT id, username FROM users WHERE id = ?').get(userId) as { id?: number; username?: string } | undefined;
+    const user = getDB().prepare(`SELECT id, username, ${displayNameSql()} AS display_name FROM users WHERE id = ?`).get(userId) as { id?: number; username?: string; display_name?: string } | undefined;
     if (!user?.id) {
       return res.status(404).json({ error: 'Connect code user not found' });
     }
-    res.json({ userId: Number(user.id), username: user.username || '' });
+    res.json({ userId: Number(user.id), username: user.username || '', display_name: user.display_name || user.username || '' });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Invalid connect code' });
   }
@@ -3102,7 +3173,7 @@ app.post('/groups/add-member',
   APIGateway.validateSchema({
   groupId: { required: true, type: 'number', integer: true, min: 1 },
   userId: { type: 'number', integer: true, min: 1 },
-  username: { type: 'string', minLength: 1, maxLength: 40 },
+  username: { type: 'string', minLength: 1, maxLength: 120 },
 }),
   async (req, res) => {
   const authUserId = assertAuthUser(req);
@@ -3130,7 +3201,7 @@ app.post('/groups/remove-member',
   APIGateway.validateSchema({
   groupId: { required: true, type: 'number', integer: true, min: 1 },
   userId: { type: 'number', integer: true, min: 1 },
-  username: { type: 'string', minLength: 1, maxLength: 40 },
+  username: { type: 'string', minLength: 1, maxLength: 120 },
 }),
   async (req, res) => {
   const authUserId = assertAuthUser(req);
@@ -3191,7 +3262,7 @@ app.get('/groups/user/:userId', requireSameUserIdFromParam('userId'), async (req
 app.get('/profile/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   const db = getDB();
   const user = db
-    .prepare('SELECT id, public_uuid, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?')
+    .prepare(`SELECT id, public_uuid, username, ${displayNameSql()} AS display_name, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?`)
     .get(req.params.userId) as any;
 
   if (!user) return res.status(404).json({ error: 'User not found' });
@@ -3209,7 +3280,7 @@ app.get('/profile/public/:userId', async (req, res) => {
   const db = getDB();
 
   const user = db
-    .prepare('SELECT id, public_uuid, username, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?')
+    .prepare(`SELECT id, public_uuid, username, ${displayNameSql()} AS display_name, avatar_url, background_url, bio, fitness_goal, hobbies, selected_coach, enabled_coaches, timezone FROM users WHERE id = ?`)
     .get(targetUserId) as any;
 
   if (!user) {
@@ -3245,7 +3316,9 @@ app.get('/profile/public/:userId', async (req, res) => {
       friendship_status: friendshipStatus,
       profile: {
         id: user.id,
-        username: user.username,
+        username: user.display_name || user.username,
+        account_username: user.username,
+        display_name: user.display_name || user.username,
         avatar_url: avatarAsset?.visibility === 'public' ? mediaUrlForClient(req, user.avatar_url) : null,
         background_url: backgroundAsset?.visibility === 'public' ? mediaUrlForClient(req, user.background_url) : null,
         bio: null,
@@ -3284,6 +3357,8 @@ app.get('/profile/public/:userId', async (req, res) => {
     friendship_status: friendshipStatus,
     profile: {
       ...user,
+      username: user.display_name || user.username,
+      account_username: user.username,
       enabled_coaches: resolveEnabledCoachesForUser(targetUserId),
       avatar_url: mediaUrlForClient(req, user.avatar_url),
       background_url: mediaUrlForClient(req, user.background_url),
@@ -3295,6 +3370,7 @@ app.get('/profile/public/:userId', async (req, res) => {
 
 app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.validateSchema({
   userId: { required: true, type: 'number', integer: true, min: 1 },
+  display_name: { type: 'string', maxLength: 80 },
   avatar_url: { type: 'string', maxLength: 2048 },
   avatar_visibility: { type: 'string', minLength: 1, maxLength: 20 },
   background_url: { type: 'string', maxLength: 2048 },
@@ -3306,7 +3382,7 @@ app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.vali
 }), async (req, res) => {
   const db = getDB();
   const userId = toUserId(req.body.userId);
-  const { avatar_url, avatar_visibility, background_url, background_visibility, bio, fitness_goal, hobbies, timezone } = req.body;
+  const { display_name, avatar_url, avatar_visibility, background_url, background_visibility, bio, fitness_goal, hobbies, timezone } = req.body;
   const avatarVisibility = normalizeMediaVisibility(avatar_visibility, 'public');
   const backgroundVisibility = normalizeMediaVisibility(background_visibility, 'friends');
   const updates: string[] = [];
@@ -3339,6 +3415,14 @@ app.post('/profile/update', requireSameUserIdFromBody('userId'), APIGateway.vali
       updates.push('background_url = ?');
       values.push(safe.slice(0, 2048));
     }
+  }
+  if (display_name !== undefined) {
+    const normalizedDisplayName = sanitizePlainText(display_name, 80).replace(/\s+/g, ' ').trim();
+    if (!normalizedDisplayName) {
+      return res.status(400).json({ error: 'Display name cannot be empty' });
+    }
+    updates.push('display_name = ?');
+    values.push(normalizedDisplayName);
   }
   if (bio !== undefined) { updates.push('bio = ?'); values.push(String(bio).slice(0, 1000)); }
   if (fitness_goal !== undefined) { updates.push('fitness_goal = ?'); values.push(String(fitness_goal).slice(0, 200)); }
@@ -3846,7 +3930,7 @@ app.get('/health/leaderboard/:userId', requireSameUserIdFromParam('userId'), asy
 
   const placeholders = allUsers.map(() => '?').join(',');
   const leaderboard = db.prepare(`
-    SELECT u.id, u.username, u.avatar_url, h.steps, h.calories_burned
+    SELECT u.id, ${displayNameSql('u')} AS username, u.username AS account_username, ${displayNameSql('u')} AS display_name, u.avatar_url, h.steps, h.calories_burned
     FROM users u
     LEFT JOIN health_data h ON u.id = h.user_id AND h.date = ?
     WHERE u.id IN (${placeholders})

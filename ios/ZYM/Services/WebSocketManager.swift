@@ -8,6 +8,7 @@ struct SocketChatMessage: Codable {
     let content_b64: String?
     let created_at: String?
     let username: String?
+    let display_name: String?
     let avatar_url: String?
     let media_urls: [String]?
     let is_coach: Bool?
@@ -192,9 +193,10 @@ final class WebSocketManager: NSObject, ObservableObject, URLSessionWebSocketDel
             if let messagePayload = payload["message"] as? [String: Any],
                let messageData = try? JSONSerialization.data(withJSONObject: messagePayload),
                let message = try? JSONDecoder().decode(SocketChatMessage.self, from: messageData) {
-                let senderName = (message.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                                  ? message.username?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                  : nil)
+                let trimmedDisplayName = message.display_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedUsername = message.username?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let senderName = (trimmedDisplayName?.isEmpty == false ? trimmedDisplayName : nil)
+                    ?? (trimmedUsername?.isEmpty == false ? trimmedUsername : nil)
                     ?? ((message.is_coach ?? false) ? "Coach" : "New message")
                 let snippet = {
                     let text = String(message.decodedContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

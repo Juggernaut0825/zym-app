@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCoachRecords, selectCoach, updateCoachRecordProfile } from '@/lib/api';
 import { setCoach } from '@/lib/auth-storage';
+import { CoachAvatar, type CoachId } from '@/components/onboarding/CoachAvatar';
 import {
   activityLevelOptions,
   bodyFatRangeOptions,
@@ -21,8 +22,6 @@ import {
   trainingDayOptions,
 } from '@/lib/coach-profile-options';
 import type { CoachProfileData } from '@/lib/types';
-
-type CoachId = 'zj' | 'lc';
 
 interface SetupState {
   coach: CoachId | '';
@@ -44,28 +43,30 @@ interface WelcomeFlowProps {
   onComplete: (coach: CoachId) => void;
 }
 
-const totalSteps = 5;
+const totalSteps = 4;
 
 const coachCards = [
   {
     id: 'zj' as const,
     title: 'ZJ',
-    badge: 'Encouraging',
-    description: 'Thoughtful, supportive, and steady. Best when you want consistency without feeling judged.',
-    sample: 'I will help you keep momentum without overcomplicating your day.',
+    badge: 'Gentle encouragement',
+    description: 'Warm, supportive, and steady.',
+    sample: "I'll help you keep momentum without overcomplicating your day.",
     tone: 'rgba(105,121,247,0.12)',
-    border: 'rgba(105,121,247,0.18)',
-    ink: 'var(--coach-zj)',
+    border: 'rgba(105,121,247,0.3)',
+    ink: 'var(--coach-zj-ink)',
+    glow: '0 26px 58px rgba(105,121,247,0.18)',
   },
   {
     id: 'lc' as const,
     title: 'LC',
-    badge: 'Strict',
-    description: 'Direct, sharper, and more demanding. Best when you want structure and accountability.',
-    sample: 'I will push you to stop drifting and start executing.',
-    tone: 'rgba(242,138,58,0.12)',
-    border: 'rgba(242,138,58,0.18)',
-    ink: 'var(--coach-lc)',
+    badge: 'Tough accountability',
+    description: 'Direct, sharp, and demanding.',
+    sample: "I'll push you to stop drifting and start executing.",
+    tone: 'rgba(242,138,58,0.13)',
+    border: 'rgba(242,138,58,0.34)',
+    ink: 'var(--coach-lc-ink)',
+    glow: '0 26px 58px rgba(177,99,34,0.2)',
   },
 ];
 
@@ -95,13 +96,11 @@ function detectLocalTimezone(): string | undefined {
 function stepTitle(step: number): string {
   switch (step) {
     case 0:
-      return 'See what this turns into';
+      return 'Meet your coaches';
     case 1:
-      return 'Preview the outcome';
-    case 2:
       return 'Choose your coach';
-    case 3:
-      return 'Fill the basics';
+    case 2:
+      return 'Build your coach profile';
     default:
       return 'You are ready';
   }
@@ -110,15 +109,13 @@ function stepTitle(step: number): string {
 function stepSubtitle(step: number): string {
   switch (step) {
     case 0:
-      return 'A quick setup makes the first conversation feel guided instead of blank.';
+      return 'A quick hello from the two coaching styles inside ZYM.';
     case 1:
-      return 'ZYM works better when you know what kind of recipes, plans, and check-ins it can produce.';
+      return 'Pick the voice you want to hear when the day gets noisy.';
     case 2:
-      return 'Pick the coaching energy you want to hear every day.';
-    case 3:
-      return 'Tell the agent your height, weight, age, goal, and training context so it can personalize your output.';
+      return 'Give your coach enough context to make the first plan useful.';
     default:
-      return 'We will save this into your coach profile so meals, plans, and feedback feel tailored from the start.';
+      return 'Your coach profile is ready to guide meals, workouts, check-ins, and feedback.';
   }
 }
 
@@ -166,12 +163,34 @@ function buildSetupState(
   };
 }
 
+function selectedCoachOrDefault(coach: SetupState['coach'], fallback: CoachId | null): CoachId {
+  return coach || fallback || 'zj';
+}
+
+function coachProfilePrompt(state: SetupState): string {
+  const coach = selectedCoachOrDefault(state.coach, null);
+  if (state.trainingDays) {
+    return "I'll build your weekly structure around your available days.";
+  }
+  if (state.goal) {
+    return "Got it. I'll shape your plan around this goal.";
+  }
+  return coach === 'lc'
+    ? "Give me the basics. I'll use this to set your calories and training structure."
+    : "Let's set your baseline so I can guide you from the first reply.";
+}
+
+function summaryItem(label: string, value: string) {
+  return (
+    <div className="rounded-[18px] border border-slate-200/80 bg-white px-4 py-3">
+      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-800">{value || 'Not set'}</p>
+    </div>
+  );
+}
+
 export function WelcomeFlow(props: WelcomeFlowProps) {
-  const {
-    userId,
-    initialCoach,
-    onComplete,
-  } = props;
+  const { userId, initialCoach, onComplete } = props;
   const [step, setStep] = useState(0);
   const [loadingExisting, setLoadingExisting] = useState(true);
   const [pending, setPending] = useState(false);
@@ -179,6 +198,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   const [state, setState] = useState<SetupState>(buildSetupState(undefined, initialCoach));
 
   const progress = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
+  const selectedCoach = selectedCoachOrDefault(state.coach, initialCoach);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,15 +225,12 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     };
   }, [userId, initialCoach]);
 
-  const canContinue = (() => {
-    if (step === 2) return Boolean(state.coach);
-    return true;
-  })();
+  const canContinue = step !== 1 || Boolean(state.coach);
 
   async function handleFinish() {
     if (!state.coach) {
       setError('Choose a coach before finishing setup.');
-      setStep(2);
+      setStep(1);
       return;
     }
 
@@ -248,34 +265,30 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   const renderStep = () => {
     if (step === 0) {
       return (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,0.46fr)_minmax(0,0.54fr)]">
-          <section className="rounded-[28px] border border-white/70 bg-white/68 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">What people type</p>
-            <div className="mt-5 grid gap-3">
-              <div className="rounded-[22px] border border-[rgba(105,121,247,0.14)] bg-[rgba(105,121,247,0.08)] px-4 py-3 text-sm text-slate-700">
-                "I am 179 cm, 83 kg, want to cut, and train 4 days a week."
-              </div>
-              <div className="rounded-[22px] border border-[rgba(242,138,58,0.14)] bg-[rgba(242,138,58,0.08)] px-4 py-3 text-sm text-slate-700">
-                "Can you help me plan meals and tell me what to train today?"
-              </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
+            <CoachAvatar
+              coach="zj"
+              state="talking"
+              size={112}
+              showBubble
+              bubbleText="I'm ZJ. I'll help you stay consistent without making fitness feel overwhelming."
+            />
+            <div className="mt-5 rounded-[22px] border border-[rgba(105,121,247,0.14)] bg-[rgba(105,121,247,0.07)] px-4 py-4 text-sm leading-7 text-slate-700">
+              Tell us your goal, schedule, meals, and training context.
             </div>
           </section>
 
-          <section className="rounded-[28px] border border-white/70 bg-white/68 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">What you get back</p>
-            <div className="mt-5 grid gap-4">
-              <div className="rounded-[22px] border border-[rgba(105,121,247,0.14)] bg-white px-4 py-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[color:var(--coach-zj)]">Meal guidance</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">Protein target, calorie direction, and a believable meal structure for the day.</p>
-              </div>
-              <div className="rounded-[22px] border border-[rgba(242,138,58,0.14)] bg-white px-4 py-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[color:var(--coach-lc)]">Training plan</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">A structured list of exercises with sets, reps, rest time, and built-in movement demos.</p>
-              </div>
-              <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Follow-up coaching</p>
-                <p className="mt-2 text-sm leading-7 text-slate-700">Sharper advice because the coach already knows your baseline and goal.</p>
-              </div>
+          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
+            <CoachAvatar
+              coach="lc"
+              state="talking"
+              size={112}
+              showBubble
+              bubbleText="I'm LC. I'll keep you accountable and push you when you start drifting."
+            />
+            <div className="mt-5 rounded-[22px] border border-[rgba(242,138,58,0.16)] bg-[rgba(242,138,58,0.08)] px-4 py-4 text-sm font-medium leading-7 text-slate-800">
+              Then we turn that into daily meals, workouts, check-ins, and feedback.
             </div>
           </section>
         </div>
@@ -283,34 +296,6 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     }
 
     if (step === 1) {
-      return (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,0.52fr)]">
-          <section className="rounded-[28px] border border-white/70 bg-white/68 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Input example</p>
-            <div className="mt-5 rounded-[24px] border border-[rgba(242,138,58,0.14)] bg-[rgba(242,138,58,0.08)] px-5 py-5 text-sm text-slate-700">
-              I want a simple upper-body workout for today. I am trying to cut, my shoulders are a little uneven, and I do not want a huge complicated plan.
-            </div>
-          </section>
-          <section className="rounded-[28px] border border-white/70 bg-white/68 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Output example</p>
-            <div className="mt-5 rounded-[24px] border border-[rgba(105,121,247,0.14)] bg-white px-5 py-5">
-              <p className="text-sm font-semibold text-slate-900">Upper A</p>
-              <ol className="mt-4 space-y-3 text-sm text-slate-700">
-                <li>1. Incline dumbbell press · 4 sets · 8 reps · 90 sec rest</li>
-                <li>2. Chest-supported row · 4 sets · 10 reps · 75 sec rest</li>
-                <li>3. Cable lateral raise · 3 sets · 12 reps · 60 sec rest</li>
-                <li>4. One-arm dumbbell shoulder press · 3 sets · 8 reps each side · 75 sec rest</li>
-              </ol>
-              <p className="mt-4 text-xs leading-6 text-slate-500">
-                The same setup also helps meals, recovery guidance, progress summaries, and coach memory.
-              </p>
-            </div>
-          </section>
-        </div>
-      );
-    }
-
-    if (step === 2) {
       return (
         <div className="grid gap-4 lg:grid-cols-2">
           {coachCards.map((card) => {
@@ -320,22 +305,31 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 key={card.id}
                 type="button"
                 onClick={() => setState((prev) => ({ ...prev, coach: card.id }))}
-                className="rounded-[28px] border p-6 text-left transition"
+                className={`rounded-[28px] border p-5 text-left transition duration-300 sm:p-6 ${
+                  active ? (card.id === 'lc' ? 'scale-[1.012]' : 'scale-[1.008]') : 'hover:scale-[1.004]'
+                }`}
                 style={{
-                  background: active ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.72)',
-                  borderColor: active ? card.border : 'rgba(255,255,255,0.6)',
-                  boxShadow: active ? '0 24px 50px rgba(59,49,40,0.12)' : '0 16px 34px rgba(59,49,40,0.06)',
+                  background: active ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.72)',
+                  borderColor: active ? card.border : 'rgba(255,255,255,0.65)',
+                  boxShadow: active ? card.glow : '0 16px 34px rgba(59,49,40,0.06)',
                 }}
               >
-                <div
-                  className="inline-flex rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em]"
-                  style={{ background: card.tone, color: card.ink }}
-                >
-                  {card.badge}
+                <div className="flex items-start gap-4">
+                  <CoachAvatar coach={card.id} state={active ? 'selected' : 'idle'} size={82} />
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="inline-flex rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+                      style={{ background: card.tone, color: card.ink }}
+                    >
+                      {card.badge}
+                    </div>
+                    <h2 className="mt-4 text-3xl font-bold text-slate-900">{card.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{card.description}</p>
+                  </div>
                 </div>
-                <h2 className="mt-5 text-3xl font-bold text-slate-900">{card.title}</h2>
-                <p className="mt-3 text-sm leading-7 text-slate-700">{card.description}</p>
-                <p className="mt-4 text-sm font-semibold leading-7" style={{ color: card.ink }}>{card.sample}</p>
+                <p className="mt-5 rounded-[20px] bg-white/80 px-4 py-3 text-sm font-semibold leading-7" style={{ color: card.ink }}>
+                  {card.sample}
+                </p>
               </button>
             );
           })}
@@ -343,11 +337,21 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
       );
     }
 
-    if (step === 3) {
+    if (step === 2) {
       return (
         <div className="grid gap-6">
-          <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-            <div className="grid gap-3 sm:grid-cols-3">
+          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <CoachAvatar
+                coach={selectedCoach}
+                state={state.goal || state.trainingDays ? 'talking' : 'idle'}
+                size={92}
+                showBubble
+                bubbleText={coachProfilePrompt(state)}
+              />
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <input className="input-shell" placeholder="Height" value={state.height} onChange={(event) => setState((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))} />
               <input className="input-shell" placeholder="Weight" value={state.weight} onChange={(event) => setState((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))} />
               <input className="input-shell" inputMode="numeric" placeholder="Age" value={state.age} onChange={(event) => setState((prev) => ({ ...prev, age: event.target.value.slice(0, 3) }))} />
@@ -382,7 +386,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
 
             <textarea
               className="input-shell mt-4 min-h-[120px] resize-none"
-              placeholder="Optional notes: injuries, sport focus, schedule, food preferences..."
+              placeholder="Extra notes: injuries, sport focus, schedule, food preferences..."
               value={state.notes}
               onChange={(event) => setState((prev) => ({ ...prev, notes: event.target.value.slice(0, 1200) }))}
             />
@@ -391,27 +395,33 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
       );
     }
 
+    const readyLine = selectedCoach === 'lc'
+      ? 'Profile saved. Now stop guessing and start executing.'
+      : "You're ready. I'll help you build this step by step.";
+
     return (
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.56fr)_minmax(0,0.44fr)]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Saved context</p>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Coach: {state.coach ? state.coach.toUpperCase() : 'Not selected'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Goal: {state.goal ? optionLabelForValue(goalOptions, state.goal) : 'Not set'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Height: {state.height || 'Not set'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Weight: {state.weight || 'Not set'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Age: {state.age || 'Not set'}</div>
-            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">Experience: {state.experienceLevel ? optionLabelForValue(experienceLevelOptions, state.experienceLevel) : 'Not set'}</div>
-          </div>
+          <CoachAvatar coach={selectedCoach} state="celebrate" size={126} showBubble bubbleText={readyLine} />
         </section>
 
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">What happens next</p>
-          <div className="mt-5 space-y-3 text-sm leading-7 text-slate-700">
-            <p>Tell the agent your height, weight, age, goals, injuries, food preferences, or sport focus so it knows you better from the first reply.</p>
-            <p>The coach can now shape meal feedback, recipes, and training plans around the profile you just saved.</p>
-            <p>If you want, you can still edit all of this later inside the coach conversation, including progress check-ins.</p>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Coach profile card</p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {summaryItem('Coach', state.coach ? state.coach.toUpperCase() : 'Not selected')}
+            {summaryItem('Goal', state.goal ? optionLabelForValue(goalOptions, state.goal) : '')}
+            {summaryItem('Height', state.height)}
+            {summaryItem('Weight', state.weight)}
+            {summaryItem('Age', state.age)}
+            {summaryItem('Training days', state.trainingDays ? optionLabelForValue(trainingDayOptions, state.trainingDays) : '')}
+            {summaryItem('Activity', state.activityLevel ? optionLabelForValue(activityLevelOptions, state.activityLevel) : '')}
+            {summaryItem('Experience', state.experienceLevel ? optionLabelForValue(experienceLevelOptions, state.experienceLevel) : '')}
           </div>
+          {state.notes.trim() ? (
+            <div className="mt-3 rounded-[18px] border border-slate-200/80 bg-white px-4 py-3 text-sm leading-7 text-slate-700">
+              {state.notes.trim()}
+            </div>
+          ) : null}
         </section>
       </div>
     );
@@ -419,12 +429,12 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
 
   return (
     <div className="relative min-h-dvh overflow-x-hidden bg-white px-4 py-6 sm:px-6 sm:py-8">
-      <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col">
+      <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] w-full max-w-6xl flex-col pb-24 md:pb-0">
         <div className="mx-auto w-full max-w-4xl">
-          <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Welcome setup</p>
-              <h1 className="mt-3 text-[clamp(2.2rem,5vw,4rem)] font-bold leading-[0.98] text-slate-900">{stepTitle(step)}</h1>
+              <h1 className="mt-3 text-[clamp(2.1rem,5vw,4rem)] font-bold leading-[0.98] text-slate-900">{stepTitle(step)}</h1>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--ink-500)] sm:text-base">{stepSubtitle(step)}</p>
             </div>
             <div className="rounded-full border border-white/70 bg-white/68 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
@@ -432,7 +442,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
             </div>
           </div>
 
-          <div className="mb-8 h-2 overflow-hidden rounded-full bg-white/60">
+          <div className="mb-8 h-2 overflow-hidden rounded-full bg-slate-100/80">
             <div
               className="h-full rounded-full transition-all duration-300"
               style={{
@@ -468,7 +478,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 className="btn btn-primary"
                 onClick={() => {
                   if (!canContinue) {
-                    setError('Finish this step before continuing.');
+                    setError('Choose a coach before continuing.');
                     return;
                   }
                   setError('');

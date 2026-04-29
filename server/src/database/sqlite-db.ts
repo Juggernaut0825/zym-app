@@ -230,6 +230,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
+      display_name TEXT,
       email TEXT UNIQUE,
       password_hash TEXT,
       email_verified_at DATETIME,
@@ -424,6 +425,16 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       PRIMARY KEY (user_id, topic)
     );
 
+    CREATE TABLE IF NOT EXISTS push_device_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'ios',
+      device_token TEXT NOT NULL UNIQUE,
+      environment TEXT NOT NULL DEFAULT 'production',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS coach_outreach_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -545,6 +556,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   if (!userColumns.some((column) => column.name === 'connect_code')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN connect_code TEXT');
   }
+  if (!userColumns.some((column) => column.name === 'display_name')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+  }
   if (!userColumns.some((column) => column.name === 'timezone')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN timezone TEXT');
   }
@@ -646,6 +660,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_activity_notifications_user_read ON activity_notifications(user_id, is_read, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_activity_notifications_topic ON activity_notifications(topic, created_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_conversation_notification_settings_user_muted ON conversation_notification_settings(user_id, muted, updated_at DESC)');
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_push_device_tokens_user ON push_device_tokens(user_id, platform, last_seen_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_user_sent ON coach_outreach_events(user_id, sent_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_coach_outreach_events_trigger_day ON coach_outreach_events(trigger_type, local_day, sent_at DESC)');
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_abuse_reports_reporter ON abuse_reports(reporter_user_id, created_at DESC)');
@@ -707,6 +722,16 @@ function ensureUserPublicUuids(runtimeDb: RuntimeDatabase): void {
   }
 }
 
+function ensureUserDisplayNames(runtimeDb: RuntimeDatabase): void {
+  runtimeDb
+    .prepare(`
+      UPDATE users
+      SET display_name = username
+      WHERE display_name IS NULL OR TRIM(display_name) = ''
+    `)
+    .run();
+}
+
 export async function initDB(): Promise<void> {
   if (db) {
     return;
@@ -726,6 +751,7 @@ export async function initDB(): Promise<void> {
     db = new PostgresDatabaseAdapter(postgresBridge);
     ensureConnectCodes(db);
     ensureUserPublicUuids(db);
+    ensureUserDisplayNames(db);
     return;
   }
 
@@ -734,6 +760,7 @@ export async function initDB(): Promise<void> {
   db = new SqliteDatabaseAdapter(sqlite);
   ensureConnectCodes(db);
   ensureUserPublicUuids(db);
+  ensureUserDisplayNames(db);
 }
 
 export function getDB(): RuntimeDatabase {

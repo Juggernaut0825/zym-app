@@ -75,8 +75,23 @@ function sanitizeUsernameSeed(value: string): string {
   return `${sliced || 'zym'}user`.slice(0, 32);
 }
 
+function normalizeDisplayName(value: unknown, fallback: string): string {
+  const displayName = String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (displayName) return displayName;
+  return String(fallback || 'ZYM User').trim().replace(/\s+/g, ' ').slice(0, 80) || 'ZYM User';
+}
+
 function createPublicUuid(): string {
   return `uuid_${crypto.randomUUID().replace(/-/g, '')}`;
+}
+
+function displayNameFromPublicUuid(publicUuid: string): string {
+  const suffix = String(publicUuid || '')
+    .replace(/^uuid_/, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 6)
+    || crypto.randomBytes(3).toString('hex');
+  return `zymuser_${suffix.toLowerCase()}`;
 }
 
 function issueUniquePublicUuid(): string {
@@ -165,11 +180,29 @@ export class AuthService {
   ) {
     const hash = await bcrypt.hash(password, 10);
     const normalizedEmail = normalizeEmail(email);
+    const normalizedUsername = String(username || '').trim();
+    if (!normalizedUsername) {
+      throw new Error('Username is required');
+    }
     const db = getDB();
+    const usernameTaken = db
+      .prepare('SELECT id FROM users WHERE lower(username) = ? LIMIT 1')
+      .get(normalizedUsername.toLowerCase());
+    if (usernameTaken) {
+      throw new Error('Username already exists');
+    }
+    if (normalizedEmail) {
+      const emailTaken = db
+        .prepare('SELECT id FROM users WHERE lower(email) = ? LIMIT 1')
+        .get(normalizedEmail);
+      if (emailTaken) {
+        throw new Error('Email already exists');
+      }
+    }
     const publicUuid = issueUniquePublicUuid();
     const result = db
-      .prepare('INSERT INTO users (username, email, password_hash, selected_coach, public_uuid) VALUES (?, ?, ?, NULL, ?)')
-      .run(username, normalizedEmail, hash, publicUuid);
+      .prepare('INSERT INTO users (username, display_name, email, password_hash, selected_coach, public_uuid) VALUES (?, ?, ?, ?, NULL, ?)')
+      .run(normalizedUsername, normalizeDisplayName(normalizedUsername, normalizedUsername), normalizedEmail, hash, publicUuid);
 
     const userId = Number(result.lastInsertRowid || 0);
     if (userId > 0 && options?.healthDisclaimerAccepted) {
@@ -509,7 +542,7 @@ export class AuthService {
 
     const db = getDB();
     let user = db.prepare(`
-      SELECT id, username, email, email_verified_at, google_sub
+      SELECT id, username, display_name, email, email_verified_at, google_sub, public_uuid
       FROM users
       WHERE google_sub = ?
       LIMIT 1
@@ -517,7 +550,7 @@ export class AuthService {
 
     if (!user) {
       user = db.prepare(`
-        SELECT id, username, email, email_verified_at, google_sub
+        SELECT id, username, display_name, email, email_verified_at, google_sub, public_uuid
         FROM users
         WHERE lower(email) = ?
         LIMIT 1
@@ -528,12 +561,12 @@ export class AuthService {
       if (!context.healthDisclaimerAccepted) {
         throw new Error('Please confirm the health disclaimer before continuing with Google.');
       }
-      const username = this.generateUniqueUsername(identity.name || identity.email.split('@')[0] || 'zymuser');
       const publicUuid = issueUniquePublicUuid();
+      const displayName = displayNameFromPublicUuid(publicUuid);
       const result = db.prepare(`
-        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, google_sub, public_uuid)
-        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
-      `).run(username, identity.email, identity.sub, publicUuid);
+        INSERT INTO users (username, display_name, email, password_hash, email_verified_at, selected_coach, google_sub, public_uuid)
+        VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
+      `).run(identity.email, displayName, identity.email, identity.sub, publicUuid);
       const userId = Number(result.lastInsertRowid || 0);
       if (userId > 0) {
         db.prepare(`
@@ -548,7 +581,7 @@ export class AuthService {
         );
       }
       user = db.prepare(`
-        SELECT id, username, email, email_verified_at, google_sub
+        SELECT id, username, display_name, email, email_verified_at, google_sub, public_uuid
         FROM users
         WHERE id = ?
       `).get(userId) as any;
@@ -566,6 +599,19 @@ export class AuthService {
       }
       if (!isEmailVerified(user.email_verified_at)) {
         updates.push('email_verified_at = CURRENT_TIMESTAMP');
+      }
+      if (!String(user.display_name || '').trim()) {
+        updates.push('display_name = ?');
+        params.push(displayNameFromPublicUuid(String(user.public_uuid || '')));
+      }
+      if (identity.email && String(user.username || '').trim().toLowerCase() !== identity.email) {
+        const usernameOwner = db
+          .prepare('SELECT id FROM users WHERE lower(username) = ? AND id != ? LIMIT 1')
+          .get(identity.email, Number(user.id || 0)) as { id?: number } | undefined;
+        if (!usernameOwner?.id) {
+          updates.push('username = ?');
+          params.push(identity.email);
+        }
       }
 
       if (updates.length > 0) {
@@ -591,7 +637,7 @@ export class AuthService {
     const db = getDB();
 
     let user = db.prepare(`
-      SELECT id, username, email, email_verified_at, apple_sub
+      SELECT id, username, display_name, email, email_verified_at, apple_sub, public_uuid
       FROM users
       WHERE apple_sub = ?
       LIMIT 1
@@ -599,7 +645,7 @@ export class AuthService {
 
     if (!user && identity.email) {
       user = db.prepare(`
-        SELECT id, username, email, email_verified_at, apple_sub
+        SELECT id, username, display_name, email, email_verified_at, apple_sub, public_uuid
         FROM users
         WHERE lower(email) = ?
         LIMIT 1
@@ -613,13 +659,12 @@ export class AuthService {
       if (!identity.email) {
         throw new Error('Apple sign-in did not include an email. Try again and choose to share your email.');
       }
-      const usernameSeed = context.fullName || identity.email.split('@')[0] || 'zymuser';
-      const username = this.generateUniqueUsername(usernameSeed);
       const publicUuid = issueUniquePublicUuid();
+      const displayName = displayNameFromPublicUuid(publicUuid);
       const result = db.prepare(`
-        INSERT INTO users (username, email, password_hash, email_verified_at, selected_coach, apple_sub, public_uuid)
-        VALUES (?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
-      `).run(username, identity.email, identity.sub, publicUuid);
+        INSERT INTO users (username, display_name, email, password_hash, email_verified_at, selected_coach, apple_sub, public_uuid)
+        VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, ?)
+      `).run(identity.email, displayName, identity.email, identity.sub, publicUuid);
       const userId = Number(result.lastInsertRowid || 0);
       if (userId > 0) {
         db.prepare(`
@@ -634,7 +679,7 @@ export class AuthService {
         );
       }
       user = db.prepare(`
-        SELECT id, username, email, email_verified_at, apple_sub
+        SELECT id, username, display_name, email, email_verified_at, apple_sub, public_uuid
         FROM users
         WHERE id = ?
       `).get(userId) as any;
@@ -657,6 +702,19 @@ export class AuthService {
       }
       if (identity.emailVerified && !isEmailVerified(user.email_verified_at)) {
         updates.push('email_verified_at = CURRENT_TIMESTAMP');
+      }
+      if (!String(user.display_name || '').trim()) {
+        updates.push('display_name = ?');
+        params.push(displayNameFromPublicUuid(String(user.public_uuid || '')));
+      }
+      if (identity.email && String(user.username || '').trim().toLowerCase() !== identity.email) {
+        const usernameOwner = db
+          .prepare('SELECT id FROM users WHERE lower(username) = ? AND id != ? LIMIT 1')
+          .get(identity.email, Number(user.id || 0)) as { id?: number } | undefined;
+        if (!usernameOwner?.id) {
+          updates.push('username = ?');
+          params.push(identity.email);
+        }
       }
 
       if (updates.length > 0) {

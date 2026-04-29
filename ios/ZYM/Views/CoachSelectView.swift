@@ -175,20 +175,8 @@ private struct CoachSelectionCard: View {
                     )
                     .clipShape(Capsule())
 
-                ZStack {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.zymCoachAccent(coach), Color.zymCoachAccentDark(coach)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 52, height: 52)
-                    Text(tag)
-                        .font(.custom("Syne", size: 22))
-                        .foregroundColor(.white)
-                }
+                CoachAvatar(coach: coach, state: selected ? .selected : .idle, size: 56)
+                    .frame(width: 56, height: 56)
 
                 Text(title)
                     .font(.custom("Syne", size: 22))

@@ -73,7 +73,11 @@ export class CommunityService {
 
   static getFeed(userId: number) {
     const posts = getDB().prepare(`
-      SELECT p.*, u.username, u.avatar_url,
+      SELECT p.*,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS username,
+        u.username AS account_username,
+        COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+        u.avatar_url,
         (SELECT COUNT(*) FROM post_reactions WHERE post_id = p.id) as reaction_count,
         (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) as comment_count,
         CASE
@@ -161,7 +165,11 @@ export class CommunityService {
   static getComments(postId: number) {
     return getDB()
       .prepare(`
-        SELECT pc.id, pc.post_id, pc.user_id, pc.content, pc.created_at, u.username, u.avatar_url
+        SELECT pc.id, pc.post_id, pc.user_id, pc.content, pc.created_at,
+          COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS username,
+          u.username AS account_username,
+          COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS display_name,
+          u.avatar_url
         FROM post_comments pc
         JOIN users u ON u.id = pc.user_id
         WHERE pc.post_id = ?
@@ -173,6 +181,7 @@ export class CommunityService {
         post_id: Number(row.post_id),
         user_id: Number(row.user_id),
         username: String(row.username || ''),
+        display_name: String(row.display_name || row.username || ''),
         avatar_url: row.avatar_url || null,
         content: String(row.content || ''),
         created_at: String(row.created_at || ''),
