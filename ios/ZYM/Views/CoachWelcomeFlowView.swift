@@ -3,7 +3,9 @@ import SwiftUI
 private struct CoachWelcomeSetupState {
     var coach = ""
     var height = ""
+    var heightUnit = "cm"
     var weight = ""
+    var weightUnit = "kg"
     var age = ""
     var bodyFatRange = ""
     var trainingDays = ""
@@ -50,20 +52,34 @@ enum CoachBubbleTailDirection {
     case none
 }
 
+private struct CoachUnitOption: Identifiable {
+    let value: String
+    let label: String
+    var id: String { value }
+}
+
+private let coachHeightUnitOptions = [
+    CoachUnitOption(value: "cm", label: "cm"),
+    CoachUnitOption(value: "ft_in", label: "ft/in"),
+]
+
+private let coachWeightUnitOptions = [
+    CoachUnitOption(value: "kg", label: "kg"),
+    CoachUnitOption(value: "lb", label: "lb"),
+]
+
 private struct CoachArtConfig {
     let id: String
     let name: String
     let heroImageName: String
-    let faceCenterX: CGFloat
-    let faceCenterY: CGFloat
-    let zoom: CGFloat
+    let avatarImageName: String
 }
 
 private func coachArt(_ coach: String) -> CoachArtConfig {
     if coach == "lc" {
-        return CoachArtConfig(id: "lc", name: "LC", heroImageName: "CoachLCHero", faceCenterX: 0.5, faceCenterY: 0.38, zoom: 2.08)
+        return CoachArtConfig(id: "lc", name: "LC", heroImageName: "CoachLCHero", avatarImageName: "CoachLCAvatar")
     }
-    return CoachArtConfig(id: "zj", name: "ZJ", heroImageName: "CoachZJHero", faceCenterX: 0.5, faceCenterY: 0.38, zoom: 2.08)
+    return CoachArtConfig(id: "zj", name: "ZJ", heroImageName: "CoachZJHero", avatarImageName: "CoachZJAvatar")
 }
 
 struct CoachAvatar: View {
@@ -132,14 +148,10 @@ struct CoachAvatar: View {
             Circle()
                 .fill(Color.white)
                 .overlay(
-                    Image(art.heroImageName)
+                    Image(art.avatarImageName)
                         .resizable()
-                        .scaledToFit()
-                        .scaleEffect(art.zoom)
-                        .offset(
-                            x: (0.5 - art.faceCenterX) * size * art.zoom,
-                            y: (0.5 - art.faceCenterY) * size * art.zoom
-                        )
+                        .scaledToFill()
+                        .frame(width: size, height: size)
                 )
                 .clipShape(Circle())
                 .overlay(
@@ -154,7 +166,8 @@ struct CoachAvatar: View {
             Image(art.heroImageName)
                 .resizable()
                 .scaledToFit()
-                .frame(width: size, height: size)
+                .frame(width: size, height: size * 1.35)
+                .blendMode(.multiply)
                 .scaleEffect(scale)
                 .offset(y: yOffset)
                 .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.24 : 0.12), radius: size * 0.1, x: 0, y: size * 0.06)
@@ -237,28 +250,14 @@ struct CoachSpeechBubble: View {
             .padding(.vertical, 12)
             .frame(maxWidth: 270, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                CoachSpeechBubbleShape(tailDirection: tailDirection, cornerRadius: 20)
                     .fill(fill)
                     .shadow(color: Color.black.opacity(0.06), radius: 16, x: 0, y: 9)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                CoachSpeechBubbleShape(tailDirection: tailDirection, cornerRadius: 20)
                     .stroke(stroke, lineWidth: 1)
             )
-            .overlay(alignment: tailAlignment) {
-                if tailDirection != .none {
-                    CoachBubbleTail()
-                        .fill(fill)
-                        .frame(width: 18, height: 18)
-                        .rotationEffect(.degrees(tailRotation))
-                        .overlay(
-                            CoachBubbleTail()
-                                .stroke(stroke, lineWidth: 1)
-                                .rotationEffect(.degrees(tailRotation))
-                        )
-                        .offset(tailOffset)
-                }
-            }
             .frame(maxWidth: .infinity, alignment: frameAlignment)
     }
 
@@ -270,43 +269,57 @@ struct CoachSpeechBubble: View {
         }
     }
 
-    private var tailAlignment: Alignment {
-        switch tailDirection {
-        case .left: return .leading
-        case .right: return .trailing
-        case .topLeft: return .topLeading
-        case .topRight: return .topTrailing
-        case .none: return .center
-        }
-    }
-
-    private var tailRotation: Double {
-        switch tailDirection {
-        case .left: return 45
-        case .right: return 225
-        case .topLeft, .topRight: return 135
-        case .none: return 0
-        }
-    }
-
-    private var tailOffset: CGSize {
-        switch tailDirection {
-        case .left: return CGSize(width: -8, height: 0)
-        case .right: return CGSize(width: 8, height: 0)
-        case .topLeft: return CGSize(width: 22, height: -8)
-        case .topRight: return CGSize(width: -22, height: -8)
-        case .none: return .zero
-        }
-    }
 }
 
-private struct CoachBubbleTail: Shape {
+private struct CoachSpeechBubbleShape: Shape {
+    let tailDirection: CoachBubbleTailDirection
+    let cornerRadius: CGFloat
+
     func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
+        let tailWidth: CGFloat = tailDirection == .none ? 0 : 13
+        var bubbleRect = rect
+        switch tailDirection {
+        case .left:
+            bubbleRect.origin.x += tailWidth
+            bubbleRect.size.width -= tailWidth
+        case .right:
+            bubbleRect.size.width -= tailWidth
+        case .topLeft, .topRight:
+            bubbleRect.origin.y += tailWidth
+            bubbleRect.size.height -= tailWidth
+        case .none:
+            break
+        }
+
+        var path = Path(roundedRect: bubbleRect, cornerRadius: cornerRadius)
+        switch tailDirection {
+        case .left:
+            let centerY = bubbleRect.midY
+            path.move(to: CGPoint(x: bubbleRect.minX + 1, y: centerY - 10))
+            path.addLine(to: CGPoint(x: rect.minX, y: centerY))
+            path.addLine(to: CGPoint(x: bubbleRect.minX + 1, y: centerY + 10))
+            path.closeSubpath()
+        case .right:
+            let centerY = bubbleRect.midY
+            path.move(to: CGPoint(x: bubbleRect.maxX - 1, y: centerY - 10))
+            path.addLine(to: CGPoint(x: rect.maxX, y: centerY))
+            path.addLine(to: CGPoint(x: bubbleRect.maxX - 1, y: centerY + 10))
+            path.closeSubpath()
+        case .topLeft:
+            let anchorX = bubbleRect.minX + 34
+            path.move(to: CGPoint(x: anchorX - 11, y: bubbleRect.minY + 1))
+            path.addLine(to: CGPoint(x: anchorX, y: rect.minY))
+            path.addLine(to: CGPoint(x: anchorX + 11, y: bubbleRect.minY + 1))
+            path.closeSubpath()
+        case .topRight:
+            let anchorX = bubbleRect.maxX - 34
+            path.move(to: CGPoint(x: anchorX - 11, y: bubbleRect.minY + 1))
+            path.addLine(to: CGPoint(x: anchorX, y: rect.minY))
+            path.addLine(to: CGPoint(x: anchorX + 11, y: bubbleRect.minY + 1))
+            path.closeSubpath()
+        case .none:
+            break
+        }
         return path
     }
 }
@@ -543,8 +556,24 @@ struct CoachWelcomeFlowView: View {
             )
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                welcomeInputField("Height", text: $state.height, keyboard: .decimalPad, unit: "cm")
-                welcomeInputField("Weight", text: $state.weight, keyboard: .decimalPad, unit: "kg")
+                welcomeMeasurementField(
+                    "Height",
+                    text: $state.height,
+                    unit: $state.heightUnit,
+                    options: coachHeightUnitOptions,
+                    placeholder: state.heightUnit == "cm" ? "180" : "5'11\"",
+                    keyboard: state.heightUnit == "cm" ? .decimalPad : .default,
+                    suffix: state.heightUnit == "cm" ? "cm" : "ft/in"
+                )
+                welcomeMeasurementField(
+                    "Weight",
+                    text: $state.weight,
+                    unit: $state.weightUnit,
+                    options: coachWeightUnitOptions,
+                    placeholder: state.weightUnit == "kg" ? "81.5" : "180",
+                    keyboard: .decimalPad,
+                    suffix: state.weightUnit
+                )
                 welcomeInputField("Age", text: $state.age, keyboard: .numberPad, unit: "years")
                 welcomeMenu("Gender", selection: $state.gender, options: coachGenderOptions)
                 welcomeMenu("Body fat range", selection: $state.bodyFatRange, options: coachBodyFatRangeOptions.map {
@@ -555,17 +584,35 @@ struct CoachWelcomeFlowView: View {
                 welcomeMenu("Experience level", selection: $state.experienceLevel, options: coachExperienceLevelOptions)
             }
 
-            welcomeInputField("Goal, in your own words", text: $state.goal, keyboard: .default)
+            welcomeInputField("Goal", text: $state.goal, keyboard: .default, placeholder: "Maintain strength while leaning out")
 
-            TextEditor(text: $state.notes)
-                .frame(minHeight: 110)
-                .padding(10)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("EXTRA NOTES")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+
+                ZStack(alignment: .topLeading) {
+                    if state.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Injuries, sport focus, schedule, food preferences...")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.zymSubtext.opacity(0.78))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                    }
+
+                    TextEditor(text: $state.notes)
+                        .frame(minHeight: 110)
+                        .padding(10)
+                        .scrollContentBackground(.hidden)
+                }
                 .background(Color.white.opacity(0.82))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Color.zymLine, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
         }
         .zymCard()
     }
@@ -593,8 +640,8 @@ struct CoachWelcomeFlowView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     readySummaryTile("Coach", state.coach.isEmpty ? "Not selected" : state.coach.uppercased())
                     readySummaryTile("Goal", state.goal)
-                    readySummaryTile("Height", state.height.isEmpty ? "" : "\(state.height) cm")
-                    readySummaryTile("Weight", state.weight.isEmpty ? "" : "\(state.weight) kg")
+                    readySummaryTile("Height", coachWelcomeHeightDisplay(state.height, unit: state.heightUnit))
+                    readySummaryTile("Weight", coachWelcomeWeightDisplay(state.weight, unit: state.weightUnit))
                     readySummaryTile("Age", state.age.isEmpty ? "" : "\(state.age) years")
                     readySummaryTile("Training days", optionLabel(state.trainingDays, options: coachTrainingDayOptions))
                     readySummaryTile("Activity", optionLabel(state.activityLevel, options: coachActivityLevelOptions))
@@ -714,7 +761,46 @@ struct CoachWelcomeFlowView: View {
         .buttonStyle(.plain)
     }
 
-    private func welcomeInputField(_ placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, unit: String? = nil) -> some View {
+    private func welcomeMeasurementField(
+        _ label: String,
+        text: Binding<String>,
+        unit: Binding<String>,
+        options: [CoachUnitOption],
+        placeholder: String,
+        keyboard: UIKeyboardType,
+        suffix: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(label.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                Spacer(minLength: 6)
+                Picker("", selection: unit) {
+                    ForEach(options) { option in
+                        Text(option.label).tag(option.value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: label == "Height" ? 114 : 90)
+            }
+
+            welcomeInputBody(placeholder: placeholder, text: text, keyboard: keyboard, unit: suffix)
+        }
+    }
+
+    private func welcomeInputField(_ label: String, text: Binding<String>, keyboard: UIKeyboardType, placeholder: String? = nil, unit: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.1)
+                .foregroundColor(Color.zymSubtext)
+            welcomeInputBody(placeholder: placeholder ?? label, text: text, keyboard: keyboard, unit: unit)
+        }
+    }
+
+    private func welcomeInputBody(placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, unit: String? = nil) -> some View {
         ZStack(alignment: .trailing) {
             TextField(placeholder, text: text)
                 .keyboardType(keyboard)
@@ -737,34 +823,41 @@ struct CoachWelcomeFlowView: View {
     }
 
     private func welcomeMenu(_ label: String, selection: Binding<String>, options: [CoachOption]) -> some View {
-        Menu {
-            Button("Not set") {
-                selection.wrappedValue = ""
-            }
-            ForEach(options) { option in
-                Button(option.label) {
-                    selection.wrappedValue = option.value
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.1)
+                .foregroundColor(Color.zymSubtext)
+
+            Menu {
+                Button("Not set") {
+                    selection.wrappedValue = ""
                 }
+                ForEach(options) { option in
+                    Button(option.label) {
+                        selection.wrappedValue = option.value
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(selection.wrappedValue.isEmpty ? "Select \(label.lowercased())" : (options.first(where: { $0.value == selection.wrappedValue })?.label ?? selection.wrappedValue))
+                        .font(.system(size: 13))
+                        .foregroundColor(selection.wrappedValue.isEmpty ? Color.zymSubtext : Color.zymText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.zymSubtext)
+                }
+                .padding(12)
+                .background(Color.white.opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.zymLine, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-        } label: {
-            HStack {
-                Text(selection.wrappedValue.isEmpty ? label : (options.first(where: { $0.value == selection.wrappedValue })?.label ?? selection.wrappedValue))
-                    .font(.system(size: 13))
-                    .foregroundColor(selection.wrappedValue.isEmpty ? Color.zymSubtext : Color.zymText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                Spacer(minLength: 6)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(Color.zymSubtext)
-            }
-            .padding(12)
-            .background(Color.white.opacity(0.82))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.zymLine, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 
@@ -800,10 +893,14 @@ struct CoachWelcomeFlowView: View {
             DispatchQueue.main.async {
                 loadingExisting = false
                 if let profile = decoded?.profile {
+                    let height = coachWelcomeHeightValue(profile.height, fallbackCm: profile.height_cm)
+                    let weight = coachWelcomeWeightValue(profile.weight, fallbackKg: profile.weight_kg)
                     state = CoachWelcomeSetupState(
                         coach: decoded?.selectedCoach ?? appState.selectedCoach ?? "",
-                        height: coachWelcomeString(profile.height) ?? coachWelcomeNumber(profile.height_cm),
-                        weight: coachWelcomeString(profile.weight) ?? coachWelcomeNumber(profile.weight_kg),
+                        height: height.value,
+                        heightUnit: height.unit,
+                        weight: weight.value,
+                        weightUnit: weight.unit,
                         age: profile.age.map(String.init) ?? "",
                         bodyFatRange: coachBodyFatValueToRange(profile.body_fat_pct),
                         trainingDays: profile.training_days.map(String.init) ?? "",
@@ -860,8 +957,8 @@ struct CoachWelcomeFlowView: View {
                 "timezone": TimeZone.current.identifier,
                 "seed_initial_check_in": true,
             ]
-            if !state.height.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["height"] = state.height.trimmingCharacters(in: .whitespacesAndNewlines) }
-            if !state.weight.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["weight"] = state.weight.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if let height = coachWelcomeHeightPayload(state.height, unit: state.heightUnit) { body["height"] = height }
+            if let weight = coachWelcomeWeightPayload(state.weight, unit: state.weightUnit) { body["weight"] = weight }
             if let age = Int(state.age.trimmingCharacters(in: .whitespacesAndNewlines)) { body["age"] = age }
             if let trainingDays = Int(state.trainingDays.trimmingCharacters(in: .whitespacesAndNewlines)) { body["training_days"] = trainingDays }
             if let bodyFat = coachBodyFatRangeToValue(state.bodyFatRange) { body["body_fat_pct"] = bodyFat }
@@ -906,4 +1003,55 @@ private func coachWelcomeNumber(_ value: Double?) -> String {
 private func coachWelcomeString(_ value: String?) -> String? {
     let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+}
+
+private func coachWelcomeHeightValue(_ value: String?, fallbackCm: Double?) -> (value: String, unit: String) {
+    guard let raw = coachWelcomeString(value) else {
+        return (coachWelcomeNumber(fallbackCm), "cm")
+    }
+    let lower = raw.lowercased()
+    if lower.contains("'") || lower.contains("\"") || lower.contains("ft") || lower.contains("inch") || lower.contains(" in") {
+        return (raw.replacingOccurrences(of: " ", with: ""), "ft_in")
+    }
+    return (coachWelcomeStripSuffix(raw, suffixes: ["centimeters", "centimeter", "cm"]), "cm")
+}
+
+private func coachWelcomeWeightValue(_ value: String?, fallbackKg: Double?) -> (value: String, unit: String) {
+    guard let raw = coachWelcomeString(value) else {
+        return (coachWelcomeNumber(fallbackKg), "kg")
+    }
+    let lower = raw.lowercased()
+    if lower.hasSuffix("lb") || lower.hasSuffix("lbs") || lower.hasSuffix("pound") || lower.hasSuffix("pounds") {
+        return (coachWelcomeStripSuffix(raw, suffixes: ["pounds", "pound", "lbs", "lb"]), "lb")
+    }
+    return (coachWelcomeStripSuffix(raw, suffixes: ["kilograms", "kilogram", "kgs", "kg"]), "kg")
+}
+
+private func coachWelcomeHeightPayload(_ value: String, unit: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    return unit == "ft_in" ? trimmed : "\(trimmed) cm"
+}
+
+private func coachWelcomeWeightPayload(_ value: String, unit: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    return "\(trimmed) \(unit == "lb" ? "lb" : "kg")"
+}
+
+private func coachWelcomeHeightDisplay(_ value: String, unit: String) -> String {
+    coachWelcomeHeightPayload(value, unit: unit) ?? ""
+}
+
+private func coachWelcomeWeightDisplay(_ value: String, unit: String) -> String {
+    coachWelcomeWeightPayload(value, unit: unit) ?? ""
+}
+
+private func coachWelcomeStripSuffix(_ value: String, suffixes: [String]) -> String {
+    var output = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lower = output.lowercased()
+    if let suffix = suffixes.first(where: { lower.hasSuffix($0) }) {
+        output = String(output.dropLast(suffix.count))
+    }
+    return output.trimmingCharacters(in: .whitespacesAndNewlines)
 }

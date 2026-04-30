@@ -373,7 +373,7 @@ function parseHeightCm(value: unknown): number | null {
   const text = normalizeFreeformProfileText(value, 40).toLowerCase();
   if (!text) return null;
 
-  const feetInches = text.match(/^(\d{1,2})\s*'\s*(\d{1,2})(?:\s*(?:"|in|inch|inches))?$/);
+  const feetInches = text.match(/^(\d{1,2})\s*(?:'|ft|feet|foot)\s*(\d{1,2})(?:\s*(?:"|''|'|in|inch|inches))?$/);
   if (feetInches) {
     const feet = Number(feetInches[1]);
     const inches = Number(feetInches[2]);
@@ -580,7 +580,7 @@ export class CoachTypedToolsService {
     const startingWeightKg = toNumber(raw.starting_weight_kg ?? raw.startingWeightKg, 20, 350);
     const gender = normalizeFreeformProfileText(raw.gender ?? raw.sex, 40);
     const activity = normalizeFreeformProfileText(raw.activity_level ?? raw.activity ?? raw.activityLevel, 60);
-    const goal = normalizeFreeformProfileText(raw.goal ?? raw.fitness_goal ?? raw.fitnessGoal, 120);
+    const goal = normalizeFreeformProfileText(raw.goal ?? raw.fitness_goal ?? raw.fitnessGoal, 180);
     const experience = normalizeFreeformProfileText(raw.experience_level ?? raw.experience ?? raw.experienceLevel, 40);
     const timezone = safeString(raw.timezone ?? raw.timeZone ?? raw.tz, 120).replace(/\s+/g, '');
     const latestCheckInAtRaw = safeString(raw.latest_checkin_at ?? raw.latestCheckinAt, 120);

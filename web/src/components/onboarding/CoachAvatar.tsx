@@ -30,21 +30,23 @@ export const COACH_ART: Record<CoachId, CoachArtConfig> = {
   zj: {
     id: 'zj',
     name: 'ZJ',
-    heroSrc: '/coaches/zj-hero.svg',
+    heroSrc: '/coaches/zj-hero.png',
+    avatarSrc: '/coaches/zj-avatar.png',
     faceCrop: {
       faceCenterX: 50,
-      faceCenterY: 38,
-      zoom: 2.08,
+      faceCenterY: 48,
+      zoom: 1,
     },
   },
   lc: {
     id: 'lc',
     name: 'LC',
-    heroSrc: '/coaches/lc-hero.svg',
+    heroSrc: '/coaches/lc-hero.png',
+    avatarSrc: '/coaches/lc-avatar.png',
     faceCrop: {
       faceCenterX: 50,
-      faceCenterY: 38,
-      zoom: 2.08,
+      faceCenterY: 48,
+      zoom: 1,
     },
   },
 };
@@ -123,6 +125,7 @@ export function CoachAvatar({
   const art = COACH_ART[coach];
   const imageSrc = art.avatarSrc || art.heroSrc;
   const crop = art.faceCrop;
+  const hasDedicatedAvatar = Boolean(art.avatarSrc);
 
   if (variant === 'hero') {
     return (
@@ -164,8 +167,8 @@ export function CoachAvatar({
           className="coach-avatar-crop"
           style={{
             backgroundImage: `url(${imageSrc})`,
-            backgroundPosition: `${crop.faceCenterX}% ${crop.faceCenterY}%`,
-            backgroundSize: `${crop.zoom * 100}%`,
+            backgroundPosition: hasDedicatedAvatar ? 'center' : `${crop.faceCenterX}% ${crop.faceCenterY}%`,
+            backgroundSize: hasDedicatedAvatar ? 'cover' : `${crop.zoom * 100}%`,
           }}
         />
       </span>

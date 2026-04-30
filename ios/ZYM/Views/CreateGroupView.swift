@@ -365,18 +365,7 @@ private struct GroupCoachAvatar: View {
     var selected = false
 
     var body: some View {
-        Text(coachId.uppercased())
-            .font(.system(size: 12, weight: .black))
-            .foregroundColor(selected ? .white : Color.zymCoachInk(coachId))
-            .frame(width: 40, height: 40)
-            .background(
-                Circle()
-                    .fill(selected ? Color.zymCoachAccent(coachId) : Color.zymCoachSoft(coachId).opacity(0.85))
-            )
-            .overlay(
-                Circle()
-                    .stroke(selected ? Color.zymCoachAccentDark(coachId) : Color.white.opacity(0.72), lineWidth: 1)
-            )
+        CoachAvatar(coach: coachId, state: selected ? .selected : .idle, size: 40, animated: false)
     }
 }
 

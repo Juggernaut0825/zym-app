@@ -73,14 +73,7 @@ struct CoachCard: View {
     var body: some View {
         Button(action: action) {
             VStack {
-                Circle()
-                    .fill(Color(red: 0.37, green: 0.43, blue: 0.37))
-                    .frame(width: 80, height: 80)
-                    .overlay(
-                        Image(systemName: "figure.strengthtraining.traditional")
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundColor(.white)
-                    )
+                CoachAvatar(coach: name.lowercased(), state: isSelected ? .selected : .idle, size: 80)
                 Text(name)
                     .font(.custom("Syne", size: 24))
                     .fontWeight(.bold)

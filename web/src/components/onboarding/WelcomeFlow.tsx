@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { getCoachRecords, selectCoach, updateCoachRecordProfile } from '@/lib/api';
 import { setCoach } from '@/lib/auth-storage';
 import {
@@ -26,10 +26,15 @@ import {
 } from '@/lib/coach-profile-options';
 import type { CoachProfileData } from '@/lib/types';
 
+type HeightUnit = 'cm' | 'ft_in';
+type WeightUnit = 'kg' | 'lb';
+
 interface SetupState {
   coach: CoachId | '';
   height: string;
+  heightUnit: HeightUnit;
   weight: string;
+  weightUnit: WeightUnit;
   age: string;
   bodyFatRange: string;
   trainingDays: string;
@@ -76,7 +81,9 @@ const coachCards = [
 const EMPTY_SETUP_STATE: SetupState = {
   coach: '',
   height: '',
+  heightUnit: 'cm',
   weight: '',
+  weightUnit: 'kg',
   age: '',
   bodyFatRange: '',
   trainingDays: '',
@@ -109,6 +116,66 @@ function stepTitle(step: number): string {
   }
 }
 
+function normalizeHeightInput(value: unknown): { value: string; unit: HeightUnit } {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { value: '', unit: 'cm' };
+  const lower = raw.toLowerCase();
+  if (/['"]|\b(ft|feet|foot|in|inch|inches)\b/.test(lower)) {
+    const value = raw
+      .replace(/\s*(?:feet|foot|ft)\s*/gi, "'")
+      .replace(/\s*(?:inches|inch|in)\s*$/gi, '"')
+      .replace(/\s+/g, '')
+      .trim();
+    return { value, unit: 'ft_in' };
+  }
+  const meters = lower.match(/^(\d(?:\.\d+)?)\s*m$/);
+  if (meters) {
+    return { value: String(Math.round(Number(meters[1]) * 1000) / 10), unit: 'cm' };
+  }
+  return {
+    value: raw.replace(/\s*(?:cm|centimeters?|m)\s*$/i, '').trim(),
+    unit: 'cm',
+  };
+}
+
+function normalizeWeightInput(value: unknown): { value: string; unit: WeightUnit } {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { value: '', unit: 'kg' };
+  const lower = raw.toLowerCase();
+  if (/\b(lb|lbs|pound|pounds)\b/.test(lower)) {
+    return {
+      value: raw.replace(/\s*(?:lb|lbs|pound|pounds)\s*$/i, '').trim(),
+      unit: 'lb',
+    };
+  }
+  return {
+    value: raw.replace(/\s*(?:kg|kgs|kilograms?)\s*$/i, '').trim(),
+    unit: 'kg',
+  };
+}
+
+function heightForPayload(state: SetupState): string | undefined {
+  const value = state.height.trim();
+  if (!value) return undefined;
+  return state.heightUnit === 'ft_in' ? value : `${value} cm`;
+}
+
+function weightForPayload(state: SetupState): string | undefined {
+  const value = state.weight.trim();
+  if (!value) return undefined;
+  return `${value} ${state.weightUnit}`;
+}
+
+function heightSummary(state: SetupState): string {
+  if (!state.height.trim()) return '';
+  return state.heightUnit === 'ft_in' ? state.height.trim() : `${state.height.trim()} cm`;
+}
+
+function weightSummary(state: SetupState): string {
+  if (!state.weight.trim()) return '';
+  return `${state.weight.trim()} ${state.weightUnit}`;
+}
+
 function buildSetupState(
   profile: CoachProfileData | null | undefined,
   initialCoach: CoachId | null,
@@ -138,10 +205,14 @@ function buildSetupState(
       fitnessGoal?: string | null;
       timeZone?: string | null;
     };
+  const height = normalizeHeightInput(source.height ?? source.height_cm ?? source.heightCm);
+  const weight = normalizeWeightInput(source.weight ?? source.weight_kg ?? source.weightKg);
   return {
     coach: selectedCoachOverride || initialCoach || '',
-    height: formatNumericProfileValue(source.height_cm ?? source.heightCm ?? source.height, 1),
-    weight: formatNumericProfileValue(source.weight_kg ?? source.weightKg ?? source.weight, 2),
+    height: height.value || formatNumericProfileValue(source.height_cm ?? source.heightCm, 1),
+    heightUnit: height.unit,
+    weight: weight.value || formatNumericProfileValue(source.weight_kg ?? source.weightKg, 2),
+    weightUnit: weight.unit,
     age: formatNumericProfileValue(source.age ?? source.ageYears, 0),
     bodyFatRange: bodyFatValueToRange((source.body_fat_pct ?? source.body_fat ?? source.bodyFatPct) as number | null | undefined),
     trainingDays: normalizeTrainingDaysValue(source.training_days ?? source.trainingDays),
@@ -179,25 +250,83 @@ function summaryItem(label: string, value: string) {
   );
 }
 
-function unitInput(
+function UnitToggle<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <span className="coach-unit-toggle" aria-label="Measurement unit">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={option.value === value ? 'coach-unit-toggle-active' : ''}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function profileTextField({
+  label,
+  value,
+  onChange,
+  inputMode = 'text',
+  maxLength = 40,
+  unit,
+  placeholder,
+  control,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  inputMode?: 'decimal' | 'numeric' | 'text';
+  maxLength?: number;
+  unit?: string;
+  placeholder?: string;
+  control?: ReactNode;
+}) {
+  return (
+    <label className="coach-profile-field">
+      <span className="coach-profile-field-top">
+        <span className="coach-profile-label">{label}</span>
+        {control}
+      </span>
+      <span className="coach-form-field">
+        <input
+          className="input-shell"
+          inputMode={inputMode}
+          placeholder={placeholder || label}
+          value={value}
+          onChange={(event) => onChange(event.target.value.slice(0, maxLength))}
+        />
+        {unit ? <span className="coach-form-unit">{unit}</span> : null}
+      </span>
+    </label>
+  );
+}
+
+function profileSelectField(
   label: string,
-  unit: string,
   value: string,
   onChange: (value: string) => void,
-  inputMode: 'decimal' | 'numeric' = 'decimal',
-  maxLength = 40,
+  options: Array<{ value: string; label: string }>,
 ) {
   return (
-    <label className="coach-form-field">
-      <span className="sr-only">{label}</span>
-      <input
-        className="input-shell"
-        inputMode={inputMode}
-        placeholder={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value.slice(0, maxLength))}
-      />
-      <span className="coach-form-unit">{unit}</span>
+    <label className="coach-profile-field">
+      <span className="coach-profile-label">{label}</span>
+      <select className="input-shell" value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Select {label.toLowerCase()}</option>
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
     </label>
   );
 }
@@ -253,8 +382,8 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
       await selectCoach(userId, state.coach);
       await updateCoachRecordProfile({
         userId,
-        height: state.height.trim() || undefined,
-        weight: state.weight.trim() || undefined,
+        height: heightForPayload(state),
+        weight: weightForPayload(state),
         age: state.age.trim() ? Number(state.age.trim()) : undefined,
         body_fat_pct: bodyFatRangeToValue(state.bodyFatRange),
         training_days: state.trainingDays.trim() ? Number(state.trainingDays.trim()) : undefined,
@@ -384,47 +513,74 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              {unitInput('Height', 'cm', state.height, (value) => setState((prev) => ({ ...prev, height: value })))}
-              {unitInput('Weight', 'kg', state.weight, (value) => setState((prev) => ({ ...prev, weight: value })))}
-              {unitInput('Age', 'years', state.age, (value) => setState((prev) => ({ ...prev, age: value })), 'numeric', 3)}
+              {profileTextField({
+                label: 'Height',
+                value: state.height,
+                onChange: (value) => setState((prev) => ({ ...prev, height: value })),
+                inputMode: state.heightUnit === 'cm' ? 'decimal' : 'text',
+                placeholder: state.heightUnit === 'cm' ? '180' : '5\'11"',
+                unit: state.heightUnit === 'cm' ? 'cm' : 'ft/in',
+                control: (
+                  <UnitToggle
+                    options={[{ value: 'cm', label: 'cm' }, { value: 'ft_in', label: 'ft/in' }]}
+                    value={state.heightUnit}
+                    onChange={(heightUnit) => setState((prev) => ({ ...prev, heightUnit }))}
+                  />
+                ),
+              })}
+              {profileTextField({
+                label: 'Weight',
+                value: state.weight,
+                onChange: (value) => setState((prev) => ({ ...prev, weight: value })),
+                inputMode: 'decimal',
+                placeholder: state.weightUnit === 'kg' ? '81.5' : '180',
+                unit: state.weightUnit,
+                control: (
+                  <UnitToggle
+                    options={[{ value: 'kg', label: 'kg' }, { value: 'lb', label: 'lb' }]}
+                    value={state.weightUnit}
+                    onChange={(weightUnit) => setState((prev) => ({ ...prev, weightUnit }))}
+                  />
+                ),
+              })}
+              {profileTextField({
+                label: 'Age',
+                value: state.age,
+                onChange: (value) => setState((prev) => ({ ...prev, age: value })),
+                inputMode: 'numeric',
+                maxLength: 3,
+                placeholder: '23',
+                unit: 'years',
+              })}
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <select className="input-shell" value={state.gender} onChange={(event) => setState((prev) => ({ ...prev, gender: event.target.value }))}>
-                <option value="">Gender</option>
-                {genderOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <select className="input-shell" value={state.bodyFatRange} onChange={(event) => setState((prev) => ({ ...prev, bodyFatRange: event.target.value }))}>
-                <option value="">Body fat range</option>
-                {bodyFatRangeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <select className="input-shell" value={state.trainingDays} onChange={(event) => setState((prev) => ({ ...prev, trainingDays: event.target.value }))}>
-                <option value="">Training days / week</option>
-                {trainingDayOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <select className="input-shell" value={state.activityLevel} onChange={(event) => setState((prev) => ({ ...prev, activityLevel: event.target.value }))}>
-                <option value="">Activity level</option>
-                {activityLevelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <select className="input-shell" value={state.experienceLevel} onChange={(event) => setState((prev) => ({ ...prev, experienceLevel: event.target.value }))}>
-                <option value="">Experience level</option>
-                {experienceLevelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              {profileSelectField('Gender', state.gender, (gender) => setState((prev) => ({ ...prev, gender })), genderOptions)}
+              {profileSelectField('Body fat range', state.bodyFatRange, (bodyFatRange) => setState((prev) => ({ ...prev, bodyFatRange })), bodyFatRangeOptions)}
+              {profileSelectField('Training days / week', state.trainingDays, (trainingDays) => setState((prev) => ({ ...prev, trainingDays })), trainingDayOptions)}
+              {profileSelectField('Activity level', state.activityLevel, (activityLevel) => setState((prev) => ({ ...prev, activityLevel })), activityLevelOptions)}
+              {profileSelectField('Experience level', state.experienceLevel, (experienceLevel) => setState((prev) => ({ ...prev, experienceLevel })), experienceLevelOptions)}
             </div>
 
-            <input
-              className="input-shell mt-4"
-              placeholder="Goal, in your own words"
-              value={state.goal}
-              onChange={(event) => setState((prev) => ({ ...prev, goal: event.target.value.slice(0, 180) }))}
-            />
+            <div className="mt-4">
+              {profileTextField({
+                label: 'Goal',
+                value: state.goal,
+                onChange: (goal) => setState((prev) => ({ ...prev, goal: goal.slice(0, 180) })),
+                placeholder: 'Maintain strength while leaning out',
+                maxLength: 180,
+              })}
+            </div>
 
-            <textarea
-              className="input-shell mt-4 min-h-[120px] resize-none"
-              placeholder="Extra notes: injuries, sport focus, schedule, food preferences..."
-              value={state.notes}
-              onChange={(event) => setState((prev) => ({ ...prev, notes: event.target.value.slice(0, 1200) }))}
-            />
+            <label className="coach-profile-field mt-4">
+              <span className="coach-profile-label">Extra notes</span>
+              <textarea
+                className="input-shell min-h-[120px] resize-none"
+                placeholder="Injuries, sport focus, schedule, food preferences..."
+                value={state.notes}
+                onChange={(event) => setState((prev) => ({ ...prev, notes: event.target.value.slice(0, 1200) }))}
+              />
+            </label>
           </section>
         </div>
       );
@@ -445,8 +601,8 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {summaryItem('Coach', state.coach ? state.coach.toUpperCase() : 'Not selected')}
             {summaryItem('Goal', state.goal)}
-            {summaryItem('Height', state.height ? `${state.height} cm` : '')}
-            {summaryItem('Weight', state.weight ? `${state.weight} kg` : '')}
+            {summaryItem('Height', heightSummary(state))}
+            {summaryItem('Weight', weightSummary(state))}
             {summaryItem('Age', state.age ? `${state.age} years` : '')}
             {summaryItem('Training days', state.trainingDays ? optionLabelForValue(trainingDayOptions, state.trainingDays) : '')}
             {summaryItem('Activity', state.activityLevel ? optionLabelForValue(activityLevelOptions, state.activityLevel) : '')}
