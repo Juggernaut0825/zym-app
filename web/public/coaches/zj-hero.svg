@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-labelledby="title desc">
+  <title id="title">ZJ coach upper-body character</title>
+  <desc id="desc">A calm supportive cartoon fitness coach in blue and lavender tones.</desc>
+  <defs>
+    <linearGradient id="zjBg" x1="190" x2="610" y1="112" y2="724" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4F6FF"/>
+      <stop offset="1" stop-color="#DDE4FF"/>
+    </linearGradient>
+    <linearGradient id="zjJacket" x1="238" x2="600" y1="512" y2="786" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8796FF"/>
+      <stop offset="0.55" stop-color="#6171E5"/>
+      <stop offset="1" stop-color="#3E49A8"/>
+    </linearGradient>
+    <linearGradient id="zjShirt" x1="352" x2="470" y1="522" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E8EDFF"/>
+    </linearGradient>
+    <linearGradient id="zjSkin" x1="315" x2="501" y1="212" y2="444" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE4C9"/>
+      <stop offset="0.75" stop-color="#EAB68D"/>
+      <stop offset="1" stop-color="#D89A74"/>
+    </linearGradient>
+    <linearGradient id="zjHair" x1="284" x2="500" y1="164" y2="318" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#313C78"/>
+      <stop offset="1" stop-color="#151A42"/>
+    </linearGradient>
+    <filter id="zjShadow" x="110" y="114" width="580" height="660" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="34" stdDeviation="34" flood-color="#4351A7" flood-opacity="0.18"/>
+    </filter>
+    <filter id="zjSoft" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <ellipse cx="400" cy="714" rx="226" ry="46" fill="#6171E5" opacity="0.13" filter="url(#zjSoft)"/>
+  <g filter="url(#zjShadow)">
+    <path d="M207 675c16-93 87-164 180-171h26c92 7 164 78 180 171l11 62H196l11-62Z" fill="url(#zjJacket)"/>
+    <path d="M315 536c42 42 121 42 163 0l31 189H284l31-189Z" fill="url(#zjShirt)"/>
+    <path d="M303 562c-37 23-58 64-67 126l-8 49h-70l12-64c16-86 66-148 133-180v69Z" fill="#7688F2"/>
+    <path d="M497 562c37 23 58 64 67 126l8 49h70l-12-64c-16-86-66-148-133-180v69Z" fill="#4856C5"/>
+    <path d="M324 504c8 50 39 79 76 79s68-29 76-79v-38H324v38Z" fill="#E8B185"/>
+    <path d="M324 486c25 28 126 28 152 0v41c-20 31-132 31-152 0v-41Z" fill="#D99B74" opacity="0.56"/>
+
+    <path d="M276 306c0-90 55-155 124-155s124 65 124 155v38c0 92-55 160-124 160s-124-68-124-160v-38Z" fill="url(#zjSkin)"/>
+    <path d="M270 332c-27-5-50 15-45 47 6 34 31 54 58 48l-13-95Z" fill="#EAB68D"/>
+    <path d="M530 332c27-5 50 15 45 47-6 34-31 54-58 48l13-95Z" fill="#EAB68D"/>
+    <path d="M277 323c31-9 61-32 82-68 37 39 93 60 160 61-5-91-55-160-125-165-81-5-134 58-117 172Z" fill="url(#zjHair)"/>
+    <path d="M288 340c5-51 31-88 72-114 4 20 19 39 46 58 32 22 70 31 111 28-8-94-53-145-119-151-73-6-123 44-137 128-5 31 2 56 27 51Z" fill="#20295F"/>
+    <path d="M333 348c22-11 48-10 69 1" fill="none" stroke="#27315F" stroke-linecap="round" stroke-width="13" opacity="0.22"/>
+    <path d="M410 349c20-11 44-11 65 0" fill="none" stroke="#27315F" stroke-linecap="round" stroke-width="13" opacity="0.22"/>
+    <ellipse cx="356" cy="381" rx="12" ry="16" fill="#242B45"/>
+    <ellipse cx="445" cy="381" rx="12" ry="16" fill="#242B45"/>
+    <path d="M386 416c9 6 21 6 29 0" fill="none" stroke="#B77A5E" stroke-linecap="round" stroke-width="9" opacity="0.72"/>
+    <path d="M353 446c26 26 70 26 95 0" fill="none" stroke="#8A4E45" stroke-linecap="round" stroke-width="10"/>
+    <circle cx="325" cy="418" r="19" fill="#F4BBA3" opacity="0.38"/>
+    <circle cx="477" cy="418" r="19" fill="#F4BBA3" opacity="0.38"/>
+
+    <path d="M278 618c37-42 73-58 114-50" fill="none" stroke="#F7F8FF" stroke-linecap="round" stroke-width="24" opacity="0.74"/>
+    <path d="M522 618c-37-42-73-58-114-50" fill="none" stroke="#C4CEFF" stroke-linecap="round" stroke-width="24" opacity="0.82"/>
+    <path d="M382 584l18 32 18-32" fill="none" stroke="#5462D8" stroke-linecap="round" stroke-linejoin="round" stroke-width="10"/>
+    <path d="M242 661c-2 44 28 80 74 76 28-3 45-20 43-43-2-25-23-35-50-26-8-27-29-39-67-7Z" fill="#E8B185"/>
+    <path d="M558 661c2 44-28 80-74 76-28-3-45-20-43-43 2-25 23-35 50-26 8-27 29-39 67-7Z" fill="#E8B185"/>
+  </g>
+</svg>

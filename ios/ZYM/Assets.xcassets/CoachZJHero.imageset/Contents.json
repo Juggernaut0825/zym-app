@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "coach-zj-hero.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

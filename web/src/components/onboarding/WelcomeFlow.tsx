@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCoachRecords, selectCoach, updateCoachRecordProfile } from '@/lib/api';
 import { setCoach } from '@/lib/auth-storage';
-import { CoachAvatar, type CoachId } from '@/components/onboarding/CoachAvatar';
+import {
+  CoachAvatar,
+  CoachHero,
+  CoachSpeechBubble,
+  type CoachId,
+} from '@/components/onboarding/CoachAvatar';
 import {
   activityLevelOptions,
   bodyFatRangeOptions,
@@ -12,11 +17,9 @@ import {
   experienceLevelOptions,
   formatNumericProfileValue,
   genderOptions,
-  goalOptions,
   normalizeActivityLevelValue,
   normalizeExperienceLevelValue,
   normalizeGenderValue,
-  normalizeGoalValue,
   normalizeTrainingDaysValue,
   optionLabelForValue,
   trainingDayOptions,
@@ -106,19 +109,6 @@ function stepTitle(step: number): string {
   }
 }
 
-function stepSubtitle(step: number): string {
-  switch (step) {
-    case 0:
-      return 'A quick hello from the two coaching styles inside ZYM.';
-    case 1:
-      return 'Pick the voice you want to hear when the day gets noisy.';
-    case 2:
-      return 'Give your coach enough context to make the first plan useful.';
-    default:
-      return 'Your coach profile is ready to guide meals, workouts, check-ins, and feedback.';
-  }
-}
-
 function buildSetupState(
   profile: CoachProfileData | null | undefined,
   initialCoach: CoachId | null,
@@ -157,7 +147,7 @@ function buildSetupState(
     trainingDays: normalizeTrainingDaysValue(source.training_days ?? source.trainingDays),
     gender: normalizeGenderValue(source.gender),
     activityLevel: normalizeActivityLevelValue(source.activity_level || source.activity || source.activityLevel),
-    goal: normalizeGoalValue(source.goal || source.fitness_goal || source.fitnessGoal),
+    goal: String(source.goal || source.fitness_goal || source.fitnessGoal || '').trim().slice(0, 180),
     experienceLevel: normalizeExperienceLevelValue(source.experience_level || source.experience || source.experienceLevel),
     notes: String(source.notes || ''),
   };
@@ -186,6 +176,29 @@ function summaryItem(label: string, value: string) {
       <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{label}</p>
       <p className="mt-1 text-sm font-semibold text-slate-800">{value || 'Not set'}</p>
     </div>
+  );
+}
+
+function unitInput(
+  label: string,
+  unit: string,
+  value: string,
+  onChange: (value: string) => void,
+  inputMode: 'decimal' | 'numeric' = 'decimal',
+  maxLength = 40,
+) {
+  return (
+    <label className="coach-form-field">
+      <span className="sr-only">{label}</span>
+      <input
+        className="input-shell"
+        inputMode={inputMode}
+        placeholder={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value.slice(0, maxLength))}
+      />
+      <span className="coach-form-unit">{unit}</span>
+    </label>
   );
 }
 
@@ -266,30 +279,42 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     if (step === 0) {
       return (
         <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
-            <CoachAvatar
+          <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
+            <CoachHero
               coach="zj"
+              animationMode="loop"
               state="talking"
-              size={112}
+              size={250}
               showBubble
-              bubbleText="I'm ZJ. I'll help you stay consistent without making fitness feel overwhelming."
+              bubbleText="I'm ZJ. I'll help you build steady habits without making fitness feel overwhelming."
+              tailDirection="left"
             />
-            <div className="mt-5 rounded-[22px] border border-[rgba(105,121,247,0.14)] bg-[rgba(105,121,247,0.07)] px-4 py-4 text-sm leading-7 text-slate-700">
-              Tell us your goal, schedule, meals, and training context.
-            </div>
+            <CoachSpeechBubble
+              coach="zj"
+              text="Share your goal, schedule, meals, and training context."
+              tailDirection="top-left"
+              className="mt-3"
+            />
           </section>
 
-          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
-            <CoachAvatar
+          <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
+            <CoachHero
               coach="lc"
+              animationMode="loop"
               state="talking"
-              size={112}
+              size={250}
               showBubble
-              bubbleText="I'm LC. I'll keep you accountable and push you when you start drifting."
+              bubbleText="I'm LC. I'll keep the plan sharp and call out drift before it becomes a pattern."
+              tailDirection="left"
+              bubbleTone="strong"
             />
-            <div className="mt-5 rounded-[22px] border border-[rgba(242,138,58,0.16)] bg-[rgba(242,138,58,0.08)] px-4 py-4 text-sm font-medium leading-7 text-slate-800">
-              Then we turn that into daily meals, workouts, check-ins, and feedback.
-            </div>
+            <CoachSpeechBubble
+              coach="lc"
+              tone="strong"
+              text="Then ZYM turns it into meals, workouts, check-ins, and feedback."
+              tailDirection="top-left"
+              className="mt-3"
+            />
           </section>
         </div>
       );
@@ -315,7 +340,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 }}
               >
                 <div className="flex items-start gap-4">
-                  <CoachAvatar coach={card.id} state={active ? 'selected' : 'idle'} size={82} />
+                  <CoachAvatar coach={card.id} state={active ? 'selected' : 'idle'} size={74} />
                   <div className="min-w-0 flex-1">
                     <div
                       className="inline-flex rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
@@ -327,9 +352,16 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                     <p className="mt-2 text-sm leading-6 text-slate-600">{card.description}</p>
                   </div>
                 </div>
-                <p className="mt-5 rounded-[20px] bg-white/80 px-4 py-3 text-sm font-semibold leading-7" style={{ color: card.ink }}>
-                  {card.sample}
-                </p>
+                <div className="mt-5 flex flex-wrap items-end gap-4">
+                  <CoachHero coach={card.id} state={active ? 'selected' : 'idle'} size={150} animationMode={active ? 'loop' : 'static'} />
+                  <CoachSpeechBubble
+                    coach={card.id}
+                    tone={active ? 'strong' : 'soft'}
+                    text={card.sample}
+                    tailDirection="left"
+                    className="mb-4"
+                  />
+                </div>
               </button>
             );
           })}
@@ -340,7 +372,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     if (step === 2) {
       return (
         <div className="grid gap-6">
-          <section className="rounded-[28px] border border-white/70 bg-white/72 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.08)] sm:p-6">
+          <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
               <CoachAvatar
                 coach={selectedCoach}
@@ -352,9 +384,9 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <input className="input-shell" placeholder="Height" value={state.height} onChange={(event) => setState((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))} />
-              <input className="input-shell" placeholder="Weight" value={state.weight} onChange={(event) => setState((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))} />
-              <input className="input-shell" inputMode="numeric" placeholder="Age" value={state.age} onChange={(event) => setState((prev) => ({ ...prev, age: event.target.value.slice(0, 3) }))} />
+              {unitInput('Height', 'cm', state.height, (value) => setState((prev) => ({ ...prev, height: value })))}
+              {unitInput('Weight', 'kg', state.weight, (value) => setState((prev) => ({ ...prev, weight: value })))}
+              {unitInput('Age', 'years', state.age, (value) => setState((prev) => ({ ...prev, age: value })), 'numeric', 3)}
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -374,15 +406,18 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 <option value="">Activity level</option>
                 {activityLevelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <select className="input-shell" value={state.goal} onChange={(event) => setState((prev) => ({ ...prev, goal: event.target.value }))}>
-                <option value="">Goal</option>
-                {goalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
               <select className="input-shell" value={state.experienceLevel} onChange={(event) => setState((prev) => ({ ...prev, experienceLevel: event.target.value }))}>
                 <option value="">Experience level</option>
                 {experienceLevelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </div>
+
+            <input
+              className="input-shell mt-4"
+              placeholder="Goal, in your own words"
+              value={state.goal}
+              onChange={(event) => setState((prev) => ({ ...prev, goal: event.target.value.slice(0, 180) }))}
+            />
 
             <textarea
               className="input-shell mt-4 min-h-[120px] resize-none"
@@ -402,17 +437,17 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     return (
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-          <CoachAvatar coach={selectedCoach} state="celebrate" size={126} showBubble bubbleText={readyLine} />
+          <CoachHero coach={selectedCoach} state="celebrate" size={230} showBubble bubbleText={readyLine} bubbleTone="strong" />
         </section>
 
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
           <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Coach profile card</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {summaryItem('Coach', state.coach ? state.coach.toUpperCase() : 'Not selected')}
-            {summaryItem('Goal', state.goal ? optionLabelForValue(goalOptions, state.goal) : '')}
-            {summaryItem('Height', state.height)}
-            {summaryItem('Weight', state.weight)}
-            {summaryItem('Age', state.age)}
+            {summaryItem('Goal', state.goal)}
+            {summaryItem('Height', state.height ? `${state.height} cm` : '')}
+            {summaryItem('Weight', state.weight ? `${state.weight} kg` : '')}
+            {summaryItem('Age', state.age ? `${state.age} years` : '')}
             {summaryItem('Training days', state.trainingDays ? optionLabelForValue(trainingDayOptions, state.trainingDays) : '')}
             {summaryItem('Activity', state.activityLevel ? optionLabelForValue(activityLevelOptions, state.activityLevel) : '')}
             {summaryItem('Experience', state.experienceLevel ? optionLabelForValue(experienceLevelOptions, state.experienceLevel) : '')}
@@ -433,9 +468,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
         <div className="mx-auto w-full max-w-4xl">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Welcome setup</p>
-              <h1 className="mt-3 text-[clamp(2.1rem,5vw,4rem)] font-bold leading-[0.98] text-slate-900">{stepTitle(step)}</h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--ink-500)] sm:text-base">{stepSubtitle(step)}</p>
+              <h1 className="text-[clamp(2.1rem,5vw,4rem)] font-bold leading-[0.98] text-slate-900">{stepTitle(step)}</h1>
             </div>
             <div className="rounded-full border border-white/70 bg-white/68 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
               {step + 1} / {totalSteps}

@@ -21,150 +21,293 @@ enum CoachAvatarState {
     case celebrate
 }
 
+enum CoachAvatarVariant {
+    case profile
+    case hero
+}
+
+enum CoachAnimationMode {
+    case `static`
+    case loop
+}
+
+enum CoachBubbleTone {
+    case soft
+    case strong
+}
+
+enum CoachBubbleAlignment {
+    case leading
+    case trailing
+    case center
+}
+
+enum CoachBubbleTailDirection {
+    case left
+    case right
+    case topLeft
+    case topRight
+    case none
+}
+
+private struct CoachArtConfig {
+    let id: String
+    let name: String
+    let heroImageName: String
+    let faceCenterX: CGFloat
+    let faceCenterY: CGFloat
+    let zoom: CGFloat
+}
+
+private func coachArt(_ coach: String) -> CoachArtConfig {
+    if coach == "lc" {
+        return CoachArtConfig(id: "lc", name: "LC", heroImageName: "CoachLCHero", faceCenterX: 0.5, faceCenterY: 0.38, zoom: 2.08)
+    }
+    return CoachArtConfig(id: "zj", name: "ZJ", heroImageName: "CoachZJHero", faceCenterX: 0.5, faceCenterY: 0.38, zoom: 2.08)
+}
+
 struct CoachAvatar: View {
     let coach: String
     let state: CoachAvatarState
     let size: CGFloat
+    var variant: CoachAvatarVariant = .profile
+    var animated: Bool = true
     var bubbleText: String = ""
     var showBubble: Bool = false
 
-    @State private var animated = false
+    @State private var animationTick = false
 
-    private var normalizedCoach: String { coach == "lc" ? "lc" : "zj" }
-    private var isLC: Bool { normalizedCoach == "lc" }
-    private var accent: Color { Color.zymCoachAccent(normalizedCoach) }
-    private var accentDark: Color { Color.zymCoachAccentDark(normalizedCoach) }
-    private var soft: Color { Color.zymCoachSoft(normalizedCoach) }
-    private var ink: Color { Color.zymCoachInk(normalizedCoach) }
+    private var art: CoachArtConfig { coachArt(coach) }
+    private var isLC: Bool { art.id == "lc" }
+    private var accent: Color { Color.zymCoachAccent(art.id) }
 
     private var animation: Animation {
         if isLC {
-            return .easeInOut(duration: state == .celebrate ? 0.62 : 1.1)
+            return .easeInOut(duration: state == .celebrate ? 0.72 : 1.25)
         }
-        return .easeInOut(duration: state == .celebrate ? 0.9 : 1.9)
+        return .easeInOut(duration: state == .celebrate ? 0.9 : 2.2)
     }
 
     private var scale: CGFloat {
+        guard animated else { return 1 }
         switch state {
         case .selected:
-            return animated ? (isLC ? 1.045 : 1.025) : 1
+            return animationTick ? (isLC ? 1.045 : 1.025) : 1
         case .celebrate:
-            return animated ? (isLC ? 1.08 : 1.04) : 0.99
+            return animationTick ? (isLC ? 1.08 : 1.04) : 0.99
         case .talking:
-            return animated ? (isLC ? 1.035 : 1.018) : 0.995
+            return animationTick ? (isLC ? 1.035 : 1.018) : 0.995
         case .idle:
-            return animated ? (isLC ? 1.018 : 1.012) : 1
+            return animationTick ? (isLC ? 1.018 : 1.012) : 1
         }
     }
 
     private var yOffset: CGFloat {
+        guard animated else { return 0 }
         if isLC {
-            return animated ? -2 : 1
+            return animationTick ? -2 : 1
         }
-        return animated ? -5 : 0
+        return animationTick ? -5 : 0
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: showBubble ? 10 : 0) {
-            avatar
+            imageView
             if showBubble && !bubbleText.isEmpty {
-                Text(bubbleText)
-                    .font(.system(size: max(12, size * 0.13), weight: .semibold))
-                    .foregroundColor(Color.zymText)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 11)
-                    .background(Color.white.opacity(0.95))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(accent.opacity(isLC ? 0.22 : 0.16), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+                CoachSpeechBubble(text: bubbleText, coach: art.id, tailDirection: .topLeft)
             }
         }
         .onAppear {
-            guard !animated else { return }
+            guard animated, !animationTick else { return }
             withAnimation(animation.repeatForever(autoreverses: true)) {
-                animated = true
+                animationTick = true
             }
         }
     }
 
-    private var avatar: some View {
-        ZStack {
+    @ViewBuilder
+    private var imageView: some View {
+        switch variant {
+        case .profile:
             Circle()
-                .stroke(Color.white.opacity(0.44), lineWidth: max(1, size * 0.012))
-                .scaleEffect(x: isLC ? 1.03 : 1.12, y: isLC ? 1.08 : 0.94)
-                .rotationEffect(.degrees(isLC ? 18 : -16))
-
-            Circle()
-                .stroke(Color.white.opacity(0.28), lineWidth: max(1, size * 0.01))
-                .scaleEffect(x: isLC ? 0.92 : 0.96, y: isLC ? 1.04 : 1.1)
-                .rotationEffect(.degrees(isLC ? -18 : 20))
-
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [soft.opacity(0.96), accent.opacity(0.95), accentDark.opacity(0.98)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                .fill(Color.white)
+                .overlay(
+                    Image(art.heroImageName)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(art.zoom)
+                        .offset(
+                            x: (0.5 - art.faceCenterX) * size * art.zoom,
+                            y: (0.5 - art.faceCenterY) * size * art.zoom
+                        )
                 )
+                .clipShape(Circle())
                 .overlay(
                     Circle()
-                        .fill(Color.white.opacity(0.44))
-                        .frame(width: size * 0.24, height: size * 0.24)
-                        .offset(x: -size * 0.18, y: -size * 0.21)
+                        .stroke(Color.white.opacity(0.9), lineWidth: max(2, size * 0.035))
                 )
-
-            face
-                .frame(width: size * 0.68, height: size * 0.68)
-        }
-        .frame(width: size, height: size)
-        .scaleEffect(scale)
-        .offset(y: yOffset)
-        .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.28 : 0.16), radius: size * 0.18, x: 0, y: size * 0.1)
-    }
-
-    private var face: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .fill(Color.white.opacity(0.9))
-                .shadow(color: Color.black.opacity(0.04), radius: 10, x: 0, y: 6)
-
-            eye(x: -0.17)
-            eye(x: 0.17)
-            brow(x: -0.17, angle: isLC ? 14 : -5)
-            brow(x: 0.17, angle: isLC ? -14 : 5)
-
-            Capsule()
-                .fill(ink.opacity(0.58))
-                .frame(width: size * 0.14, height: (state == .talking && animated) ? size * 0.08 : size * 0.035)
-                .offset(y: size * 0.1)
-
-            Text(normalizedCoach.uppercased())
-                .font(.system(size: size * 0.11, weight: .black))
-                .tracking(1)
-                .foregroundColor(ink)
-                .offset(y: size * 0.22)
+                .frame(width: size, height: size)
+                .scaleEffect(scale)
+                .offset(y: yOffset)
+                .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.3 : 0.16), radius: size * 0.18, x: 0, y: size * 0.1)
+        case .hero:
+            Image(art.heroImageName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .scaleEffect(scale)
+                .offset(y: yOffset)
+                .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.24 : 0.12), radius: size * 0.1, x: 0, y: size * 0.06)
         }
     }
+}
 
-    private func eye(x: CGFloat) -> some View {
-        Capsule()
-            .fill(Color.zymText.opacity(0.82))
-            .frame(width: size * 0.055, height: size * 0.075)
-            .offset(x: size * x, y: -size * 0.08)
+struct CoachHero: View {
+    let coach: String
+    var animationMode: CoachAnimationMode = .loop
+    var state: CoachAvatarState = .idle
+    var size: CGFloat = 230
+    var showBubble = false
+    var bubbleText = ""
+    var bubbleTone: CoachBubbleTone = .soft
+    var bubbleAlignment: CoachBubbleAlignment = .leading
+    var tailDirection: CoachBubbleTailDirection = .left
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 14) {
+                heroImage
+                bubble(tailDirection)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                heroImage
+                bubble(.topLeft)
+            }
+        }
     }
 
-    private func brow(x: CGFloat, angle: Double) -> some View {
-        Capsule()
-            .fill(Color.zymText.opacity(isLC ? 0.34 : 0.22))
-            .frame(width: size * 0.12, height: size * 0.024)
-            .rotationEffect(.degrees(angle))
-            .offset(x: size * x, y: -size * 0.17)
+    private var heroImage: some View {
+        CoachAvatar(
+            coach: coach,
+            state: state,
+            size: size,
+            variant: .hero,
+            animated: animationMode == .loop
+        )
+    }
+
+    @ViewBuilder
+    private func bubble(_ direction: CoachBubbleTailDirection) -> some View {
+        if showBubble && !bubbleText.isEmpty {
+            CoachSpeechBubble(
+                text: bubbleText,
+                coach: coach,
+                tone: bubbleTone,
+                alignment: bubbleAlignment,
+                tailDirection: direction
+            )
+        }
+    }
+}
+
+struct CoachSpeechBubble: View {
+    let text: String
+    let coach: String
+    var tone: CoachBubbleTone = .soft
+    var alignment: CoachBubbleAlignment = .leading
+    var tailDirection: CoachBubbleTailDirection = .left
+
+    private var coachId: String { coach == "lc" ? "lc" : "zj" }
+    private var fill: Color {
+        if coachId == "lc" {
+            return tone == .strong ? Color(red: 1.0, green: 0.9, blue: 0.77) : Color(red: 1.0, green: 0.95, blue: 0.88)
+        }
+        return tone == .strong ? Color(red: 0.89, green: 0.92, blue: 1.0) : Color(red: 0.95, green: 0.96, blue: 1.0)
+    }
+    private var stroke: Color { Color.zymCoachAccent(coachId).opacity(coachId == "lc" ? 0.24 : 0.2) }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(Color.zymCoachInk(coachId))
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 270, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(fill)
+                    .shadow(color: Color.black.opacity(0.06), radius: 16, x: 0, y: 9)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+            .overlay(alignment: tailAlignment) {
+                if tailDirection != .none {
+                    CoachBubbleTail()
+                        .fill(fill)
+                        .frame(width: 18, height: 18)
+                        .rotationEffect(.degrees(tailRotation))
+                        .overlay(
+                            CoachBubbleTail()
+                                .stroke(stroke, lineWidth: 1)
+                                .rotationEffect(.degrees(tailRotation))
+                        )
+                        .offset(tailOffset)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+
+    private var frameAlignment: Alignment {
+        switch alignment {
+        case .leading: return .leading
+        case .trailing: return .trailing
+        case .center: return .center
+        }
+    }
+
+    private var tailAlignment: Alignment {
+        switch tailDirection {
+        case .left: return .leading
+        case .right: return .trailing
+        case .topLeft: return .topLeading
+        case .topRight: return .topTrailing
+        case .none: return .center
+        }
+    }
+
+    private var tailRotation: Double {
+        switch tailDirection {
+        case .left: return 45
+        case .right: return 225
+        case .topLeft, .topRight: return 135
+        case .none: return 0
+        }
+    }
+
+    private var tailOffset: CGSize {
+        switch tailDirection {
+        case .left: return CGSize(width: -8, height: 0)
+        case .right: return CGSize(width: 8, height: 0)
+        case .topLeft: return CGSize(width: 22, height: -8)
+        case .topRight: return CGSize(width: -22, height: -8)
+        case .none: return .zero
+        }
+    }
+}
+
+private struct CoachBubbleTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -280,16 +423,9 @@ struct CoachWelcomeFlowView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("WELCOME SETUP")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.6)
-                        .foregroundColor(Color.zymSubtext)
                     Text(stepTitle)
                         .font(.custom("Syne", size: 32))
                         .foregroundColor(Color.zymText)
-                    Text(stepSubtitle)
-                        .font(.system(size: 14))
-                        .foregroundColor(Color.zymSubtext)
                 }
                 Spacer()
                 Text("\(step + 1) / \(totalSteps)")
@@ -340,16 +476,16 @@ struct CoachWelcomeFlowView: View {
             coachIntroCard(
                 coach: "zj",
                 lines: [
-                    "I'm ZJ. I'll help you stay consistent without making fitness feel overwhelming.",
-                    "Tell us your goal, schedule, meals, and training context."
+                    "I'm ZJ. I'll help you build steady habits without making fitness feel overwhelming.",
+                    "Share your goal, schedule, meals, and training context."
                 ]
             )
 
             coachIntroCard(
                 coach: "lc",
                 lines: [
-                    "I'm LC. I'll keep you accountable and push you when you start drifting.",
-                    "Then we turn that into daily meals, workouts, check-ins, and feedback."
+                    "I'm LC. I'll keep the plan sharp and call out drift before it becomes a pattern.",
+                    "Then ZYM turns it into meals, workouts, check-ins, and feedback."
                 ]
             )
         }
@@ -357,23 +493,23 @@ struct CoachWelcomeFlowView: View {
 
     private func coachIntroCard(coach: String, lines: [String]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            CoachAvatar(
+            CoachHero(
                 coach: coach,
                 state: .talking,
-                size: 104,
+                size: 204,
+                showBubble: true,
                 bubbleText: lines.first ?? "",
-                showBubble: true
+                bubbleTone: coach == "lc" ? .strong : .soft,
+                tailDirection: .left
             )
 
             if lines.count > 1 {
-                Text(lines[1])
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color.zymCoachInk(coach))
-                    .lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(Color.zymCoachSoft(coach).opacity(0.74))
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                CoachSpeechBubble(
+                    text: lines[1],
+                    coach: coach,
+                    tone: coach == "lc" ? .strong : .soft,
+                    tailDirection: .topLeft
+                )
             }
         }
         .zymCard()
@@ -407,18 +543,19 @@ struct CoachWelcomeFlowView: View {
             )
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                welcomeInputField("Height", text: $state.height, keyboard: .decimalPad)
-                welcomeInputField("Weight", text: $state.weight, keyboard: .decimalPad)
-                welcomeInputField("Age", text: $state.age, keyboard: .numberPad)
+                welcomeInputField("Height", text: $state.height, keyboard: .decimalPad, unit: "cm")
+                welcomeInputField("Weight", text: $state.weight, keyboard: .decimalPad, unit: "kg")
+                welcomeInputField("Age", text: $state.age, keyboard: .numberPad, unit: "years")
                 welcomeMenu("Gender", selection: $state.gender, options: coachGenderOptions)
                 welcomeMenu("Body fat range", selection: $state.bodyFatRange, options: coachBodyFatRangeOptions.map {
                     CoachOption(value: $0.value, label: $0.label, description: nil)
                 })
                 welcomeMenu("Training days / week", selection: $state.trainingDays, options: coachTrainingDayOptions)
                 welcomeMenu("Activity level", selection: $state.activityLevel, options: coachActivityLevelOptions)
-                welcomeMenu("Goal", selection: $state.goal, options: coachGoalOptions)
                 welcomeMenu("Experience level", selection: $state.experienceLevel, options: coachExperienceLevelOptions)
             }
+
+            welcomeInputField("Goal, in your own words", text: $state.goal, keyboard: .default)
 
             TextEditor(text: $state.notes)
                 .frame(minHeight: 110)
@@ -435,14 +572,16 @@ struct CoachWelcomeFlowView: View {
 
     private var readyStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            CoachAvatar(
+            CoachHero(
                 coach: selectedCoach,
                 state: .celebrate,
-                size: 118,
+                size: 204,
+                showBubble: true,
                 bubbleText: selectedCoach == "lc"
                     ? "Profile saved. Now stop guessing and start executing."
                     : "You're ready. I'll help you build this step by step.",
-                showBubble: true
+                bubbleTone: .strong,
+                tailDirection: .left
             )
 
             VStack(alignment: .leading, spacing: 10) {
@@ -453,10 +592,10 @@ struct CoachWelcomeFlowView: View {
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     readySummaryTile("Coach", state.coach.isEmpty ? "Not selected" : state.coach.uppercased())
-                    readySummaryTile("Goal", optionLabel(state.goal, options: coachGoalOptions))
-                    readySummaryTile("Height", state.height)
-                    readySummaryTile("Weight", state.weight)
-                    readySummaryTile("Age", state.age)
+                    readySummaryTile("Goal", state.goal)
+                    readySummaryTile("Height", state.height.isEmpty ? "" : "\(state.height) cm")
+                    readySummaryTile("Weight", state.weight.isEmpty ? "" : "\(state.weight) kg")
+                    readySummaryTile("Age", state.age.isEmpty ? "" : "\(state.age) years")
                     readySummaryTile("Training days", optionLabel(state.trainingDays, options: coachTrainingDayOptions))
                     readySummaryTile("Activity", optionLabel(state.activityLevel, options: coachActivityLevelOptions))
                     readySummaryTile("Experience", optionLabel(state.experienceLevel, options: coachExperienceLevelOptions))
@@ -516,33 +655,41 @@ struct CoachWelcomeFlowView: View {
                 state.coach = coach
             }
         } label: {
-            HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
                 CoachAvatar(coach: coach, state: isSelected ? .selected : .idle, size: 78)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(badge.uppercased())
-                        .font(.system(size: 10, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundColor(Color.zymCoachInk(coach))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.82))
-                        .clipShape(Capsule())
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(badge.uppercased())
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundColor(Color.zymCoachInk(coach))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.82))
+                            .clipShape(Capsule())
 
-                    Text(coach.uppercased())
-                        .font(.custom("Syne", size: 30))
-                        .foregroundColor(Color.zymText)
+                        Text(coach.uppercased())
+                            .font(.custom("Syne", size: 30))
+                            .foregroundColor(Color.zymText)
 
-                    Text(description)
-                        .font(.system(size: 13))
-                        .foregroundColor(Color.zymSubtext)
-                        .multilineTextAlignment(.leading)
-
-                    Text(sample)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color.zymCoachInk(coach))
-                        .multilineTextAlignment(.leading)
+                        Text(description)
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.zymSubtext)
+                            .multilineTextAlignment(.leading)
+                    }
                 }
+
+                CoachHero(
+                    coach: coach,
+                    animationMode: isSelected ? .loop : .static,
+                    state: isSelected ? .selected : .idle,
+                    size: 148,
+                    showBubble: true,
+                    bubbleText: sample,
+                    bubbleTone: isSelected ? .strong : .soft,
+                    tailDirection: .left
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
@@ -567,16 +714,26 @@ struct CoachWelcomeFlowView: View {
         .buttonStyle(.plain)
     }
 
-    private func welcomeInputField(_ placeholder: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        TextField(placeholder, text: text)
-            .keyboardType(keyboard)
-            .padding(12)
-            .background(Color.white.opacity(0.82))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.zymLine, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    private func welcomeInputField(_ placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, unit: String? = nil) -> some View {
+        ZStack(alignment: .trailing) {
+            TextField(placeholder, text: text)
+                .keyboardType(keyboard)
+                .padding(12)
+                .padding(.trailing, unit == nil ? 0 : 54)
+                .background(Color.white.opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.zymLine, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            if let unit {
+                Text(unit)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+                    .padding(.trailing, 12)
+            }
+        }
     }
 
     private func welcomeMenu(_ label: String, selection: Binding<String>, options: [CoachOption]) -> some View {
@@ -622,15 +779,6 @@ struct CoachWelcomeFlowView: View {
         case 1: return "Choose your coach"
         case 2: return "Build your coach profile"
         default: return "You are ready"
-        }
-    }
-
-    private var stepSubtitle: String {
-        switch step {
-        case 0: return "A quick hello from the two coaching styles inside ZYM."
-        case 1: return "Pick the voice you want to hear when the day gets noisy."
-        case 2: return "Give your coach enough context to make the first plan useful."
-        default: return "Your coach profile is ready to guide meals, workouts, check-ins, and feedback."
         }
     }
 
