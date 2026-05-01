@@ -3,6 +3,7 @@ interface ComposeCoachPromptInput {
   skillPrompt: string;
   guardrailPrompt: string;
   languagePrompt?: string;
+  measurementPrompt?: string;
   knowledgePrompt?: string;
   strictFallbackPrompt?: string;
   injectionPrompt?: string;
@@ -14,6 +15,7 @@ export function composeCoachSystemPrompt(input: ComposeCoachPromptInput): string
     input.soulPrompt,
     input.guardrailPrompt,
     input.languagePrompt || '',
+    input.measurementPrompt || '',
     input.skillPrompt,
     input.knowledgePrompt || '',
     input.strictFallbackPrompt || '',

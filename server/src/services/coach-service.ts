@@ -15,6 +15,7 @@ import { MediaAssetService } from './media-asset-service.js';
 import { resolveUploadsDir } from '../config/app-paths.js';
 import { buildCoachTopic } from './message-service.js';
 import { resolveSelectedCoachForUser } from '../utils/coach-prefs.js';
+import { coachTypedToolsService } from './coach-typed-tools-service.js';
 
 function buildGuardrailPrompt() {
   return `[SAFETY GUARDRAILS]
@@ -163,6 +164,40 @@ function buildReplyLanguagePrompt(message: string): string {
 ${languageLine}
 - Prior conversation history, summaries, and retrieved context must not override the latest user message's language.
 - If the latest message intentionally mixes languages, follow the language used for the actual question.`;
+}
+
+function inferWeightUnitFromProfile(profile: Record<string, unknown>): 'lb' | 'kg' {
+  const preferred = String(profile.preferred_weight_unit || '').trim().toLowerCase();
+  if (preferred === 'lb' || preferred === 'lbs') return 'lb';
+  const raw = String(profile.weight || '').trim().toLowerCase();
+  return /\b(lb|lbs|pound|pounds)\b/.test(raw) ? 'lb' : 'kg';
+}
+
+function inferHeightUnitFromProfile(profile: Record<string, unknown>): 'ft/in' | 'cm' {
+  const preferred = String(profile.preferred_height_unit || '').trim().toLowerCase();
+  if (preferred === 'ft_in' || preferred === 'ft/in') return 'ft/in';
+  const raw = String(profile.height || '').trim().toLowerCase();
+  return /['"]|\b(ft|feet|foot|in|inch|inches)\b/.test(raw) ? 'ft/in' : 'cm';
+}
+
+async function buildMeasurementPrompt(userId: string): Promise<string> {
+  let weightUnit: 'lb' | 'kg' = 'kg';
+  let heightUnit: 'ft/in' | 'cm' = 'cm';
+
+  try {
+    const profile = await coachTypedToolsService.getProfile(userId);
+    weightUnit = inferWeightUnitFromProfile(profile);
+    heightUnit = inferHeightUnitFromProfile(profile);
+  } catch (error) {
+    logger.warn(`[coach] failed to load measurement preferences for user=${userId}`, error);
+  }
+
+  return `[MEASUREMENT UNITS]
+- The user's preferred bodyweight and training-load unit is ${weightUnit === 'lb' ? 'lb/lbs' : 'kg'}.
+- The user's preferred height unit is ${heightUnit}.
+- Match these units in replies, summaries, and recommendations unless the user explicitly asks for another unit.
+- Tool schemas store weight as kilograms and height as centimeters. Convert internally for tool calls, then speak back in the user's preferred units.
+- Treat height inputs like 5'11", 5'11, and 5 11 as 5 ft 11 in when the user is using ft/in.`;
 }
 
 interface KnowledgeCitationLink {
@@ -484,6 +519,7 @@ export class CoachService {
       soulPrompt: basePrompt,
       guardrailPrompt: buildGuardrailPrompt(),
       languagePrompt: buildReplyLanguagePrompt(normalizedMessage),
+      measurementPrompt: await buildMeasurementPrompt(userId),
       skillPrompt: activeSkill.prompt,
       injectionPrompt,
       sessionPrompt: buildSessionPrompt(session),
@@ -544,6 +580,7 @@ export class CoachService {
     const systemPrompt = composeCoachSystemPrompt({
       soulPrompt: basePrompt,
       guardrailPrompt: buildGuardrailPrompt(),
+      measurementPrompt: await buildMeasurementPrompt(userId),
       skillPrompt: activeSkill.prompt,
       sessionPrompt: buildSessionPrompt(session),
     });

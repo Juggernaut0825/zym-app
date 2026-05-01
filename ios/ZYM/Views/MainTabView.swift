@@ -1,11 +1,14 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var notificationManager: AppNotificationManager
     @State private var selectedTab = 0
     @State private var showCoachWelcome = false
     @State private var hasPresentedWelcomeThisSession = false
+    @State private var showNotificationSettingsPrompt = false
+    @State private var hasPromptedForNotificationsThisEntry = false
 
     var body: some View {
         ZStack {
@@ -62,6 +65,7 @@ struct MainTabView: View {
             notificationManager.registerForRemoteNotificationsIfAuthorized()
             notificationManager.submitDeviceTokenIfPossible(appState: appState)
             presentCoachWelcomeIfNeeded()
+            promptForNotificationSettingsIfNeeded()
         }
         .onChange(of: appState.isLoggedIn) { _, isLoggedIn in
             if isLoggedIn {
@@ -69,9 +73,12 @@ struct MainTabView: View {
                 notificationManager.registerForRemoteNotificationsIfAuthorized()
                 notificationManager.submitDeviceTokenIfPossible(appState: appState)
                 presentCoachWelcomeIfNeeded(force: true)
+                promptForNotificationSettingsIfNeeded(resetForEntry: true)
             } else {
                 showCoachWelcome = false
                 hasPresentedWelcomeThisSession = false
+                showNotificationSettingsPrompt = false
+                hasPromptedForNotificationsThisEntry = false
             }
         }
         .onChange(of: notificationManager.remoteDeviceToken) { _, _ in
@@ -84,14 +91,20 @@ struct MainTabView: View {
                 appState.requestedTabIndex = nil
             }
         }
-        .safeAreaInset(edge: .top) {
-            if appState.isLoggedIn && notificationManager.shouldPromptToOpenSettings {
-                NotificationPermissionBanner {
-                    notificationManager.openSystemSettings()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 6)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                promptForNotificationSettingsIfNeeded(resetForEntry: true)
+            } else if phase == .background {
+                hasPromptedForNotificationsThisEntry = false
             }
+        }
+        .alert("Notifications are off", isPresented: $showNotificationSettingsPrompt) {
+            Button("Open Settings") {
+                notificationManager.openSystemSettings()
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("Turn notifications on in Apple Settings so new messages and coach replies can alert you.")
         }
     }
 
@@ -106,41 +119,21 @@ struct MainTabView: View {
             showCoachWelcome = true
         }
     }
-}
 
-private struct NotificationPermissionBanner: View {
-    let onOpenSettings: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "bell.badge.slash.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(Color.zymPrimaryDark)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Notifications are off")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color.zymText)
-                Text("Turn them back on in Apple Settings so new messages and coach replies can alert you.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Color.zymSubtext)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 8)
-
-            Button("Open") {
-                onOpenSettings()
-            }
-            .buttonStyle(ZYMGhostButton())
+    private func promptForNotificationSettingsIfNeeded(resetForEntry: Bool = false) {
+        guard appState.isLoggedIn else { return }
+        if resetForEntry {
+            hasPromptedForNotificationsThisEntry = false
         }
-        .padding(12)
-        .background(Color.white.opacity(0.96))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.zymLine, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 8)
+        guard !hasPromptedForNotificationsThisEntry else { return }
+
+        notificationManager.refreshAuthorizationStatus()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard appState.isLoggedIn,
+                  !hasPromptedForNotificationsThisEntry,
+                  notificationManager.shouldPromptToOpenSettings else { return }
+            hasPromptedForNotificationsThisEntry = true
+            showNotificationSettingsPrompt = true
+        }
     }
 }

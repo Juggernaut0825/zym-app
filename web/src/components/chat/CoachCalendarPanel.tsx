@@ -9,6 +9,7 @@ import {
 import {
   type CoachDayRecord,
   type CoachMealRecord,
+  type CoachProfileData,
   type CoachRecordsResponse,
   type CoachTrainingRecord,
 } from '@/lib/types';
@@ -43,6 +44,7 @@ interface TrainingEditDraft {
 }
 
 type ProgressRange = 14 | 30 | 90;
+type WeightUnit = 'kg' | 'lb';
 
 function toText(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -121,6 +123,32 @@ function formatSignedMetric(value: number | null | undefined, suffix = ''): stri
   return `${rounded > 0 ? '+' : ''}${rounded}${suffix}`;
 }
 
+function inferPreferredWeightUnit(profile: CoachProfileData | null | undefined): WeightUnit {
+  const preferred = String(profile?.preferred_weight_unit || '').trim().toLowerCase();
+  if (preferred === 'lb' || preferred === 'lbs') return 'lb';
+  const raw = String(profile?.weight || '').trim().toLowerCase();
+  return /\b(lb|lbs|pound|pounds)\b/.test(raw) ? 'lb' : 'kg';
+}
+
+function kgToDisplayWeight(value: number | null | undefined, unit: WeightUnit): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return unit === 'lb' ? Math.round(value * 2.2046226218 * 10) / 10 : Math.round(value * 10) / 10;
+}
+
+function displayWeight(valueKg: number | null | undefined, unit: WeightUnit): string {
+  return formatNullableMetric(kgToDisplayWeight(valueKg, unit), ` ${unit}`);
+}
+
+function displaySignedWeight(valueKg: number | null | undefined, unit: WeightUnit): string {
+  return formatSignedMetric(kgToDisplayWeight(valueKg, unit), ` ${unit}`);
+}
+
+function weightInputToKg(value: string, unit: WeightUnit): number | undefined {
+  const numeric = toNumberOrUndefined(value);
+  if (numeric === undefined) return undefined;
+  return unit === 'lb' ? Math.round(numeric * 0.45359237 * 100) / 100 : numeric;
+}
+
 function buildLinePath(values: Array<number | null>, width: number, height: number): { path: string; dots: Array<{ x: number; y: number }> } {
   const numericValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   if (numericValues.length === 0) {
@@ -160,14 +188,14 @@ function buildMealEditDraft(day: string, meal: CoachMealRecord): MealEditDraft {
   };
 }
 
-function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): TrainingEditDraft {
+function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord, unit: WeightUnit): TrainingEditDraft {
   return {
     day,
     trainingId: entry.id,
     name: toText(entry.name).slice(0, 120),
     sets: toText(entry.sets),
     reps: toText(entry.reps).slice(0, 20),
-    weight_kg: toText(entry.weight_kg),
+    weight_kg: toText(kgToDisplayWeight(entry.weight_kg, unit)),
     notes: toText(entry.notes).slice(0, 500),
     time: toText(entry.time).slice(0, 5),
   };
@@ -185,6 +213,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
   const [progressRange, setProgressRange] = useState<ProgressRange>(30);
 
   const effectiveDay = selectedDay || localDayString(records?.profile?.timezone || undefined);
+  const preferredWeightUnit = inferPreferredWeightUnit(records?.profile);
 
   const dayLookup = useMemo(() => {
     const map = new Map<string, CoachDayRecord>();
@@ -207,13 +236,13 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
 
   const progressSeries = useMemo(() => progressDays.map((day, index, allDays) => {
     const record = dayLookup.get(day);
-    const weight = typeof record?.check_in?.weight_kg === 'number' ? record.check_in.weight_kg : null;
+    const weight = kgToDisplayWeight(record?.check_in?.weight_kg, preferredWeightUnit);
     const avgWeight = average(
       allDays
         .slice(Math.max(0, index - 6), index + 1)
         .map((innerDay) => {
           const innerRecord = dayLookup.get(innerDay);
-          return typeof innerRecord?.check_in?.weight_kg === 'number' ? innerRecord.check_in.weight_kg : null;
+          return kgToDisplayWeight(innerRecord?.check_in?.weight_kg, preferredWeightUnit);
         }),
     );
     return {
@@ -222,7 +251,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
       avgWeight,
       health: record?.health || null,
     };
-  }), [dayLookup, progressDays]);
+  }), [dayLookup, preferredWeightUnit, progressDays]);
 
   const trendChart = useMemo(
     () => buildLinePath(progressSeries.map((point) => point.weight), 640, 220),
@@ -293,7 +322,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
         name: trainingDraft.name.trim().slice(0, 120),
         sets: toIntOrUndefined(trainingDraft.sets),
         reps: trainingDraft.reps.trim().slice(0, 20) || undefined,
-        weight_kg: toNumberOrUndefined(trainingDraft.weight_kg),
+        weight_kg: weightInputToKg(trainingDraft.weight_kg, preferredWeightUnit),
         notes: trainingDraft.notes.trim().slice(0, 500) || undefined,
         time: trainingDraft.time.trim() || undefined,
       });
@@ -315,7 +344,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
     },
     {
       label: 'Latest Weight',
-      value: formatNullableMetric(records?.progress?.latestWeightKg, ' kg'),
+      value: displayWeight(records?.progress?.latestWeightKg, preferredWeightUnit),
       detail: records?.progress?.latestWeightDay ? `Last weigh-in ${formatDay(records.progress.latestWeightDay)}` : 'No weigh-ins yet',
     },
     {
@@ -325,7 +354,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
     },
     {
       label: '14d Delta',
-      value: formatSignedMetric(records?.progress?.weight14dDelta, ' kg'),
+      value: displaySignedWeight(records?.progress?.weight14dDelta, preferredWeightUnit),
       detail: records?.progress?.statusLabel || 'Need more signal',
     },
   ];
@@ -489,7 +518,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                   <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Check-in</p>
                     <p className="mt-1 text-sm text-slate-700">
-                      Weight {formatNullableMetric(selectedCheckIn?.weight_kg, ' kg')} · Body fat {formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}
+                      Weight {displayWeight(selectedCheckIn?.weight_kg, preferredWeightUnit)} · Body fat {formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}
                     </p>
                   </div>
                   <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
@@ -584,14 +613,14 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                             </p>
                             <p className="mt-2 text-sm font-semibold text-slate-900">{entry.name || 'Training entry'}</p>
                             <p className="mt-1 text-sm text-slate-600">
-                              {entry.sets || 0} sets · {entry.reps || '0'} reps{typeof entry.weight_kg === 'number' ? ` · ${entry.weight_kg} kg` : ''}
+                              {entry.sets || 0} sets · {entry.reps || '0'} reps{typeof entry.weight_kg === 'number' ? ` · ${displayWeight(entry.weight_kg, preferredWeightUnit)}` : ''}
                             </p>
                             {entry.notes ? <p className="mt-2 text-sm leading-7 text-slate-600">{entry.notes}</p> : null}
                           </div>
                           <button
                             className="text-sm font-semibold text-slate-500 transition hover:text-slate-900"
                             type="button"
-                            onClick={() => setTrainingDraft(buildTrainingEditDraft(effectiveDay, entry))}
+                            onClick={() => setTrainingDraft(buildTrainingEditDraft(effectiveDay, entry, preferredWeightUnit))}
                             disabled={saving}
                           >
                             Edit
@@ -652,7 +681,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
             <input className="input-shell" maxLength={120} placeholder="Exercise name" value={trainingDraft.name} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, name: event.target.value.slice(0, 120) } : prev))} />
             <input className="input-shell" inputMode="numeric" placeholder="Sets" value={trainingDraft.sets} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, sets: event.target.value.slice(0, 2) } : prev))} />
             <input className="input-shell" maxLength={20} placeholder="Reps" value={trainingDraft.reps} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, reps: event.target.value.slice(0, 20) } : prev))} />
-            <input className="input-shell" inputMode="decimal" placeholder="Weight kg" value={trainingDraft.weight_kg} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, weight_kg: event.target.value.slice(0, 8) } : prev))} />
+            <input className="input-shell" inputMode="decimal" placeholder={`Weight ${preferredWeightUnit}`} value={trainingDraft.weight_kg} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, weight_kg: event.target.value.slice(0, 8) } : prev))} />
             <input className="input-shell" maxLength={5} placeholder="Time HH:mm" value={trainingDraft.time} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, time: event.target.value.slice(0, 5) } : prev))} />
           </div>
           <textarea

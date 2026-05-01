@@ -5,7 +5,7 @@ import { requireUserId, toJson } from './base-tool-helpers.js';
 export class GetProfileTool implements Tool {
   definition: ToolDefinition = {
     name: 'get_profile',
-    description: 'Read the current user profile values and derived metrics.',
+    description: 'Read the current user profile values, derived metrics, and preferred measurement units.',
     parameters: {
       type: 'object',
       properties: {},

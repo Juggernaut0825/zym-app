@@ -2206,6 +2206,10 @@ app.post('/coach/select', requireSameUserIdFromBody('userId'), async (req, res) 
     const userId = toUserId(req.body.userId);
     const coach = normalizeCoachId(req.body.coach) || 'zj';
     const enabledCoaches = enableCoachForUser(userId, coach, true);
+    await publishRealtimeEventSafely({
+      type: 'inbox_updated',
+      userIds: [userId],
+    }, 'coach-select-inbox-updated');
     res.json({ success: true, selectedCoach: coach, enabledCoaches });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -2218,6 +2222,10 @@ app.post('/coach/enable', requireSameUserIdFromBody('userId'), async (req, res) 
     const coach = normalizeCoachId(req.body.coach) || 'zj';
     const enabledCoaches = enableCoachForUser(userId, coach, false);
     const selectedCoach = resolveSelectedCoachForUser(userId);
+    await publishRealtimeEventSafely({
+      type: 'inbox_updated',
+      userIds: [userId],
+    }, 'coach-enable-inbox-updated');
     res.json({ success: true, coach, selectedCoach, enabledCoaches });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

@@ -377,8 +377,17 @@ function parseHeightCm(value: unknown): number | null {
   if (feetInches) {
     const feet = Number(feetInches[1]);
     const inches = Number(feetInches[2]);
+    if (feet < 3 || feet > 8 || inches < 0 || inches >= 12) return null;
     const totalInches = feet * 12 + inches;
     return Math.round(totalInches * 2.54 * 10) / 10;
+  }
+
+  const looseFeetInches = text.match(/^([3-8])\s+(\d{1,2})$/);
+  if (looseFeetInches) {
+    const feet = Number(looseFeetInches[1]);
+    const inches = Number(looseFeetInches[2]);
+    if (inches >= 12) return null;
+    return Math.round((feet * 12 + inches) * 2.54 * 10) / 10;
   }
 
   const meters = text.match(/^(\d(?:\.\d+)?)\s*m$/);
@@ -412,6 +421,56 @@ function parseWeightKg(value: unknown): number | null {
   }
 
   return null;
+}
+
+function inferPreferredHeightUnit(profile: Record<string, unknown>): 'ft_in' | 'cm' {
+  const raw = normalizeFreeformProfileText(profile.height, 40).toLowerCase();
+  return /['"]|\b(ft|feet|foot|in|inch|inches)\b/.test(raw) || /^([3-8])\s+\d{1,2}$/.test(raw)
+    ? 'ft_in'
+    : 'cm';
+}
+
+function inferPreferredWeightUnit(profile: Record<string, unknown>): 'lb' | 'kg' {
+  const raw = normalizeFreeformProfileText(profile.weight, 40).toLowerCase();
+  return /\b(lb|lbs|pound|pounds)\b/.test(raw) ? 'lb' : 'kg';
+}
+
+function kgToLb(value: unknown): number | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return Math.round(numeric * 2.2046226218 * 10) / 10;
+}
+
+function cmToFeetInches(value: unknown): string | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  const totalInches = Math.round(numeric / 2.54);
+  const feet = Math.floor(totalInches / 12);
+  const inches = totalInches % 12;
+  return `${feet}'${inches}"`;
+}
+
+function withMeasurementPreferences(profile: Record<string, unknown>): Record<string, unknown> {
+  const preferredHeightUnit = inferPreferredHeightUnit(profile);
+  const preferredWeightUnit = inferPreferredWeightUnit(profile);
+  const displayHeight = preferredHeightUnit === 'ft_in'
+    ? (normalizeFreeformProfileText(profile.height, 40) || cmToFeetInches(profile.height_cm))
+    : (normalizeFreeformProfileText(profile.height, 40) || (Number.isFinite(Number(profile.height_cm)) ? `${Math.round(Number(profile.height_cm) * 10) / 10} cm` : null));
+  const displayWeight = preferredWeightUnit === 'lb'
+    ? (normalizeFreeformProfileText(profile.weight, 40) || (kgToLb(profile.weight_kg) !== null ? `${kgToLb(profile.weight_kg)} lb` : null))
+    : (normalizeFreeformProfileText(profile.weight, 40) || (Number.isFinite(Number(profile.weight_kg)) ? `${Math.round(Number(profile.weight_kg) * 10) / 10} kg` : null));
+
+  return {
+    ...profile,
+    preferred_height_unit: preferredHeightUnit,
+    preferred_weight_unit: preferredWeightUnit,
+    display_height: displayHeight,
+    display_weight: displayWeight,
+    unit_preferences: {
+      height: preferredHeightUnit,
+      weight: preferredWeightUnit,
+    },
+  };
 }
 
 function inferGender(value: unknown): 'male' | 'female' | null {
@@ -961,7 +1020,7 @@ export class CoachTypedToolsService {
     const progressSummary = computeCoachProgressSummary(daily, normalized.goal);
 
     return {
-      ...normalized,
+      ...withMeasurementPreferences(normalized),
       latest_checkin_at: safeString(normalized.latest_checkin_at, 120) || progressSummary.latestCheckInAt || null,
       progress_summary: progressSummary,
     };

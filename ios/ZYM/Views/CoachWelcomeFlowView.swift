@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 private struct CoachWelcomeSetupState {
@@ -887,11 +888,51 @@ private func coachWelcomeString(_ value: String?) -> String? {
     return trimmed.isEmpty ? nil : trimmed
 }
 
+private func coachWelcomeRegexGroups(_ value: String, pattern: String) -> [String]? {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+    let range = NSRange(value.startIndex..<value.endIndex, in: value)
+    guard let match = regex.firstMatch(in: value, range: range) else { return nil }
+    return (0..<match.numberOfRanges).compactMap { index in
+        let matchRange = match.range(at: index)
+        guard let swiftRange = Range(matchRange, in: value) else { return nil }
+        return String(value[swiftRange])
+    }
+}
+
+private func coachWelcomeNormalizeFeetInches(_ value: String) -> String? {
+    let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return nil }
+
+    if let loose = coachWelcomeRegexGroups(raw, pattern: #"^([3-8])\s+(\d{1,2})$"#),
+       loose.count >= 3,
+       let inches = Int(loose[2]),
+       inches < 12 {
+        return "\(loose[1])'\(inches)\""
+    }
+
+    let normalized = raw
+        .lowercased()
+        .replacingOccurrences(of: #"\s*(feet|foot|ft)\s*"#, with: "'", options: .regularExpression)
+        .replacingOccurrences(of: #"\s*(inches|inch|in)\s*$"#, with: "\"", options: .regularExpression)
+        .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+    if let quoted = coachWelcomeRegexGroups(normalized, pattern: #"^([3-8])'(\d{1,2})(?:"|''|')?$"#),
+       quoted.count >= 3,
+       let inches = Int(quoted[2]),
+       inches < 12 {
+        return "\(quoted[1])'\(inches)\""
+    }
+
+    return nil
+}
+
 private func coachWelcomeHeightValue(_ value: String?, fallbackCm: Double?) -> (value: String, unit: String) {
     guard let raw = coachWelcomeString(value) else {
         return (coachWelcomeNumber(fallbackCm), "cm")
     }
     let lower = raw.lowercased()
+    if let normalized = coachWelcomeNormalizeFeetInches(raw) {
+        return (normalized, "ft_in")
+    }
     if lower.contains("'") || lower.contains("\"") || lower.contains("ft") || lower.contains("inch") || lower.contains(" in") {
         return (raw.replacingOccurrences(of: " ", with: ""), "ft_in")
     }
@@ -912,7 +953,7 @@ private func coachWelcomeWeightValue(_ value: String?, fallbackKg: Double?) -> (
 private func coachWelcomeHeightPayload(_ value: String, unit: String) -> String? {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
-    return unit == "ft_in" ? trimmed : "\(trimmed) cm"
+    return unit == "ft_in" ? (coachWelcomeNormalizeFeetInches(trimmed) ?? trimmed) : "\(trimmed) cm"
 }
 
 private func coachWelcomeWeightPayload(_ value: String, unit: String) -> String? {

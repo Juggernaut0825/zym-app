@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+private enum CalendarWeightUnit: String {
+    case kg
+    case lb
+
+    var label: String { rawValue }
+    var suffix: String { " \(rawValue)" }
+}
+
 private struct CalendarMealDraft: Identifiable {
     let id = UUID()
     var day: String
@@ -32,16 +40,18 @@ private struct CalendarTrainingDraft: Identifiable {
     var sets: String
     var reps: String
     var weightKg: String
+    var weightUnit: CalendarWeightUnit
     var notes: String
     var time: String
 
-    init(day: String, entry: CoachTrainingRecord) {
+    init(day: String, entry: CoachTrainingRecord, weightUnit: CalendarWeightUnit) {
         self.day = day
         self.trainingId = entry.id
         self.name = calendarDraftString(entry.name, limit: 120)
         self.sets = calendarDraftNumber(entry.sets)
         self.reps = calendarDraftString(entry.reps, limit: 20)
-        self.weightKg = calendarDraftNumber(entry.weight_kg)
+        self.weightKg = calendarDraftNumber(calendarDisplayWeight(entry.weight_kg, unit: weightUnit))
+        self.weightUnit = weightUnit
         self.notes = calendarDraftString(entry.notes, limit: 500)
         self.time = calendarDraftString(entry.time, limit: 5)
     }
@@ -57,6 +67,27 @@ private func calendarDraftNumber(_ value: Double?) -> String {
         return String(Int(value.rounded()))
     }
     return String(format: "%.2f", value).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
+}
+
+private func calendarPreferredWeightUnit(from profile: CoachProfileData?) -> CalendarWeightUnit {
+    let raw = (profile?.weight ?? "").lowercased()
+    return raw.range(of: #"\b(lb|lbs|pound|pounds)\b"#, options: .regularExpression) == nil ? .kg : .lb
+}
+
+private func calendarDisplayWeight(_ valueKg: Double?, unit: CalendarWeightUnit) -> Double? {
+    guard let valueKg, valueKg.isFinite else { return nil }
+    let value = unit == .lb ? valueKg * 2.2046226218 : valueKg
+    return (value * 10).rounded() / 10
+}
+
+private func calendarWeightKg(from input: String, unit: CalendarWeightUnit) -> Double? {
+    guard let value = Double(input.trimmingCharacters(in: .whitespacesAndNewlines)), value.isFinite else { return nil }
+    return unit == .lb ? (value * 0.45359237 * 100).rounded() / 100 : value
+}
+
+private func calendarWeightText(_ valueKg: Double?, unit: CalendarWeightUnit) -> String? {
+    guard let display = calendarDisplayWeight(valueKg, unit: unit) else { return nil }
+    return "\(calendarDraftNumber(display))\(unit.suffix)"
 }
 
 private func calendarLocalDay(from date: Date, timeZoneId: String?) -> String {
@@ -134,13 +165,6 @@ private enum CalendarTrendMetric: String, CaseIterable, Identifiable {
         }
     }
 
-    var unit: String {
-        switch self {
-        case .weight: return " kg"
-        case .bodyFat: return "%"
-        }
-    }
-
     var decimals: Int { 1 }
 }
 
@@ -186,6 +210,10 @@ struct CalendarView: View {
         selectedRecord?.training ?? []
     }
 
+    private var preferredWeightUnit: CalendarWeightUnit {
+        calendarPreferredWeightUnit(from: records?.profile)
+    }
+
     private var selectedHealth: CoachHealthSnapshot? {
         selectedRecord?.health
     }
@@ -196,7 +224,7 @@ struct CalendarView: View {
 
     private var weightPoints: [(day: String, weight: Double?)] {
         progressDays.map { day in
-            let weight = records?.records.first(where: { $0.day == day })?.check_in?.weight_kg
+            let weight = calendarDisplayWeight(records?.records.first(where: { $0.day == day })?.check_in?.weight_kg, unit: preferredWeightUnit)
             return (day: day, weight: weight)
         }
     }
@@ -218,7 +246,7 @@ struct CalendarView: View {
     }
 
     private var selectedOrLatestWeight: Double? {
-        selectedRecord?.check_in?.weight_kg ?? records?.progress?.latestWeightKg
+        calendarDisplayWeight(selectedRecord?.check_in?.weight_kg ?? records?.progress?.latestWeightKg, unit: preferredWeightUnit)
     }
 
     private var selectedOrLatestBodyFat: Double? {
@@ -227,10 +255,10 @@ struct CalendarView: View {
 
     private var trendDelta: Double? {
         if trendMetric == .weight && progressRange == 14 {
-            return records?.progress?.weight14dDelta
+            return calendarDisplayWeight(records?.progress?.weight14dDelta, unit: preferredWeightUnit)
         }
         if trendMetric == .weight && progressRange == 30 {
-            return records?.progress?.weight30dDelta
+            return calendarDisplayWeight(records?.progress?.weight30dDelta, unit: preferredWeightUnit)
         }
         let numeric = trendPoints.compactMap(\.value)
         guard let first = numeric.first, let last = numeric.last else { return nil }
@@ -340,7 +368,7 @@ struct CalendarView: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 CalendarMetricTile(title: "Intake", value: calendarMetric(selectedRecord?.total_intake, suffix: " kcal"), systemImage: "fork.knife")
                 CalendarMetricTile(title: "Steps", value: selectedHealth.map { "\($0.steps)" } ?? "--", systemImage: "figure.walk")
-                CalendarMetricTile(title: "Weight", value: calendarMetric(selectedOrLatestWeight, suffix: " kg", decimals: 1), systemImage: "scalemass")
+                CalendarMetricTile(title: "Weight", value: calendarMetric(selectedOrLatestWeight, suffix: preferredWeightUnit.suffix, decimals: 1), systemImage: "scalemass")
                 CalendarMetricTile(title: "Body fat", value: calendarMetric(selectedOrLatestBodyFat, suffix: "%", decimals: 1), systemImage: "percent")
             }
         }
@@ -369,7 +397,8 @@ struct CalendarView: View {
 
                     Spacer()
 
-                    Text(trendDelta.map { "\(calendarSignedMetric($0, suffix: trendMetric.unit, decimals: trendMetric.decimals)) over \(progressRange)d" } ?? "More check-ins needed")
+                    let trendSuffix = trendMetric == .weight ? preferredWeightUnit.suffix : "%"
+                    Text(trendDelta.map { "\(calendarSignedMetric($0, suffix: trendSuffix, decimals: trendMetric.decimals)) over \(progressRange)d" } ?? "More check-ins needed")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(Color.zymSubtext)
                         .lineLimit(1)
@@ -490,9 +519,15 @@ struct CalendarView: View {
                             }
                             Spacer()
                             Button("Edit") {
-                                trainingDraft = CalendarTrainingDraft(day: effectiveDay, entry: entry)
+                                trainingDraft = CalendarTrainingDraft(day: effectiveDay, entry: entry, weightUnit: preferredWeightUnit)
                             }
                             .buttonStyle(ZYMGhostButton())
+                        }
+
+                        if let weight = calendarWeightText(entry.weight_kg, unit: preferredWeightUnit) {
+                            Text("Weight \(weight)")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
                         }
 
                         if let notes = entry.notes, !notes.isEmpty {
@@ -609,7 +644,7 @@ struct CalendarView: View {
         if !draft.name.isEmpty { body["name"] = draft.name }
         if let sets = Int(draft.sets) { body["sets"] = sets }
         if !draft.reps.isEmpty { body["reps"] = draft.reps }
-        if let weight = Double(draft.weightKg) { body["weight_kg"] = weight }
+        if let weight = calendarWeightKg(from: draft.weightKg, unit: draft.weightUnit) { body["weight_kg"] = weight }
         if !draft.notes.isEmpty { body["notes"] = draft.notes }
         if !draft.time.isEmpty { body["time"] = draft.time }
 
@@ -987,7 +1022,7 @@ private struct CalendarTrainingEditSheet: View {
                     TextField("Name", text: $localDraft.name)
                     TextField("Sets", text: $localDraft.sets)
                     TextField("Reps", text: $localDraft.reps)
-                    TextField("Weight kg", text: $localDraft.weightKg)
+                    TextField("Weight \(localDraft.weightUnit.label)", text: $localDraft.weightKg)
                     TextField("Time", text: $localDraft.time)
                     TextField("Notes", text: $localDraft.notes, axis: .vertical)
                 }

@@ -11,7 +11,7 @@ export class LogCheckInTool implements Tool {
       properties: {
         weight_kg: {
           type: 'number',
-          description: 'Optional bodyweight in kilograms.',
+          description: 'Optional bodyweight in kilograms. If the user gives pounds/lbs, convert pounds to kilograms before calling this tool.',
           minimum: 20,
           maximum: 350,
         },

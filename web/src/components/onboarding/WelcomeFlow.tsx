@@ -109,17 +109,34 @@ function stepTitle(step: number): string {
   }
 }
 
+function normalizeFeetInchesInput(value: string): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const loose = raw.match(/^([3-8])\s+(\d{1,2})$/);
+  if (loose) {
+    const inches = Number(loose[2]);
+    return inches < 12 ? `${loose[1]}'${inches}"` : null;
+  }
+
+  const normalized = raw
+    .toLowerCase()
+    .replace(/\s*(?:feet|foot|ft)\s*/gi, "'")
+    .replace(/\s*(?:inches|inch|in)\s*$/gi, '"')
+    .replace(/\s+/g, '')
+    .trim();
+  const quoted = normalized.match(/^([3-8])'(\d{1,2})(?:"|''|')?$/);
+  if (!quoted) return null;
+  const inches = Number(quoted[2]);
+  return inches < 12 ? `${quoted[1]}'${inches}"` : null;
+}
+
 function normalizeHeightInput(value: unknown): { value: string; unit: HeightUnit } {
   const raw = String(value ?? '').trim();
   if (!raw) return { value: '', unit: 'cm' };
   const lower = raw.toLowerCase();
-  if (/['"]|\b(ft|feet|foot|in|inch|inches)\b/.test(lower)) {
-    const value = raw
-      .replace(/\s*(?:feet|foot|ft)\s*/gi, "'")
-      .replace(/\s*(?:inches|inch|in)\s*$/gi, '"')
-      .replace(/\s+/g, '')
-      .trim();
-    return { value, unit: 'ft_in' };
+  const feetInches = normalizeFeetInchesInput(raw);
+  if (feetInches || /['"]|\b(ft|feet|foot|in|inch|inches)\b/.test(lower)) {
+    return { value: feetInches || raw.replace(/\s+/g, '').trim(), unit: 'ft_in' };
   }
   const meters = lower.match(/^(\d(?:\.\d+)?)\s*m$/);
   if (meters) {
@@ -150,7 +167,7 @@ function normalizeWeightInput(value: unknown): { value: string; unit: WeightUnit
 function heightForPayload(state: SetupState): string | undefined {
   const value = state.height.trim();
   if (!value) return undefined;
-  return state.heightUnit === 'ft_in' ? value : `${value} cm`;
+  return state.heightUnit === 'ft_in' ? (normalizeFeetInchesInput(value) || value) : `${value} cm`;
 }
 
 function weightForPayload(state: SetupState): string | undefined {
@@ -161,7 +178,7 @@ function weightForPayload(state: SetupState): string | undefined {
 
 function heightSummary(state: SetupState): string {
   if (!state.height.trim()) return '';
-  return state.heightUnit === 'ft_in' ? state.height.trim() : `${state.height.trim()} cm`;
+  return state.heightUnit === 'ft_in' ? (normalizeFeetInchesInput(state.height) || state.height.trim()) : `${state.height.trim()} cm`;
 }
 
 function weightSummary(state: SetupState): string {

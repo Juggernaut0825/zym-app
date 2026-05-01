@@ -52,6 +52,8 @@ interface TrainingEditDraft {
   time: string;
 }
 
+type WeightUnit = 'kg' | 'lb';
+
 function toText(value: unknown): string {
   if (value === null || value === undefined) return '';
   return String(value);
@@ -68,6 +70,29 @@ function toIntOrUndefined(value: string): number | undefined {
   const numeric = toNumberOrUndefined(value);
   if (numeric === undefined) return undefined;
   return Math.floor(numeric);
+}
+
+function inferPreferredWeightUnit(profile: CoachProfileData | null | undefined): WeightUnit {
+  const preferred = String(profile?.preferred_weight_unit || '').trim().toLowerCase();
+  if (preferred === 'lb' || preferred === 'lbs') return 'lb';
+  const raw = String(profile?.weight || '').trim().toLowerCase();
+  return /\b(lb|lbs|pound|pounds)\b/.test(raw) ? 'lb' : 'kg';
+}
+
+function kgToDisplayWeight(value: number | null | undefined, unit: WeightUnit): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return unit === 'lb' ? Math.round(value * 2.2046226218 * 10) / 10 : Math.round(value * 10) / 10;
+}
+
+function displayWeight(valueKg: number | null | undefined, unit: WeightUnit): string {
+  const value = kgToDisplayWeight(valueKg, unit);
+  return typeof value === 'number' ? `${value} ${unit}` : `0 ${unit}`;
+}
+
+function weightInputToKg(value: string, unit: WeightUnit): number | undefined {
+  const numeric = toNumberOrUndefined(value);
+  if (numeric === undefined) return undefined;
+  return unit === 'lb' ? Math.round(numeric * 0.45359237 * 100) / 100 : numeric;
 }
 
 function formatDay(day: string): string {
@@ -104,14 +129,14 @@ function buildMealEditDraft(day: string, meal: CoachMealRecord): MealEditDraft {
   };
 }
 
-function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): TrainingEditDraft {
+function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord, unit: WeightUnit): TrainingEditDraft {
   return {
     day,
     trainingId: entry.id,
     name: toText(entry.name).slice(0, 120),
     sets: toText(entry.sets),
     reps: toText(entry.reps).slice(0, 20),
-    weight_kg: toText(entry.weight_kg),
+    weight_kg: toText(kgToDisplayWeight(entry.weight_kg, unit)),
     notes: toText(entry.notes).slice(0, 500),
     time: toText(entry.time).slice(0, 5),
   };
@@ -139,6 +164,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
   const [mealDraft, setMealDraft] = useState<MealEditDraft | null>(null);
   const [trainingDraft, setTrainingDraft] = useState<TrainingEditDraft | null>(null);
   const primaryButtonClass = coachId === 'lc' ? 'btn btn-lc' : 'btn btn-zj';
+  const preferredWeightUnit = inferPreferredWeightUnit(records?.profile);
 
   async function loadData() {
     if (!userId || userId <= 0) return;
@@ -264,7 +290,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
         name: trainingDraft.name.trim().slice(0, 120),
         sets: toIntOrUndefined(trainingDraft.sets),
         reps: trainingDraft.reps.trim().slice(0, 20) || undefined,
-        weight_kg: toNumberOrUndefined(trainingDraft.weight_kg),
+        weight_kg: weightInputToKg(trainingDraft.weight_kg, preferredWeightUnit),
         notes: trainingDraft.notes.trim().slice(0, 500),
         time: trainingDraft.time.trim() || undefined,
       });
@@ -435,12 +461,12 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
                   {day.training.map((entry, trainingIndex) => (
                     <li key={entry.id} className="flex items-start justify-between gap-3">
                       <span className="min-w-0 flex-1">
-                        {trainingIndex + 1}) {entry.name || 'Training entry'} {entry.time ? `${entry.time}` : '--:--'} sets: {entry.sets || 0}, reps: {entry.reps || '0'}, weight: {entry.weight_kg || 0} kg{entry.notes ? `, notes: ${entry.notes}` : ''}
+                        {trainingIndex + 1}) {entry.name || 'Training entry'} {entry.time ? `${entry.time}` : '--:--'} sets: {entry.sets || 0}, reps: {entry.reps || '0'}, weight: {displayWeight(entry.weight_kg, preferredWeightUnit)}{entry.notes ? `, notes: ${entry.notes}` : ''}
                       </span>
                       <button
                         className="shrink-0 text-xs font-semibold text-slate-500 transition hover:text-slate-900"
                         type="button"
-                        onClick={() => setTrainingDraft(buildTrainingEditDraft(day.day, entry))}
+                        onClick={() => setTrainingDraft(buildTrainingEditDraft(day.day, entry, preferredWeightUnit))}
                         disabled={saving || loading}
                       >
                         Edit
@@ -495,7 +521,7 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
             <input className="input-shell" maxLength={120} placeholder="Exercise name" value={trainingDraft.name} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, name: event.target.value.slice(0, 120) } : prev))} />
             <input className="input-shell" inputMode="numeric" placeholder="Sets" value={trainingDraft.sets} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, sets: event.target.value.slice(0, 2) } : prev))} />
             <input className="input-shell" maxLength={20} placeholder="Reps" value={trainingDraft.reps} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, reps: event.target.value.slice(0, 20) } : prev))} />
-            <input className="input-shell" inputMode="decimal" placeholder="Weight kg" value={trainingDraft.weight_kg} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, weight_kg: event.target.value.slice(0, 8) } : prev))} />
+            <input className="input-shell" inputMode="decimal" placeholder={`Weight ${preferredWeightUnit}`} value={trainingDraft.weight_kg} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, weight_kg: event.target.value.slice(0, 8) } : prev))} />
             <input className="input-shell" maxLength={5} placeholder="Time HH:mm" value={trainingDraft.time} onChange={(event) => setTrainingDraft((prev) => (prev ? { ...prev, time: event.target.value.slice(0, 5) } : prev))} />
           </div>
           <textarea

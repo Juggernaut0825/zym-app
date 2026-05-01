@@ -18,6 +18,13 @@ export interface AIResponse {
 }
 
 const OPENROUTER_ERROR_DETAIL_MAX = 800;
+const DEFAULT_OPENROUTER_MAX_TOKENS = 2048;
+
+function resolveOpenRouterMaxTokens(): number {
+  const parsed = Number(process.env.OPENROUTER_MAX_TOKENS || DEFAULT_OPENROUTER_MAX_TOKENS);
+  if (!Number.isFinite(parsed)) return DEFAULT_OPENROUTER_MAX_TOKENS;
+  return Math.min(4096, Math.max(256, Math.floor(parsed)));
+}
 
 function summarizeOpenRouterError(error: unknown): {
   status: number | null;
@@ -70,6 +77,7 @@ export class AIService {
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private maxTokens: number;
   private usageContext: OpenRouterUsageContext;
 
   constructor(options: { usageContext?: OpenRouterUsageContext } = {}) {
@@ -80,6 +88,7 @@ export class AIService {
 
     this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
     this.model = process.env.GAUZ_LLM_MODEL || 'google/gemini-3-flash-preview';
+    this.maxTokens = resolveOpenRouterMaxTokens();
     this.usageContext = options.usageContext || {
       source: 'ai_service_chat',
       requestKind: 'chat',
@@ -104,7 +113,7 @@ export class AIService {
             parameters: t.parameters,
           },
         })) : undefined,
-        max_tokens: 4096,
+        max_tokens: this.maxTokens,
       }, {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -149,7 +158,7 @@ export class AIService {
             parameters: t.parameters,
           },
         })) : undefined,
-        max_tokens: 4096,
+        max_tokens: this.maxTokens,
         stream: false,
       }, {
         headers: {

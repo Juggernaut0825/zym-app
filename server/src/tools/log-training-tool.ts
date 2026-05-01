@@ -11,7 +11,7 @@ export class LogTrainingTool implements Tool {
       properties: {
         entries: {
           type: 'array',
-          description: 'Array of training entries with fields like name, sets, reps, weight_kg.',
+          description: 'Array of training entries with fields like name, sets, reps, weight_kg. If the user gives pounds/lbs, convert to kilograms before calling this tool.',
           itemType: 'object',
           items: {
             type: 'object',
@@ -37,7 +37,7 @@ export class LogTrainingTool implements Tool {
               },
               weight_kg: {
                 type: 'number',
-                description: 'Optional working weight in kilograms.',
+                description: 'Optional working weight in kilograms. If the user gives pounds/lbs, convert pounds to kilograms before calling this tool.',
                 minimum: 0,
                 maximum: 500,
               },

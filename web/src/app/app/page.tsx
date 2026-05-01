@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, Dispatch, FormEvent, SetStateAction, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import {
@@ -705,6 +705,11 @@ function coachDisplayName(coach: 'zj' | 'lc'): string {
 
 function buildCoachTopic(userId: number, coach: 'zj' | 'lc'): string {
   return coach === 'lc' ? `coach_lc_${userId}` : `coach_${userId}`;
+}
+
+function isImeComposing(event: ReactKeyboardEvent<HTMLInputElement>): boolean {
+  const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+  return Boolean(nativeEvent.isComposing || nativeEvent.keyCode === 229);
 }
 
 function buildAppUrl(tab: TabKey = 'messages', welcomeState?: 'done', topic?: string): string {
@@ -1592,14 +1597,25 @@ export default function AppPage() {
   };
 
   const handleWelcomeComplete = (coach: 'zj' | 'lc') => {
+    const userId = authUserIdRef.current || authUserId;
+    const topic = userId > 0 ? buildCoachTopic(userId, coach) : '';
     setAuthSelectedCoach(coach);
-    if (selectedCoachRef.current !== coach) {
-      window.location.replace(buildAppUrl(tab, 'done'));
-      return;
-    }
     setSelectedCoach(coach);
     selectedCoachRef.current = coach;
+    setEnabledCoaches((prev) => (prev.includes(coach) ? prev : [coach, ...prev]));
     setWelcomeFlowOpen(false);
+    setTab('messages');
+    if (topic) {
+      requestedTopicRef.current = topic;
+      setActiveTopic(topic);
+      setMobileConversationListOpen(false);
+      window.history.replaceState({}, '', buildAppUrl('messages', 'done', topic));
+      void loadInbox(userId).then(() => {
+        setActiveTopic(topic);
+      });
+    } else {
+      window.history.replaceState({}, '', buildAppUrl('messages', 'done'));
+    }
     showNotice('Coach profile saved.');
   };
 
@@ -4434,11 +4450,12 @@ export default function AppPage() {
 	                    placeholder="Type a message..."
 	                    onKeyDown={(event) => {
 	                      if (event.key === 'Enter' && !event.shiftKey && !composerTooLong) {
+	                        if (isImeComposing(event)) return;
 	                        event.preventDefault();
 	                        void handleSendMessage();
 	                      }
-                    }}
-                  />
+	                    }}
+	                  />
 
                   <div className="flex shrink-0 items-center gap-2 self-auto sm:self-end">
                     {activeConversation?.type === 'group' && activeConversation.coachEnabled !== 'none' ? (
@@ -5300,15 +5317,16 @@ export default function AppPage() {
                         <div className="mt-3 flex flex-col gap-2.5 sm:mt-4 md:flex-row">
                           <input
                             className="input-shell text-[14px]"
-                            placeholder="Write a comment..."
-                            value={commentDraftByPostId[post.id] || ''}
-                            onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                void handleCreatePostComment(post.id);
-                              }
-                            }}
+	                            placeholder="Write a comment..."
+	                            value={commentDraftByPostId[post.id] || ''}
+	                            onChange={(event) => setCommentDraftByPostId((prev) => ({ ...prev, [post.id]: event.target.value }))}
+	                            onKeyDown={(event) => {
+	                              if (event.key === 'Enter') {
+	                                if (isImeComposing(event)) return;
+	                                event.preventDefault();
+	                                void handleCreatePostComment(post.id);
+	                              }
+	                            }}
                           />
                           <button
                             className={`${selectedCoachButtonClass} self-start md:self-auto`}

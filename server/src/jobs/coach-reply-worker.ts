@@ -40,6 +40,34 @@ async function publishCoachLifecycle(topic: string, active: boolean): Promise<vo
   }, active ? 'coach-typing-start' : 'coach-typing-stop');
 }
 
+async function sendCoachFallbackMessage(job: CoachReplyJobPayload, participantUserIds: number[]): Promise<void> {
+  const fallbackText = "I'm having trouble replying right now. Please try again in a moment.";
+  const messageId = await MessageService.sendMessage(0, job.topic, fallbackText, []);
+  const [fallbackMessage] = await MessageService.getMessages(job.topic, 1);
+
+  await publishRealtimeEventSafely({
+    type: 'message_created',
+    topic: job.topic,
+    message: fallbackMessage || {
+      id: messageId,
+      topic: job.topic,
+      from_user_id: 0,
+      content: fallbackText,
+      content_b64: encodeUtf8Base64(fallbackText),
+      media_urls: [],
+      mentions: [],
+      created_at: new Date().toISOString(),
+    },
+  }, 'coach-fallback-message-created');
+
+  if (participantUserIds.length > 0) {
+    await publishRealtimeEventSafely({
+      type: 'inbox_updated',
+      userIds: participantUserIds,
+    }, 'coach-fallback-inbox-updated');
+  }
+}
+
 export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<void> {
   const participantUserIds = Array.from(new Set([
     ...job.participantUserIds,
@@ -114,6 +142,11 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
     }
   } catch (error) {
     logger.error(`[jobs] coach reply failed for ${job.topic}`, error);
+    try {
+      await sendCoachFallbackMessage(job, participantUserIds);
+    } catch (fallbackError) {
+      logger.error(`[jobs] failed to send coach fallback for ${job.topic}`, fallbackError);
+    }
   } finally {
     await publishCoachLifecycle(job.topic, false);
   }
