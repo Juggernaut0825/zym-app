@@ -95,6 +95,11 @@ function LoginScreen() {
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const socialConsentAcceptedRef = useRef(false);
   const socialAuthAvailable = Boolean(GOOGLE_CLIENT_ID || APPLE_CLIENT_ID);
+  const socialDividerLabel = GOOGLE_CLIENT_ID && APPLE_CLIENT_ID
+    ? 'Or continue with Google or Apple'
+    : GOOGLE_CLIENT_ID
+      ? 'Or continue with Google'
+      : 'Or continue with Apple';
 
   const routeAfterLogin = (_selectedCoach: 'zj' | 'lc' | null) => {
     router.push('/app');
@@ -341,7 +346,7 @@ function LoginScreen() {
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Google or Apple</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">{socialDividerLabel}</span>
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
                 </div>
                 <label className="flex items-start gap-3 rounded-2xl border border-[rgba(171,164,155,0.16)] bg-white/55 px-4 py-3 text-sm leading-6 text-[color:var(--ink-500)]">
