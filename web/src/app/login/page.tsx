@@ -72,6 +72,17 @@ function appleFullNameFromResponse(name: any): string | null {
   return rendered || null;
 }
 
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 shrink-0">
+      <path fill="#4285F4" d="M23.5 12.2c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.1 3.5-8.7z" />
+      <path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.9-3a7.4 7.4 0 0 1-11-3.9H1v3.1A12 12 0 0 0 12 24z" />
+      <path fill="#FBBC05" d="M5 14.2a7.2 7.2 0 0 1 0-4.4V6.7H1a12 12 0 0 0 0 10.6l4-3.1z" />
+      <path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8L20 3.1A12 12 0 0 0 1 6.7l4 3.1a7.1 7.1 0 0 1 7-5z" />
+    </svg>
+  );
+}
+
 function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -151,12 +162,13 @@ function LoginScreen() {
         itp_support: true,
       });
       google.accounts.id.renderButton(container, {
+        type: 'standard',
         theme: 'outline',
         size: 'large',
-        shape: 'pill',
+        shape: 'rectangular',
         text: 'continue_with',
         logo_alignment: 'left',
-        width: Math.max(container.clientWidth, 320),
+        width: Math.max(container.clientWidth, 360),
       });
     };
 
@@ -329,7 +341,7 @@ function LoginScreen() {
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Apple or Google</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Google or Apple</span>
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
                 </div>
                 <label className="flex items-start gap-3 rounded-2xl border border-[rgba(171,164,155,0.16)] bg-white/55 px-4 py-3 text-sm leading-6 text-[color:var(--ink-500)]">
@@ -351,33 +363,40 @@ function LoginScreen() {
                     .
                   </span>
                 </label>
-                <div className="space-y-2">
-                  {APPLE_CLIENT_ID ? (
-                    <button
-                      type="button"
-                      onClick={handleAppleSignIn}
-                      disabled={pending}
-                      className={`flex min-h-[42px] w-full items-center justify-center gap-2 rounded-full border border-slate-950 bg-slate-950 px-4 text-[15px] font-semibold text-white transition active:scale-[0.99] ${!socialConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}`}
-                    >
-                      <span className="text-[18px] leading-none"></span>
-                      Continue with Apple
-                    </button>
-                  ) : null}
+                <div className="space-y-2.5">
                   {GOOGLE_CLIENT_ID ? (
-                    <div className={`relative ${pending ? 'pointer-events-none opacity-60' : ''}`}>
+                    <div
+                      className={`relative flex min-h-[52px] w-full items-center justify-center overflow-hidden rounded-[18px] border border-[rgba(15,23,42,0.12)] bg-white px-4 text-[15px] font-semibold text-[color:var(--ink-900)] shadow-[0_10px_22px_rgba(15,23,42,0.04)] transition hover:border-[rgba(15,23,42,0.2)] hover:bg-white active:scale-[0.99] ${pending ? 'pointer-events-none opacity-70' : ''} ${!socialConsentAccepted ? 'saturate-[0.92]' : ''}`}
+                    >
+                      <div className="pointer-events-none relative z-0 flex items-center justify-center gap-4">
+                        <GoogleMark />
+                        <span>Continue with Google</span>
+                      </div>
                       <div
                         ref={googleButtonRef}
-                        className={!socialConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}
+                        aria-hidden="true"
+                        className={`absolute inset-0 z-10 overflow-hidden rounded-[18px] ${socialConsentAccepted ? 'opacity-[0.01]' : 'pointer-events-none opacity-0'}`}
                       />
                       {!socialConsentAccepted ? (
                         <button
                           type="button"
-                          className="absolute inset-0 z-10 cursor-not-allowed rounded-full"
+                          className="absolute inset-0 z-20 cursor-not-allowed rounded-[18px]"
                           aria-label="Confirm Terms and Privacy before continuing with Google"
                           onClick={() => setSocialConsentWarning('Please confirm Terms and Privacy before continuing with Google.')}
                         />
                       ) : null}
                     </div>
+                  ) : null}
+                  {APPLE_CLIENT_ID ? (
+                    <button
+                      type="button"
+                      onClick={handleAppleSignIn}
+                      disabled={pending}
+                      className={`flex min-h-[52px] w-full items-center justify-center gap-4 rounded-[18px] border border-[rgba(15,23,42,0.12)] bg-white px-4 text-[15px] font-semibold text-[color:var(--ink-900)] shadow-[0_10px_22px_rgba(15,23,42,0.04)] transition hover:border-[rgba(15,23,42,0.2)] hover:bg-white active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70 ${!socialConsentAccepted ? 'saturate-[0.92]' : ''}`}
+                    >
+                      <span className="text-[24px] leading-none text-black"></span>
+                      <span>Continue with Apple</span>
+                    </button>
                   ) : null}
                 </div>
                 {socialConsentWarning ? (
