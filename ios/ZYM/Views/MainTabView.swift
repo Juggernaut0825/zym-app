@@ -84,6 +84,14 @@ struct MainTabView: View {
         .onChange(of: notificationManager.remoteDeviceToken) { _, _ in
             notificationManager.submitDeviceTokenIfPossible(appState: appState)
         }
+        .onChange(of: appState.selectedCoach) { _, nextCoach in
+            if let nextCoach, !nextCoach.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                hasPresentedWelcomeThisSession = true
+                withAnimation(.zymSoft) {
+                    showCoachWelcome = false
+                }
+            }
+        }
         .onChange(of: appState.requestedTabIndex) { _, nextTab in
             guard let nextTab else { return }
             selectedTab = nextTab
@@ -110,6 +118,11 @@ struct MainTabView: View {
 
     private func presentCoachWelcomeIfNeeded(force: Bool = false) {
         guard appState.isLoggedIn else { return }
+        guard needsCoachWelcome else {
+            hasPresentedWelcomeThisSession = true
+            showCoachWelcome = false
+            return
+        }
         if force {
             hasPresentedWelcomeThisSession = false
         }
@@ -118,6 +131,11 @@ struct MainTabView: View {
         withAnimation(.zymSoft) {
             showCoachWelcome = true
         }
+    }
+
+    private var needsCoachWelcome: Bool {
+        guard let selectedCoach = appState.selectedCoach else { return true }
+        return selectedCoach.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func promptForNotificationSettingsIfNeeded(resetForEntry: Bool = false) {

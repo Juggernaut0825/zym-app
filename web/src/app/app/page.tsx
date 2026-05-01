@@ -1992,6 +1992,7 @@ export default function AppPage() {
     const bootstrapCoach = auth.selectedCoach || 'zj';
     const params = new URLSearchParams(window.location.search);
     const suppressWelcome = params.get('welcome') === 'done';
+    const shouldShowWelcome = !suppressWelcome && !auth.selectedCoach;
     requestedTopicRef.current = String(params.get('topic') || '').trim();
     if (suppressWelcome) {
       params.delete('welcome');
@@ -2020,7 +2021,7 @@ export default function AppPage() {
     realtimeRef.current = client;
 
     setReady(true);
-    setWelcomeFlowOpen(!suppressWelcome);
+    setWelcomeFlowOpen(shouldShowWelcome);
 
     const initialFriends = await loadFriendsData(auth.userId);
     await Promise.all([

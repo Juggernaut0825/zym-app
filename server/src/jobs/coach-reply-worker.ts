@@ -101,27 +101,42 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
     });
 
     const messageId = await MessageService.sendMessage(0, job.topic, aiResponse, []);
-    const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
-      0,
-      job.topic,
-      messageId,
-      aiResponse,
-      participantUserIds,
-    );
-    void PushNotificationService.sendMessageNotifications({
-      actorUserId: 0,
-      recipientUserIds: activityNotificationTargets,
-      topic: job.topic,
-      messageId,
-      snippet: aiResponse,
-    }).catch((error) => logger.warn('[jobs] failed to send coach push notification', error));
 
-    const [coachMessage] = await MessageService.getMessages(job.topic, 1);
+    let activityNotificationTargets: number[] = [];
+    try {
+      activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+        0,
+        job.topic,
+        messageId,
+        aiResponse,
+        participantUserIds,
+      );
+    } catch (notificationError) {
+      logger.error(`[jobs] failed to create coach activity notifications for ${job.topic}`, notificationError);
+    }
+
+    if (activityNotificationTargets.length > 0) {
+      void PushNotificationService.sendMessageNotifications({
+        actorUserId: 0,
+        recipientUserIds: activityNotificationTargets,
+        topic: job.topic,
+        messageId,
+        snippet: aiResponse,
+      }).catch((error) => logger.warn('[jobs] failed to send coach push notification', error));
+    }
+
+    let coachMessage: Awaited<ReturnType<typeof MessageService.getMessages>>[number] | undefined;
+    try {
+      [coachMessage] = await MessageService.getMessages(job.topic, 1);
+    } catch (messageLookupError) {
+      logger.error(`[jobs] failed to load saved coach message for ${job.topic}`, messageLookupError);
+    }
+
     await publishRealtimeEventSafely({
       type: 'message_created',
       topic: job.topic,
       message: coachMessage || {
-        id: `coach_${Date.now()}`,
+        id: messageId,
         topic: job.topic,
         from_user_id: 0,
         content: aiResponse,
@@ -131,13 +146,14 @@ export async function processCoachReplyJob(job: CoachReplyJobPayload): Promise<v
         created_at: new Date().toISOString(),
       },
     }, 'coach-message-created');
-    if (participantUserIds.length > 0) {
+    const inboxUserIds = Array.from(new Set([
+      ...participantUserIds,
+      ...activityNotificationTargets,
+    ]));
+    if (inboxUserIds.length > 0) {
       await publishRealtimeEventSafely({
         type: 'inbox_updated',
-        userIds: Array.from(new Set([
-          ...participantUserIds,
-          ...activityNotificationTargets,
-        ])),
+        userIds: inboxUserIds,
       }, 'coach-inbox-updated');
     }
   } catch (error) {
