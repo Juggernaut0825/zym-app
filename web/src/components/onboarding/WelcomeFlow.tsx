@@ -5,7 +5,6 @@ import { getCoachRecords, selectCoach, updateCoachRecordProfile } from '@/lib/ap
 import { setCoach } from '@/lib/auth-storage';
 import {
   CoachAvatar,
-  CoachHero,
   CoachSpeechBubble,
   type CoachId,
 } from '@/components/onboarding/CoachAvatar';
@@ -51,15 +50,13 @@ interface WelcomeFlowProps {
   onComplete: (coach: CoachId) => void;
 }
 
-const totalSteps = 4;
+const totalSteps = 3;
 
-const coachCards = [
+const coachOptions = [
   {
     id: 'zj' as const,
     title: 'ZJ',
     badge: 'Gentle encouragement',
-    description: 'Warm, supportive, and steady.',
-    sample: "I'll help you keep momentum without overcomplicating your day.",
     tone: 'rgba(105,121,247,0.12)',
     border: 'rgba(105,121,247,0.3)',
     ink: 'var(--coach-zj-ink)',
@@ -69,8 +66,6 @@ const coachCards = [
     id: 'lc' as const,
     title: 'LC',
     badge: 'Tough accountability',
-    description: 'Direct, sharp, and demanding.',
-    sample: "I'll push you to stop drifting and start executing.",
     tone: 'rgba(242,138,58,0.13)',
     border: 'rgba(242,138,58,0.34)',
     ink: 'var(--coach-lc-ink)',
@@ -108,8 +103,6 @@ function stepTitle(step: number): string {
     case 0:
       return 'Meet your coaches';
     case 1:
-      return 'Choose your coach';
-    case 2:
       return 'Build your coach profile';
     default:
       return 'You are ready';
@@ -174,6 +167,20 @@ function heightSummary(state: SetupState): string {
 function weightSummary(state: SetupState): string {
   if (!state.weight.trim()) return '';
   return `${state.weight.trim()} ${state.weightUnit}`;
+}
+
+function formatConvertedNumber(value: number, maxDecimals = 1): string {
+  if (!Number.isFinite(value)) return '';
+  if (Number.isInteger(value)) return String(value);
+  return String(Number(value.toFixed(maxDecimals)));
+}
+
+function convertWeightValue(value: string, from: WeightUnit, to: WeightUnit): string {
+  const numeric = Number(String(value || '').trim());
+  if (!Number.isFinite(numeric) || numeric <= 0 || from === to) return value;
+  return to === 'lb'
+    ? formatConvertedNumber(numeric * 2.2046226218, 1)
+    : formatConvertedNumber(numeric * 0.45359237, 1);
 }
 
 function buildSetupState(
@@ -337,6 +344,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   const [loadingExisting, setLoadingExisting] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [introComplete, setIntroComplete] = useState(false);
   const [state, setState] = useState<SetupState>(buildSetupState(undefined, initialCoach));
 
   const progress = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
@@ -367,12 +375,19 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     };
   }, [userId, initialCoach]);
 
-  const canContinue = step !== 1 || Boolean(state.coach);
+  useEffect(() => {
+    if (step !== 0 || loadingExisting) return undefined;
+    setIntroComplete(false);
+    const timer = window.setTimeout(() => setIntroComplete(true), 6000);
+    return () => window.clearTimeout(timer);
+  }, [step, loadingExisting]);
+
+  const canContinue = step !== 0 || (introComplete && Boolean(state.coach));
 
   async function handleFinish() {
     if (!state.coach) {
       setError('Choose a coach before finishing setup.');
-      setStep(1);
+      setStep(0);
       return;
     }
 
@@ -407,98 +422,73 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
   const renderStep = () => {
     if (step === 0) {
       return (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
-            <CoachHero
-              coach="zj"
-              animationMode="loop"
-              state="talking"
-              size={250}
-              showBubble
-              bubbleText="I'm ZJ. I'll help you build steady habits without making fitness feel overwhelming."
-              tailDirection="left"
-            />
-            <CoachSpeechBubble
-              coach="zj"
-              text="Share your goal, schedule, meals, and training context."
-              tailDirection="top-left"
-              className="mt-3"
-            />
-          </section>
+        <div className="welcome-coach-intro rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
+          <div className={`welcome-dialogue-stack ${introComplete ? 'welcome-dialogue-stack-muted' : ''}`}>
+            <div className="welcome-dialogue-row welcome-dialogue-row-zj" style={{ animationDelay: '0ms' }}>
+              <CoachAvatar coach="zj" state="talking" size={62} />
+              <CoachSpeechBubble
+                coach="zj"
+                text="Hi, I'm ZJ! I'll help you build steady habits and encourage you in the process."
+                tailDirection="left"
+              />
+            </div>
 
-          <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
-            <CoachHero
-              coach="lc"
-              animationMode="loop"
-              state="talking"
-              size={250}
-              showBubble
-              bubbleText="I'm LC. I'll keep the plan sharp and call out drift before it becomes a pattern."
-              tailDirection="left"
-              bubbleTone="strong"
-            />
-            <CoachSpeechBubble
-              coach="lc"
-              tone="strong"
-              text="Then ZYM turns it into meals, workouts, check-ins, and feedback."
-              tailDirection="top-left"
-              className="mt-3"
-            />
-          </section>
+            <div className="welcome-dialogue-row welcome-dialogue-row-lc" style={{ animationDelay: '2000ms' }}>
+              <CoachAvatar coach="lc" state="talking" size={62} />
+              <CoachSpeechBubble
+                coach="lc"
+                tone="strong"
+                text="Hey, I'm LC! I'll keep the plan sharp and call out drift before it becomes a pattern."
+                tailDirection="left"
+              />
+            </div>
+
+            <div className="welcome-dialogue-row welcome-dialogue-row-zj" style={{ animationDelay: '4000ms' }}>
+              <CoachAvatar coach="zj" state="talking" size={62} />
+              <CoachSpeechBubble
+                coach="zj"
+                text="Share your goal, schedule, meals, and training context. Then we can turn it into records, check-ins, and feedback!"
+                tailDirection="left"
+              />
+            </div>
+          </div>
+
+          <div className={`welcome-coach-choice ${introComplete ? 'welcome-coach-choice-visible' : ''}`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {coachOptions.map((card) => {
+                const active = state.coach === card.id;
+                return (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => setState((prev) => ({ ...prev, coach: card.id }))}
+                    className={`welcome-coach-choice-card ${active ? 'welcome-coach-choice-card-active' : ''}`}
+                    style={{
+                      background: active ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.72)',
+                      borderColor: active ? card.border : 'rgba(226,232,240,0.75)',
+                      boxShadow: active ? card.glow : '0 12px 24px rgba(15,23,42,0.05)',
+                    }}
+                  >
+                    <CoachAvatar coach={card.id} state={active ? 'selected' : 'idle'} size={70} />
+                    <span className="min-w-0">
+                      <span
+                        className="inline-flex rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
+                        style={{ background: card.tone, color: card.ink }}
+                      >
+                        {card.badge}
+                      </span>
+                      <span className="mt-3 block text-2xl font-bold text-slate-900">{card.title}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       );
     }
 
     if (step === 1) {
-      return (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {coachCards.map((card) => {
-            const active = state.coach === card.id;
-            return (
-              <button
-                key={card.id}
-                type="button"
-                onClick={() => setState((prev) => ({ ...prev, coach: card.id }))}
-                className={`rounded-[28px] border p-5 text-left transition duration-300 sm:p-6 ${
-                  active ? (card.id === 'lc' ? 'scale-[1.012]' : 'scale-[1.008]') : 'hover:scale-[1.004]'
-                }`}
-                style={{
-                  background: active ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.72)',
-                  borderColor: active ? card.border : 'rgba(255,255,255,0.65)',
-                  boxShadow: active ? card.glow : '0 16px 34px rgba(59,49,40,0.06)',
-                }}
-              >
-                <div className="flex items-start gap-4">
-                  <CoachAvatar coach={card.id} state={active ? 'selected' : 'idle'} size={74} />
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className="inline-flex rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
-                      style={{ background: card.tone, color: card.ink }}
-                    >
-                      {card.badge}
-                    </div>
-                    <h2 className="mt-4 text-3xl font-bold text-slate-900">{card.title}</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{card.description}</p>
-                  </div>
-                </div>
-                <div className="mt-5 flex flex-wrap items-end gap-4">
-                  <CoachHero coach={card.id} state={active ? 'selected' : 'idle'} size={150} animationMode={active ? 'loop' : 'static'} />
-                  <CoachSpeechBubble
-                    coach={card.id}
-                    tone={active ? 'strong' : 'soft'}
-                    text={card.sample}
-                    tailDirection="left"
-                    className="mb-4"
-                  />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      );
-    }
-
-    if (step === 2) {
       return (
         <div className="grid gap-6">
           <section className="rounded-[28px] border border-slate-200/70 bg-white/86 p-5 shadow-[0_24px_50px_rgba(59,49,40,0.07)] sm:p-6">
@@ -539,7 +529,11 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                   <UnitToggle
                     options={[{ value: 'kg', label: 'kg' }, { value: 'lb', label: 'lb' }]}
                     value={state.weightUnit}
-                    onChange={(weightUnit) => setState((prev) => ({ ...prev, weightUnit }))}
+                    onChange={(weightUnit) => setState((prev) => ({
+                      ...prev,
+                      weight: convertWeightValue(prev.weight, prev.weightUnit, weightUnit),
+                      weightUnit,
+                    }))}
                   />
                 ),
               })}
@@ -593,7 +587,13 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     return (
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
-          <CoachHero coach={selectedCoach} state="celebrate" size={230} showBubble bubbleText={readyLine} bubbleTone="strong" />
+          <CoachAvatar
+            coach={selectedCoach}
+            state="celebrate"
+            size={92}
+            showBubble
+            bubbleText={readyLine}
+          />
         </section>
 
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-6 shadow-[0_24px_50px_rgba(59,49,40,0.08)]">
@@ -673,7 +673,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                   setError('');
                   setStep((current) => Math.min(totalSteps - 1, current + 1));
                 }}
-                disabled={pending || loadingExisting}
+                disabled={pending || loadingExisting || (step === 0 && !introComplete)}
               >
                 Continue
               </button>

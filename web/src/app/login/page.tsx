@@ -2,23 +2,88 @@
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { login, loginWithGoogle } from '@/lib/api';
+import { login, loginWithApple, loginWithGoogle } from '@/lib/api';
 import { setAuth } from '@/lib/auth-storage';
-import { GOOGLE_CLIENT_ID } from '@/lib/config';
+import { APPLE_CLIENT_ID, GOOGLE_CLIENT_ID, resolveAppleRedirectUri } from '@/lib/config';
 
 const HEALTH_DISCLAIMER_VERSION = '2026-03-26';
+const APPLE_SIGN_IN_SCRIPT_URL = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
+
+let appleSignInScriptPromise: Promise<void> | null = null;
+
+function randomOAuthValue(byteCount = 18): string {
+  const bytes = new Uint8Array(byteCount);
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  return btoa(String.fromCharCode(...Array.from(bytes)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function loadAppleSignInScript(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Apple sign-in is only available in the browser.'));
+  }
+  if ((window as any).AppleID?.auth) {
+    return Promise.resolve();
+  }
+  if (appleSignInScriptPromise) {
+    return appleSignInScriptPromise;
+  }
+
+  appleSignInScriptPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-apple-signin="true"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Apple sign-in could not be loaded.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = APPLE_SIGN_IN_SCRIPT_URL;
+    script.async = true;
+    script.defer = true;
+    script.dataset.appleSignin = 'true';
+    script.addEventListener('load', () => resolve(), { once: true });
+    script.addEventListener('error', () => reject(new Error('Apple sign-in could not be loaded.')), { once: true });
+    document.head.appendChild(script);
+  });
+
+  return appleSignInScriptPromise;
+}
+
+function appleFullNameFromResponse(name: any): string | null {
+  if (!name || typeof name !== 'object') return null;
+  const rendered = [
+    name.firstName,
+    name.middleName,
+    name.lastName,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  return rendered || null;
+}
 
 function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [googleConsentAccepted, setGoogleConsentAccepted] = useState(false);
-  const [googleConsentWarning, setGoogleConsentWarning] = useState('');
+  const [socialConsentAccepted, setSocialConsentAccepted] = useState(false);
+  const [socialConsentWarning, setSocialConsentWarning] = useState('');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
-  const googleConsentAcceptedRef = useRef(false);
+  const socialConsentAcceptedRef = useRef(false);
+  const socialAuthAvailable = Boolean(GOOGLE_CLIENT_ID || APPLE_CLIENT_ID);
 
   const routeAfterLogin = (_selectedCoach: 'zj' | 'lc' | null) => {
     router.push('/app');
@@ -32,11 +97,11 @@ function LoginScreen() {
   }, [searchParams]);
 
   useEffect(() => {
-    googleConsentAcceptedRef.current = googleConsentAccepted;
-    if (googleConsentAccepted) {
-      setGoogleConsentWarning('');
+    socialConsentAcceptedRef.current = socialConsentAccepted;
+    if (socialConsentAccepted) {
+      setSocialConsentWarning('');
     }
-  }, [googleConsentAccepted]);
+  }, [socialConsentAccepted]);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
@@ -45,8 +110,8 @@ function LoginScreen() {
     const container = googleButtonRef.current;
 
     const handleGoogleCredential = async (credential: string) => {
-      if (!googleConsentAcceptedRef.current) {
-        setGoogleConsentWarning('Please confirm Terms and Privacy before continuing with Google.');
+      if (!socialConsentAcceptedRef.current) {
+        setSocialConsentWarning('Please confirm Terms and Privacy before continuing with Google.');
         return;
       }
       if (!credential) {
@@ -58,7 +123,7 @@ function LoginScreen() {
         setPending(true);
         setError('');
         const auth = await loginWithGoogle(credential, {
-          healthDisclaimerAccepted: googleConsentAcceptedRef.current,
+          healthDisclaimerAccepted: socialConsentAcceptedRef.current,
           consentVersion: HEALTH_DISCLAIMER_VERSION,
         });
         setAuth(auth);
@@ -137,6 +202,59 @@ function LoginScreen() {
     }
   };
 
+  const handleAppleSignIn = async () => {
+    if (pending) return;
+    if (!socialConsentAcceptedRef.current) {
+      setSocialConsentWarning('Please confirm Terms and Privacy before continuing with Apple.');
+      return;
+    }
+    if (!APPLE_CLIENT_ID) {
+      setError('Apple sign-in is not configured for this app.');
+      return;
+    }
+
+    try {
+      setPending(true);
+      setError('');
+      await loadAppleSignInScript();
+
+      const apple = (window as any).AppleID;
+      if (!apple?.auth) {
+        throw new Error('Apple sign-in could not be initialized.');
+      }
+
+      apple.auth.init({
+        clientId: APPLE_CLIENT_ID,
+        scope: 'name email',
+        redirectURI: resolveAppleRedirectUri(),
+        state: randomOAuthValue(),
+        nonce: randomOAuthValue(),
+        usePopup: true,
+      });
+
+      const response = await apple.auth.signIn();
+      const identityToken = String(response?.authorization?.id_token || response?.authorization?.idToken || '').trim();
+      if (!identityToken) {
+        throw new Error('Apple sign-in did not return an identity token.');
+      }
+
+      const auth = await loginWithApple(identityToken, {
+        fullName: appleFullNameFromResponse(response?.user?.name),
+        healthDisclaimerAccepted: socialConsentAcceptedRef.current,
+        consentVersion: HEALTH_DISCLAIMER_VERSION,
+      });
+      setAuth(auth);
+      routeAfterLogin(auth.selectedCoach);
+    } catch (err: any) {
+      const appleError = String(err?.error || err?.message || '').trim();
+      if (appleError && appleError !== 'popup_closed_by_user') {
+        setError(appleError || 'Apple sign-in failed.');
+      }
+    } finally {
+      setPending(false);
+    }
+  };
+
   return (
     <main className="relative min-h-dvh overflow-x-hidden bg-white px-4 py-[clamp(1.25rem,3vh,2.5rem)] sm:px-6">
       <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-clamp(2.5rem,6vh,5rem))] w-full max-w-[480px] flex-col justify-center gap-[clamp(1.25rem,3vh,2.25rem)]">
@@ -207,19 +325,19 @@ function LoginScreen() {
               <span className="material-symbols-outlined text-base">arrow_forward</span>
             </button>
 
-            {GOOGLE_CLIENT_ID ? (
+            {socialAuthAvailable ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Google</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[color:var(--ink-300)]">Or continue with Apple or Google</span>
                   <div className="h-px flex-1 bg-[rgba(171,164,155,0.16)]" />
                 </div>
                 <label className="flex items-start gap-3 rounded-2xl border border-[rgba(171,164,155,0.16)] bg-white/55 px-4 py-3 text-sm leading-6 text-[color:var(--ink-500)]">
                   <input
                     type="checkbox"
                     className="mt-1 size-4 rounded border-slate-300"
-                    checked={googleConsentAccepted}
-                    onChange={(event) => setGoogleConsentAccepted(event.target.checked)}
+                    checked={socialConsentAccepted}
+                    onChange={(event) => setSocialConsentAccepted(event.target.checked)}
                   />
                   <span>
                     I understand the{' '}
@@ -233,22 +351,37 @@ function LoginScreen() {
                     .
                   </span>
                 </label>
-                <div className={`relative ${pending ? 'pointer-events-none opacity-60' : ''}`}>
-                  <div
-                    ref={googleButtonRef}
-                    className={!googleConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}
-                  />
-                  {!googleConsentAccepted ? (
+                <div className="space-y-2">
+                  {APPLE_CLIENT_ID ? (
                     <button
                       type="button"
-                      className="absolute inset-0 z-10 cursor-not-allowed rounded-full"
-                      aria-label="Confirm Terms and Privacy before continuing with Google"
-                      onClick={() => setGoogleConsentWarning('Please confirm Terms and Privacy before continuing with Google.')}
-                    />
+                      onClick={handleAppleSignIn}
+                      disabled={pending}
+                      className={`flex min-h-[42px] w-full items-center justify-center gap-2 rounded-full border border-slate-950 bg-slate-950 px-4 text-[15px] font-semibold text-white transition active:scale-[0.99] ${!socialConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}`}
+                    >
+                      <span className="text-[18px] leading-none"></span>
+                      Continue with Apple
+                    </button>
+                  ) : null}
+                  {GOOGLE_CLIENT_ID ? (
+                    <div className={`relative ${pending ? 'pointer-events-none opacity-60' : ''}`}>
+                      <div
+                        ref={googleButtonRef}
+                        className={!socialConsentAccepted ? 'opacity-80 saturate-[0.92]' : ''}
+                      />
+                      {!socialConsentAccepted ? (
+                        <button
+                          type="button"
+                          className="absolute inset-0 z-10 cursor-not-allowed rounded-full"
+                          aria-label="Confirm Terms and Privacy before continuing with Google"
+                          onClick={() => setSocialConsentWarning('Please confirm Terms and Privacy before continuing with Google.')}
+                        />
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
-                {googleConsentWarning ? (
-                  <p className="text-xs font-medium text-[color:var(--danger)]">{googleConsentWarning}</p>
+                {socialConsentWarning ? (
+                  <p className="text-xs font-medium text-[color:var(--danger)]">{socialConsentWarning}</p>
                 ) : null}
               </div>
             ) : null}

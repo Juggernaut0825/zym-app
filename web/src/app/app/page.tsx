@@ -1379,7 +1379,16 @@ export default function AppPage() {
 
     const activeCoachId = resolveConversationCoachId(activeConversation, selectedCoach);
     const coachTone = coachAvatarTheme(activeCoachId);
-    const entries = Array.from(new Map(ids.map((userId) => {
+    type TypingEntry = {
+      userId: string;
+      name: string;
+      avatarText: string;
+      avatarUrl: string;
+      coachId: CoachId | null;
+      background: string;
+      color: string;
+    };
+    const entries = Array.from(new Map<string, TypingEntry>(ids.map((userId): [string, TypingEntry] => {
       if (userId === 'coach' || userId === '0') {
         const coachName = activeConversation?.type === 'coach'
           ? (activeConversation.name.toLowerCase().includes('lc') ? 'LC' : 'ZJ')
@@ -1389,6 +1398,7 @@ export default function AppPage() {
           name: coachName,
           avatarText: avatarInitial(coachName),
           avatarUrl: '',
+          coachId: activeCoachId,
           background: coachTone.background,
           color: coachTone.text,
         }];
@@ -1411,6 +1421,7 @@ export default function AppPage() {
         name,
         avatarText: avatarInitial(name),
         avatarUrl,
+        coachId: null,
         background: 'rgba(148,163,184,0.16)',
         color: 'rgb(71 85 105)',
       }];
@@ -4354,6 +4365,7 @@ export default function AppPage() {
                         label={typingIndicatorState.primary.avatarText}
                         background={typingIndicatorState.primary.background}
                         color={typingIndicatorState.primary.color}
+                        coachId={typingIndicatorState.primary.coachId}
                       />
                       <TypingPill label={typingIndicatorState.label} />
                     </div>

@@ -50,10 +50,17 @@ function ConversationTileComponent({
   const canOpenProfile = item.type === 'dm' && typeof item.userId === 'number' && item.userId > 0 && !!onOpenProfile;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(item.topic)}
-      className={`w-full rounded-[20px] px-3 py-2.5 text-left transition sm:rounded-[24px] sm:px-4 sm:py-3 ${
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(item.topic);
+        }
+      }}
+      className={`w-full cursor-pointer rounded-[20px] px-3 py-2.5 text-left transition sm:rounded-[24px] sm:px-4 sm:py-3 ${
         active
           ? activeTone
           : 'bg-transparent hover:bg-white/55'
@@ -138,7 +145,7 @@ function ConversationTileComponent({
           )}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

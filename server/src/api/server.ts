@@ -3615,10 +3615,15 @@ app.post('/coach/records/profile/update',
       const hasCheckIns = Number(progressSummary?.checkInDays || 0) > 0;
       const weightKg = Number((profile as any)?.weight_kg);
       const bodyFatPct = Number((profile as any)?.body_fat_pct);
+      const patchIncludesProgressValue = (
+        patch.weight !== undefined
+        || patch.weight_kg !== undefined
+        || patch.body_fat_pct !== undefined
+      );
 
       if (
         shouldSeedInitialCheckIn
-        && !hasCheckIns
+        && (!hasCheckIns || patchIncludesProgressValue)
         && (Number.isFinite(weightKg) || Number.isFinite(bodyFatPct))
       ) {
         const seeded = await coachTypedToolsService.logCheckIn(String(userId), {

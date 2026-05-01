@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { CompactMessage, MediaRef, SessionState } from '../types/index.js';
 import { resolveUserDataDir } from '../utils/path-resolver.js';
-import { buildCoachProgressPinnedFacts } from '../utils/coach-progress.js';
+import { computeCoachProgressSummary } from '../utils/coach-progress.js';
 
 const MAX_RECENT_MESSAGES = 12;
 const SUMMARY_BATCH_SIZE = 6;
@@ -35,6 +35,34 @@ function isTrivialMessage(text: string): boolean {
 
 function trimSummary(summary: string): string {
   return summary.length <= MAX_SUMMARY_CHARS ? summary : summary.slice(summary.length - MAX_SUMMARY_CHARS);
+}
+
+function roundDisplay(value: number, decimals = 1): string {
+  if (!Number.isFinite(value)) return '';
+  const rounded = Number(value.toFixed(decimals));
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+function inferWeightUnit(profile: Record<string, unknown>): 'kg' | 'lb' {
+  const raw = String(profile.weight || '').toLowerCase();
+  return /\b(lb|lbs|pound|pounds)\b/.test(raw) ? 'lb' : 'kg';
+}
+
+function formatWeightKg(value: number, unit: 'kg' | 'lb'): string {
+  if (unit === 'lb') {
+    return `${roundDisplay(value * 2.2046226218, 1)} lb (${roundDisplay(value, 2)} kg)`;
+  }
+  return `${roundDisplay(value, 2)} kg`;
+}
+
+function formatWeightDeltaKg(value: number, unit: 'kg' | 'lb'): string {
+  const kgSign = value > 0 ? '+' : '';
+  if (unit === 'lb') {
+    const pounds = value * 2.2046226218;
+    const lbSign = pounds > 0 ? '+' : '';
+    return `${lbSign}${roundDisplay(pounds, 1)} lb (${kgSign}${roundDisplay(value, 2)} kg)`;
+  }
+  return `${kgSign}${roundDisplay(value, 2)} kg`;
 }
 
 function sanitizeSessionKey(sessionKey?: string): string {
@@ -92,7 +120,29 @@ function buildPinnedFacts(profile: Record<string, unknown>, daily: Record<string
     facts.push(`Daily target ${dailyTarget} kcal`);
   }
 
-  return [...facts, ...buildCoachProgressPinnedFacts(daily, goal)].slice(0, 8);
+  const progress = computeCoachProgressSummary(daily, goal);
+  const weightUnit = inferWeightUnit(profile);
+
+  if (progress.latestWeightKg !== null) {
+    let weightFact = `Latest weigh-in ${formatWeightKg(progress.latestWeightKg, weightUnit)}`;
+    if (progress.weight7dAvg !== null) {
+      weightFact += `, 7-day average ${formatWeightKg(progress.weight7dAvg, weightUnit)}`;
+    }
+    if (progress.weight14dDelta !== null) {
+      weightFact += `, 14-day change ${formatWeightDeltaKg(progress.weight14dDelta, weightUnit)}`;
+    }
+    facts.push(weightFact);
+  }
+
+  if (progress.latestBodyFatPct !== null) {
+    facts.push(`Latest body fat ${progress.latestBodyFatPct}%${progress.lastBodyFatDay ? ` on ${progress.lastBodyFatDay}` : ''}`);
+  }
+
+  if (progress.status !== 'insufficient_data') {
+    facts.push(`Progress status: ${progress.statusLabel}`);
+  }
+
+  return facts.slice(0, 8);
 }
 
 export class SessionStore {

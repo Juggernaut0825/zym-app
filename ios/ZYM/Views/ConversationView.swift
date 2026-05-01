@@ -1,7 +1,9 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import Photos
 import AVKit
+import AVFoundation
 import UniformTypeIdentifiers
 
 enum DraftAttachmentKind {
@@ -30,12 +32,15 @@ private struct ConversationTypingState {
 struct ConversationView: View {
     let conversation: Conversation
     private let maxMessageCharacters = 8000
+    private let maxDraftAttachments = 5
 
     private let latestMessageAnchor = "conversation-latest-message-anchor"
 
     @State private var messages: [Message] = []
     @State private var newMessage = ""
+    @State private var showMediaDock = false
     @State private var showMediaPicker = false
+    @State private var showCameraCapture = false
     @State private var selectedMedia: [PhotosPickerItem] = []
     @State private var draftAttachments: [DraftAttachment] = []
     @State private var isSending = false
@@ -59,6 +64,7 @@ struct ConversationView: View {
 
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
+    @FocusState private var messageFieldFocused: Bool
 
     private var groupId: Int? {
         guard conversation.isGroup, conversation.id.hasPrefix("grp_") else { return nil }
@@ -97,6 +103,10 @@ struct ConversationView: View {
 
     private var messageTooLong: Bool {
         newMessage.count > maxMessageCharacters
+    }
+
+    private var remainingDraftAttachmentSlots: Int {
+        max(0, maxDraftAttachments - draftAttachments.count)
     }
 
     private var typingIndicatorState: ConversationTypingState? {
@@ -255,8 +265,13 @@ struct ConversationView: View {
                     }
 
                     HStack(alignment: .bottom, spacing: 10) {
-                        Button(action: { showMediaPicker = true }) {
-                            Image(systemName: "plus.circle.fill")
+                        Button(action: {
+                            messageFieldFocused = false
+                            withAnimation(.zymSpring) {
+                                showMediaDock.toggle()
+                            }
+                        }) {
+                            Image(systemName: showMediaDock ? "xmark.circle.fill" : "plus.circle.fill")
                                 .font(.system(size: 24))
                                 .foregroundColor(Color.zymPrimary)
                         }
@@ -272,6 +287,7 @@ struct ConversationView: View {
                             .background(messageTooLong ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.82))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .accessibilityLabel("Message")
+                            .focused($messageFieldFocused)
 
                         if conversation.isGroup && groupCoachEnabled {
                             Button("@coach") {
@@ -290,6 +306,16 @@ struct ConversationView: View {
                         .disabled(isSending || messageTooLong)
                     }
                     .padding(.horizontal, 12)
+
+                    if showMediaDock {
+                        ConversationMediaDock(
+                            remainingSlots: remainingDraftAttachmentSlots,
+                            onGallery: openGalleryPicker,
+                            onCamera: openCameraCapture
+                        )
+                        .padding(.horizontal, 12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
 
                     if messageTooLong {
                         HStack {
@@ -408,10 +434,23 @@ struct ConversationView: View {
         .photosPicker(
             isPresented: $showMediaPicker,
             selection: $selectedMedia,
-            maxSelectionCount: 5,
+            maxSelectionCount: max(1, remainingDraftAttachmentSlots),
             matching: .any(of: [.images, .videos])
         )
+        .sheet(isPresented: $showCameraCapture) {
+            CameraCaptureView { image in
+                appendCapturedImage(image)
+            }
+            .ignoresSafeArea()
+        }
         .onChange(of: selectedMedia) { _, _ in loadMedia() }
+        .onChange(of: messageFieldFocused) { _, focused in
+            if focused && showMediaDock {
+                withAnimation(.zymSoft) {
+                    showMediaDock = false
+                }
+            }
+        }
         .onChange(of: newMessage) { _, value in
             let shouldTyping = !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if shouldTyping != lastTypingSent {
@@ -619,10 +658,109 @@ struct ConversationView: View {
         }
     }
 
+    private func openGalleryPicker() {
+        guard remainingDraftAttachmentSlots > 0 else {
+            infoNotice = "You can attach up to \(maxDraftAttachments) items."
+            showMediaDock = false
+            return
+        }
+
+        let showPicker = {
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+            showMediaPicker = true
+        }
+
+        switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
+        case .authorized, .limited:
+            showPicker()
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                DispatchQueue.main.async {
+                    if status == .authorized || status == .limited {
+                        showPicker()
+                    } else {
+                        withAnimation(.zymSoft) {
+                            showMediaDock = false
+                        }
+                    }
+                }
+            }
+        case .denied, .restricted:
+            infoNotice = "Photo library permission is needed to choose media."
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+        @unknown default:
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+        }
+    }
+
+    private func openCameraCapture() {
+        guard remainingDraftAttachmentSlots > 0 else {
+            infoNotice = "You can attach up to \(maxDraftAttachments) items."
+            showMediaDock = false
+            return
+        }
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            infoNotice = "Camera is not available on this device."
+            showMediaDock = false
+            return
+        }
+
+        let showCamera = {
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+            showCameraCapture = true
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            showCamera()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        showCamera()
+                    } else {
+                        withAnimation(.zymSoft) {
+                            showMediaDock = false
+                        }
+                    }
+                }
+            }
+        case .denied, .restricted:
+            infoNotice = "Camera permission is needed to take a photo."
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+        @unknown default:
+            withAnimation(.zymSoft) {
+                showMediaDock = false
+            }
+        }
+    }
+
     private func loadMedia() {
         let items = selectedMedia
-        clearDraftAttachments(resetSelection: false)
-        for item in items {
+        guard !items.isEmpty else { return }
+        selectedMedia = []
+
+        let slots = remainingDraftAttachmentSlots
+        guard slots > 0 else {
+            infoNotice = "You can attach up to \(maxDraftAttachments) items."
+            return
+        }
+
+        if items.count > slots {
+            infoNotice = "Only \(slots) more attachment\(slots == 1 ? "" : "s") can be added."
+        }
+
+        for item in items.prefix(slots) {
             let detectedType = item.supportedContentTypes.first(where: { type in
                 type.conforms(to: .movie) || type.conforms(to: .audiovisualContent) || type.conforms(to: .video)
             }) ?? item.supportedContentTypes.first(where: { type in
@@ -634,20 +772,18 @@ struct ConversationView: View {
                 || detectedType?.conforms(to: .video) == true
             let fileExtension = detectedType?.preferredFilenameExtension ?? (isVideo ? "mov" : "jpg")
             let mimeType = detectedType?.preferredMIMEType ?? (isVideo ? "video/quicktime" : "image/jpeg")
-            let filename = "media.\(fileExtension)"
+            let filename = "media-\(UUID().uuidString).\(fileExtension)"
 
             item.loadTransferable(type: Data.self) { result in
                 if case .success(let data) = result, let data = data {
                     let previewURL = isVideo ? makeTempPreviewURL(for: data, fileExtension: fileExtension) : nil
                     DispatchQueue.main.async {
-                        draftAttachments.append(
-                            DraftAttachment(
-                                data: data,
-                                kind: isVideo ? .video : .image,
-                                filename: filename,
-                                contentType: mimeType,
-                                previewURL: previewURL
-                            )
+                        appendDraftAttachment(
+                            data: data,
+                            kind: isVideo ? .video : .image,
+                            filename: filename,
+                            contentType: mimeType,
+                            previewURL: previewURL
                         )
                     }
                 }
@@ -655,20 +791,64 @@ struct ConversationView: View {
         }
     }
 
+    private func appendCapturedImage(_ image: UIImage) {
+        guard remainingDraftAttachmentSlots > 0 else {
+            infoNotice = "You can attach up to \(maxDraftAttachments) items."
+            return
+        }
+        guard let data = image.jpegData(compressionQuality: 0.88) else {
+            infoNotice = "Could not prepare the photo."
+            return
+        }
+
+        appendDraftAttachment(
+            data: data,
+            kind: .image,
+            filename: "camera-\(UUID().uuidString).jpg",
+            contentType: "image/jpeg",
+            previewURL: nil
+        )
+    }
+
+    private func appendDraftAttachment(
+        data: Data,
+        kind: DraftAttachmentKind,
+        filename: String,
+        contentType: String,
+        previewURL: URL?
+    ) {
+        guard draftAttachments.count < maxDraftAttachments else {
+            if let previewURL {
+                try? FileManager.default.removeItem(at: previewURL)
+            }
+            infoNotice = "You can attach up to \(maxDraftAttachments) items."
+            return
+        }
+        draftAttachments.append(
+            DraftAttachment(
+                data: data,
+                kind: kind,
+                filename: filename,
+                contentType: contentType,
+                previewURL: previewURL
+            )
+        )
+    }
+
     private func uploadMediaAndSend(userId: Int, draftText: String) {
-        var mediaUrls: [String] = []
-        var mediaIds: [String] = []
+        var mediaUrls = Array<String?>(repeating: nil, count: draftAttachments.count)
+        var mediaIds = Array<String?>(repeating: nil, count: draftAttachments.count)
         let lock = NSLock()
         let group = DispatchGroup()
 
-        for attachment in draftAttachments {
+        for (index, attachment) in draftAttachments.enumerated() {
             group.enter()
             uploadMedia(attachment) { response in
                 if let response = response {
                     lock.lock()
-                    mediaUrls.append(response.path.isEmpty ? (response.url ?? response.path) : response.path)
+                    mediaUrls[index] = response.path.isEmpty ? (response.url ?? response.path) : response.path
                     if let mediaId = response.mediaId, !mediaId.isEmpty {
-                        mediaIds.append(mediaId)
+                        mediaIds[index] = mediaId
                     }
                     lock.unlock()
                 }
@@ -677,13 +857,15 @@ struct ConversationView: View {
         }
 
         group.notify(queue: .main) {
-            if mediaUrls.isEmpty && mediaIds.isEmpty && draftText.isEmpty {
+            let orderedMediaUrls = mediaUrls.compactMap { $0 }
+            let orderedMediaIds = mediaIds.compactMap { $0 }
+            if orderedMediaUrls.isEmpty && orderedMediaIds.isEmpty && draftText.isEmpty {
                 isSending = false
                 newMessage = draftText
                 infoNotice = "Selected media could not be prepared for upload."
                 return
             }
-            sendTextMessage(userId: userId, draftText: draftText, mediaUrls: mediaUrls, mediaIds: mediaIds)
+            sendTextMessage(userId: userId, draftText: draftText, mediaUrls: orderedMediaUrls, mediaIds: orderedMediaIds)
             clearDraftAttachments()
         }
     }
@@ -2302,6 +2484,111 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
     static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: ()) {
         uiViewController.player?.pause()
         uiViewController.player = nil
+    }
+}
+
+private struct ConversationMediaDock: View {
+    let remainingSlots: Int
+    let onGallery: () -> Void
+    let onCamera: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ConversationMediaDockItem(
+                title: "Gallery",
+                systemImage: "photo.on.rectangle",
+                disabled: remainingSlots <= 0,
+                action: onGallery
+            )
+
+            ConversationMediaDockItem(
+                title: "Camera",
+                systemImage: "camera.fill",
+                disabled: remainingSlots <= 0,
+                action: onCamera
+            )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, minHeight: 138, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.zymSurfaceSoft.opacity(0.98))
+                .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: -4)
+        )
+    }
+}
+
+private struct ConversationMediaDockItem: View {
+    let title: String
+    let systemImage: String
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 9) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(disabled ? 0.46 : 0.9))
+                    .frame(width: 74, height: 74)
+                    .overlay(
+                        Image(systemName: systemImage)
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundColor(disabled ? Color.zymSubtext.opacity(0.56) : Color.zymText)
+                    )
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(disabled ? Color.zymSubtext.opacity(0.56) : Color.zymSubtext)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let controller = UIImagePickerController()
+        controller.sourceType = .camera
+        controller.cameraCaptureMode = .photo
+        controller.delegate = context.coordinator
+        controller.allowsEditing = false
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        private let parent: CameraCaptureView
+
+        init(parent: CameraCaptureView) {
+            self.parent = parent
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.onCapture(image)
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }
 

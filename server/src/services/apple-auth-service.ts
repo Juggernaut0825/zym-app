@@ -29,6 +29,7 @@ function resolveAppleAudiences(): string[] {
       process.env.APPLE_CLIENT_ID,
       process.env.APPLE_IOS_APP_ID,
       process.env.APPLE_SERVICE_ID,
+      process.env.NEXT_PUBLIC_APPLE_CLIENT_ID,
       process.env.IOS_BUNDLE_ID,
       process.env.NEXT_PUBLIC_IOS_BUNDLE_ID,
       process.env.BUNDLE_IDENTIFIER,

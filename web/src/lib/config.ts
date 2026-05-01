@@ -19,6 +19,8 @@ function warnMissingProdEnv(name: string, fallback: string) {
 const explicitApiBaseUrl = String(process.env.NEXT_PUBLIC_API_BASE_URL || '').trim();
 const explicitWsUrl = String(process.env.NEXT_PUBLIC_WS_URL || '').trim();
 const explicitGoogleClientId = String(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '').trim();
+const explicitAppleClientId = String(process.env.NEXT_PUBLIC_APPLE_CLIENT_ID || '').trim();
+const explicitAppleRedirectUri = String(process.env.NEXT_PUBLIC_APPLE_REDIRECT_URI || '').trim();
 const localApiFallback = `${runtimeProtocol}//${runtimeHost}:3001`;
 const localWsFallback = `${wsProtocol}//${runtimeHost}:8080`;
 const browserApiFallback = `${runtimeProtocol}//${runtimeHost}`;
@@ -39,6 +41,8 @@ if (!explicitWsUrl) {
 export const API_BASE_URL = normalizeBaseUrl(resolvedApiBaseUrl);
 export const WS_URL = normalizeBaseUrl(resolvedWsUrl);
 export const GOOGLE_CLIENT_ID = explicitGoogleClientId;
+export const APPLE_CLIENT_ID = explicitAppleClientId;
+export const APPLE_REDIRECT_URI = explicitAppleRedirectUri;
 
 export function resolveApiAssetUrl(raw: string): string {
   const value = String(raw || '').trim();
@@ -58,4 +62,10 @@ export function resolveApiAssetUrl(raw: string): string {
   }
 
   return `${API_BASE_URL}/${value}`;
+}
+
+export function resolveAppleRedirectUri(): string {
+  if (APPLE_REDIRECT_URI) return APPLE_REDIRECT_URI;
+  if (typeof window === 'undefined') return '';
+  return `${window.location.origin}/login`;
 }

@@ -3,12 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   getCoachRecords,
-  updateCoachCheckInRecord,
   updateCoachMealRecord,
   updateCoachTrainingRecord,
 } from '@/lib/api';
 import {
-  type CoachCheckInRecord,
   type CoachDayRecord,
   type CoachMealRecord,
   type CoachRecordsResponse,
@@ -42,13 +40,6 @@ interface TrainingEditDraft {
   weight_kg: string;
   notes: string;
   time: string;
-}
-
-interface CheckInDraft {
-  day: string;
-  weight_kg: string;
-  body_fat_pct: string;
-  notes: string;
 }
 
 type ProgressRange = 14 | 30 | 90;
@@ -182,15 +173,6 @@ function buildTrainingEditDraft(day: string, entry: CoachTrainingRecord): Traini
   };
 }
 
-function buildCheckInDraft(day: string, checkIn?: CoachCheckInRecord | null): CheckInDraft {
-  return {
-    day,
-    weight_kg: toText(checkIn?.weight_kg),
-    body_fat_pct: toText(checkIn?.body_fat_pct),
-    notes: toText(checkIn?.notes).slice(0, 500),
-  };
-}
-
 export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
   const { userId, active, onNotice, onError } = props;
 
@@ -200,7 +182,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
   const [records, setRecords] = useState<CoachRecordsResponse | null>(null);
   const [mealDraft, setMealDraft] = useState<MealEditDraft | null>(null);
   const [trainingDraft, setTrainingDraft] = useState<TrainingEditDraft | null>(null);
-  const [checkInDraft, setCheckInDraft] = useState<CheckInDraft>(buildCheckInDraft(localDayString(), null));
   const [progressRange, setProgressRange] = useState<ProgressRange>(30);
 
   const effectiveDay = selectedDay || localDayString(records?.profile?.timezone || undefined);
@@ -258,10 +239,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
     }
   }, [records?.profile?.timezone, selectedDay]);
 
-  useEffect(() => {
-    setCheckInDraft(buildCheckInDraft(effectiveDay, selectedDayRecord?.check_in || null));
-  }, [effectiveDay, selectedDayRecord]);
-
   async function loadRecords() {
     if (!userId || userId <= 0) return;
     try {
@@ -279,25 +256,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
     if (!active || !userId) return;
     void loadRecords();
   }, [active, userId]);
-
-  async function handleSaveCheckIn() {
-    try {
-      setSaving(true);
-      await updateCoachCheckInRecord({
-        userId,
-        day: checkInDraft.day,
-        weight_kg: toNumberOrUndefined(checkInDraft.weight_kg),
-        body_fat_pct: toNumberOrUndefined(checkInDraft.body_fat_pct),
-        notes: checkInDraft.notes.trim() || undefined,
-      });
-      await loadRecords();
-      onNotice('Check-in saved.');
-    } catch (error: any) {
-      onError(error?.message || 'Failed to save check-in.');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleSaveMeal() {
     if (!mealDraft) return;
@@ -561,64 +519,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
               {selectedCheckIn?.notes ? (
                 <p className="mt-4 text-sm leading-7 text-slate-500">{selectedCheckIn.notes}</p>
               ) : null}
-            </section>
-
-            <section className="rounded-[28px] bg-white/88 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Quick check-in</p>
-                  <h3 className="mt-1 text-xl font-semibold text-slate-900">Keep the daily signal lightweight</h3>
-                </div>
-                <p className="text-sm text-slate-500">Anything beyond weight and body fat can live in the note so logging stays fast.</p>
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-3">
-                <label className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Day</span>
-                  <input
-                    className="input-shell"
-                    type="date"
-                    value={checkInDraft.day}
-                    onChange={(event) => {
-                      setCheckInDraft((prev) => ({ ...prev, day: event.target.value }));
-                      setSelectedDay(event.target.value);
-                    }}
-                  />
-                </label>
-                <label className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Weight (kg)</span>
-                  <input className="input-shell" inputMode="decimal" placeholder="82.7" value={checkInDraft.weight_kg} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, weight_kg: event.target.value.slice(0, 8) }))} />
-                </label>
-                <label className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Body fat %</span>
-                  <input className="input-shell" inputMode="decimal" placeholder="17" value={checkInDraft.body_fat_pct} onChange={(event) => setCheckInDraft((prev) => ({ ...prev, body_fat_pct: event.target.value.slice(0, 5) }))} />
-                </label>
-              </div>
-
-              <label className="mt-4 flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Short note</span>
-                <textarea
-                  className="input-shell min-h-[120px]"
-                  maxLength={500}
-                  placeholder="Recovery, hunger, adherence, soreness, or any context you want to remember for this day."
-                  value={checkInDraft.notes}
-                  onChange={(event) => setCheckInDraft((prev) => ({ ...prev, notes: event.target.value.slice(0, 500) }))}
-                />
-              </label>
-
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button className="btn btn-zj" type="button" onClick={() => void handleSaveCheckIn()} disabled={saving || loadingRecords}>
-                  {saving ? 'Saving...' : 'Save check-in'}
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  onClick={() => setCheckInDraft(buildCheckInDraft(effectiveDay, selectedDayRecord?.check_in || null))}
-                  disabled={saving}
-                >
-                  Reset
-                </button>
-              </div>
             </section>
 
             <section className="grid gap-4 xl:grid-cols-2">

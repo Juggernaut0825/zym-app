@@ -114,7 +114,7 @@ export function CoachSpeechBubble({
 export function CoachAvatar({
   coach,
   variant = 'profile',
-  animated = true,
+  animated = false,
   state = 'idle',
   size = 88,
   className = '',
@@ -186,7 +186,7 @@ export function CoachAvatar({
 
 export function CoachHero({
   coach,
-  animationMode = 'loop',
+  animationMode = 'static',
   state = 'idle',
   size = 260,
   showBubble = false,

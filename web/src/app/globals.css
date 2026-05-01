@@ -201,35 +201,25 @@ select {
   overflow: hidden;
   isolation: isolate;
   background: #fff;
+  border: 0;
   transform-origin: center;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
+  box-shadow: none;
 }
 
 .coach-avatar::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  z-index: 2;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.86), inset 0 -10px 18px rgba(15,23,42,0.05);
+  display: none;
 }
 
 .coach-avatar::after {
-  content: "";
-  position: absolute;
-  inset: 7%;
-  border-radius: inherit;
-  z-index: -1;
-  filter: blur(14px);
+  display: none;
 }
 
 .coach-avatar-zj {
-  box-shadow: 0 16px 34px rgba(105,121,247,0.2);
+  box-shadow: none;
 }
 
 .coach-avatar-lc {
-  box-shadow: 0 16px 34px rgba(177,99,34,0.22);
+  box-shadow: none;
 }
 
 .coach-avatar-zj::after {
@@ -247,21 +237,21 @@ select {
 }
 
 .coach-avatar-animated.coach-avatar-zj {
-  animation: coach-zj-avatar-float 3.6s ease-in-out infinite;
+  animation: none;
 }
 
 .coach-avatar-animated.coach-avatar-lc {
-  animation: coach-lc-avatar-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: none;
 }
 
 .coach-avatar-selected.coach-avatar-zj,
 .coach-avatar-celebrate.coach-avatar-zj {
-  box-shadow: 0 20px 42px rgba(105,121,247,0.3), 0 0 0 7px rgba(105,121,247,0.1);
+  box-shadow: none;
 }
 
 .coach-avatar-selected.coach-avatar-lc,
 .coach-avatar-celebrate.coach-avatar-lc {
-  box-shadow: 0 20px 42px rgba(177,99,34,0.32), 0 0 0 7px rgba(242,138,58,0.13);
+  box-shadow: none;
 }
 
 .coach-hero {
@@ -284,15 +274,7 @@ select {
 }
 
 .coach-hero-figure::before {
-  content: "";
-  position: absolute;
-  left: 13%;
-  right: 13%;
-  bottom: 6%;
-  height: 18%;
-  border-radius: 999px;
-  filter: blur(16px);
-  opacity: 0.42;
+  display: none;
 }
 
 .coach-hero-figure-zj::before {
@@ -315,16 +297,16 @@ select {
 }
 
 .coach-hero-figure-animated.coach-hero-figure-zj {
-  animation: coach-zj-hero-loop 5s ease-in-out infinite;
+  animation: none;
 }
 
 .coach-hero-figure-animated.coach-hero-figure-lc {
-  animation: coach-lc-hero-loop 5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: none;
 }
 
 .coach-hero-figure-talking img,
 .coach-hero-figure-celebrate img {
-  animation: coach-character-blink 5s steps(1, end) infinite;
+  animation: none;
 }
 
 .coach-speech-bubble {
@@ -340,7 +322,7 @@ select {
   font-size: 0.92rem;
   line-height: 1.55;
   font-weight: 560;
-  animation: coach-bubble-pop 420ms cubic-bezier(0.18, 0.9, 0.28, 1.18) both;
+  animation: coach-bubble-pop 500ms cubic-bezier(0.18, 0.9, 0.28, 1.12) both;
 }
 
 @media (max-width: 640px) {
@@ -356,14 +338,19 @@ select {
   .coach-speech-bubble {
     max-width: 100%;
   }
+
+  .welcome-dialogue-row,
+  .welcome-dialogue-row-lc {
+    justify-content: flex-start;
+  }
+
+  .welcome-dialogue-row-lc .coach-speech-bubble {
+    order: 0;
+  }
 }
 
 .coach-speech-bubble::before {
-  content: "";
-  position: absolute;
-  width: 22px;
-  height: 18px;
-  z-index: -1;
+  display: none;
 }
 
 .coach-speech-bubble-zj {
@@ -438,6 +425,72 @@ select {
   font-size: 0.86rem;
 }
 
+.welcome-coach-intro {
+  position: relative;
+  overflow: hidden;
+}
+
+.welcome-dialogue-stack {
+  display: grid;
+  gap: 0.95rem;
+  transition: filter 360ms ease, opacity 360ms ease, transform 360ms ease;
+}
+
+.welcome-dialogue-stack-muted {
+  filter: blur(1.5px);
+  opacity: 0.34;
+  transform: scale(0.985);
+}
+
+.welcome-dialogue-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  opacity: 0;
+  transform: translateY(14px);
+  animation: welcome-dialogue-rise 500ms cubic-bezier(0.18, 0.9, 0.28, 1.08) both;
+}
+
+.welcome-dialogue-row-lc {
+  justify-content: flex-end;
+}
+
+.welcome-dialogue-row-lc .coach-speech-bubble {
+  order: -1;
+}
+
+.welcome-coach-choice {
+  margin: 1.25rem auto 0;
+  max-width: 620px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(14px) scale(0.98);
+  transition: opacity 360ms ease, transform 360ms ease;
+}
+
+.welcome-coach-choice-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.welcome-coach-choice-card {
+  display: flex;
+  min-height: 126px;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid rgba(226,232,240,0.75);
+  border-radius: 24px;
+  padding: 1rem;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.welcome-coach-choice-card:hover,
+.welcome-coach-choice-card-active {
+  transform: translateY(-1px);
+}
+
 .coach-form-field {
   position: relative;
   display: block;
@@ -508,6 +561,11 @@ select {
 @keyframes coach-bubble-pop {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes welcome-dialogue-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes coach-zj-avatar-float {

@@ -19,13 +19,15 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>ZYM uses your camera to scan friend connect QR codes.</string>
+	<string>ZYM uses your camera to scan friend connect QR codes and take photos you choose to send.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>ZYM uses your steps, active calories, and exercise minutes to sync your calendar progress with your consent.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>ZYM can write workout progress you choose to sync so your Apple Health activity record stays up to date.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ZYM uses your location to attach places to posts and help you discover nearby members when you choose to share it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ZYM lets you choose photos and videos to attach to messages.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

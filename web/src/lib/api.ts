@@ -196,6 +196,27 @@ export async function loginWithGoogle(
   });
 }
 
+export async function loginWithApple(
+  identityToken: string,
+  options?: {
+    fullName?: string | null;
+    timezone?: string;
+    healthDisclaimerAccepted?: boolean;
+    consentVersion?: string;
+  },
+): Promise<LoginResponse> {
+  return request<LoginResponse>('/auth/apple', {
+    method: 'POST',
+    body: JSON.stringify({
+      identityToken,
+      fullName: options?.fullName || undefined,
+      timezone: options?.timezone || detectClientTimeZone(),
+      healthDisclaimerAccepted: options?.healthDisclaimerAccepted,
+      consentVersion: options?.consentVersion,
+    }),
+  });
+}
+
 export async function register(
   username: string,
   email: string,

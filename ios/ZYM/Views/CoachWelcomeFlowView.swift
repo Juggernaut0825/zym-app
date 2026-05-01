@@ -91,39 +91,14 @@ struct CoachAvatar: View {
     var bubbleText: String = ""
     var showBubble: Bool = false
 
-    @State private var animationTick = false
-
     private var art: CoachArtConfig { coachArt(coach) }
-    private var isLC: Bool { art.id == "lc" }
-    private var accent: Color { Color.zymCoachAccent(art.id) }
-
-    private var animation: Animation {
-        if isLC {
-            return .easeInOut(duration: state == .celebrate ? 0.72 : 1.25)
-        }
-        return .easeInOut(duration: state == .celebrate ? 0.9 : 2.2)
-    }
 
     private var scale: CGFloat {
-        guard animated else { return 1 }
-        switch state {
-        case .selected:
-            return animationTick ? (isLC ? 1.045 : 1.025) : 1
-        case .celebrate:
-            return animationTick ? (isLC ? 1.08 : 1.04) : 0.99
-        case .talking:
-            return animationTick ? (isLC ? 1.035 : 1.018) : 0.995
-        case .idle:
-            return animationTick ? (isLC ? 1.018 : 1.012) : 1
-        }
+        1
     }
 
     private var yOffset: CGFloat {
-        guard animated else { return 0 }
-        if isLC {
-            return animationTick ? -2 : 1
-        }
-        return animationTick ? -5 : 0
+        0
     }
 
     var body: some View {
@@ -133,35 +108,19 @@ struct CoachAvatar: View {
                 CoachSpeechBubble(text: bubbleText, coach: art.id, tailDirection: .topLeft)
             }
         }
-        .onAppear {
-            guard animated, !animationTick else { return }
-            withAnimation(animation.repeatForever(autoreverses: true)) {
-                animationTick = true
-            }
-        }
     }
 
     @ViewBuilder
     private var imageView: some View {
         switch variant {
         case .profile:
-            Circle()
-                .fill(Color.white)
-                .overlay(
-                    Image(art.avatarImageName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: size, height: size)
-                )
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.white.opacity(0.9), lineWidth: max(2, size * 0.035))
-                )
+            Image(art.avatarImageName)
+                .resizable()
+                .scaledToFill()
                 .frame(width: size, height: size)
+                .clipShape(Circle())
                 .scaleEffect(scale)
                 .offset(y: yOffset)
-                .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.3 : 0.16), radius: size * 0.18, x: 0, y: size * 0.1)
         case .hero:
             Image(art.heroImageName)
                 .resizable()
@@ -170,7 +129,6 @@ struct CoachAvatar: View {
                 .blendMode(.multiply)
                 .scaleEffect(scale)
                 .offset(y: yOffset)
-                .shadow(color: accent.opacity(state == .selected || state == .celebrate ? 0.24 : 0.12), radius: size * 0.1, x: 0, y: size * 0.06)
         }
     }
 }
@@ -250,12 +208,12 @@ struct CoachSpeechBubble: View {
             .padding(.vertical, 12)
             .frame(maxWidth: 270, alignment: .leading)
             .background(
-                CoachSpeechBubbleShape(tailDirection: tailDirection, cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(fill)
                     .shadow(color: Color.black.opacity(0.06), radius: 16, x: 0, y: 9)
             )
             .overlay(
-                CoachSpeechBubbleShape(tailDirection: tailDirection, cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(stroke, lineWidth: 1)
             )
             .frame(maxWidth: .infinity, alignment: frameAlignment)
@@ -271,59 +229,6 @@ struct CoachSpeechBubble: View {
 
 }
 
-private struct CoachSpeechBubbleShape: Shape {
-    let tailDirection: CoachBubbleTailDirection
-    let cornerRadius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let tailWidth: CGFloat = tailDirection == .none ? 0 : 13
-        var bubbleRect = rect
-        switch tailDirection {
-        case .left:
-            bubbleRect.origin.x += tailWidth
-            bubbleRect.size.width -= tailWidth
-        case .right:
-            bubbleRect.size.width -= tailWidth
-        case .topLeft, .topRight:
-            bubbleRect.origin.y += tailWidth
-            bubbleRect.size.height -= tailWidth
-        case .none:
-            break
-        }
-
-        var path = Path(roundedRect: bubbleRect, cornerRadius: cornerRadius)
-        switch tailDirection {
-        case .left:
-            let centerY = bubbleRect.midY
-            path.move(to: CGPoint(x: bubbleRect.minX + 1, y: centerY - 10))
-            path.addLine(to: CGPoint(x: rect.minX, y: centerY))
-            path.addLine(to: CGPoint(x: bubbleRect.minX + 1, y: centerY + 10))
-            path.closeSubpath()
-        case .right:
-            let centerY = bubbleRect.midY
-            path.move(to: CGPoint(x: bubbleRect.maxX - 1, y: centerY - 10))
-            path.addLine(to: CGPoint(x: rect.maxX, y: centerY))
-            path.addLine(to: CGPoint(x: bubbleRect.maxX - 1, y: centerY + 10))
-            path.closeSubpath()
-        case .topLeft:
-            let anchorX = bubbleRect.minX + 34
-            path.move(to: CGPoint(x: anchorX - 11, y: bubbleRect.minY + 1))
-            path.addLine(to: CGPoint(x: anchorX, y: rect.minY))
-            path.addLine(to: CGPoint(x: anchorX + 11, y: bubbleRect.minY + 1))
-            path.closeSubpath()
-        case .topRight:
-            let anchorX = bubbleRect.maxX - 34
-            path.move(to: CGPoint(x: anchorX - 11, y: bubbleRect.minY + 1))
-            path.addLine(to: CGPoint(x: anchorX, y: rect.minY))
-            path.addLine(to: CGPoint(x: anchorX + 11, y: bubbleRect.minY + 1))
-            path.closeSubpath()
-        case .none:
-            break
-        }
-        return path
-    }
-}
-
 struct CoachWelcomeFlowView: View {
     @Binding var isPresented: Bool
     let onComplete: (() -> Void)?
@@ -334,9 +239,10 @@ struct CoachWelcomeFlowView: View {
     @State private var loadingExisting = true
     @State private var pending = false
     @State private var errorText = ""
+    @State private var introComplete = false
     @State private var state = CoachWelcomeSetupState()
 
-    private let totalSteps = 4
+    private let totalSteps = 3
 
     private var progress: Double {
         Double(step + 1) / Double(totalSteps)
@@ -376,12 +282,15 @@ struct CoachWelcomeFlowView: View {
             footerBar
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .onAppear(perform: loadExisting)
+        .onAppear {
+            loadExisting()
+            scheduleIntroReveal()
+        }
     }
 
     private var canContinue: Bool {
-        if step == 1 {
-            return !state.coach.isEmpty
+        if step == 0 {
+            return introComplete && !state.coach.isEmpty
         }
         return true
     }
@@ -410,7 +319,7 @@ struct CoachWelcomeFlowView: View {
                     }
                 }
                 .buttonStyle(ZYMPrimaryButton())
-                .disabled(pending || loadingExisting)
+                .disabled(pending || loadingExisting || (step == 0 && !introComplete))
             } else {
                 Button(pending ? "Saving..." : "Enter ZYM") {
                     saveAndFinish()
@@ -476,8 +385,6 @@ struct CoachWelcomeFlowView: View {
         case 0:
             meetCoachesStep
         case 1:
-            coachStep
-        case 2:
             basicsStep
         default:
             readyStep
@@ -485,68 +392,105 @@ struct CoachWelcomeFlowView: View {
     }
 
     private var meetCoachesStep: some View {
-        VStack(spacing: 14) {
-            coachIntroCard(
-                coach: "zj",
-                lines: [
-                    "I'm ZJ. I'll help you build steady habits without making fitness feel overwhelming.",
-                    "Share your goal, schedule, meals, and training context."
-                ]
-            )
-
-            coachIntroCard(
-                coach: "lc",
-                lines: [
-                    "I'm LC. I'll keep the plan sharp and call out drift before it becomes a pattern.",
-                    "Then ZYM turns it into meals, workouts, check-ins, and feedback."
-                ]
-            )
-        }
-    }
-
-    private func coachIntroCard(coach: String, lines: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CoachHero(
-                coach: coach,
-                state: .talking,
-                size: 204,
-                showBubble: true,
-                bubbleText: lines.first ?? "",
-                bubbleTone: coach == "lc" ? .strong : .soft,
-                tailDirection: .left
-            )
-
-            if lines.count > 1 {
-                CoachSpeechBubble(
-                    text: lines[1],
-                    coach: coach,
-                    tone: coach == "lc" ? .strong : .soft,
-                    tailDirection: .topLeft
+        VStack(spacing: 18) {
+            VStack(spacing: 12) {
+                coachDialogueRow(
+                    coach: "zj",
+                    text: "Hi, I'm ZJ! I'll help you build steady habits and encourage you in the process.",
+                    delay: 0
                 )
+
+                coachDialogueRow(
+                    coach: "lc",
+                    text: "Hey, I'm LC! I'll keep the plan sharp and call out drift before it becomes a pattern.",
+                    delay: 2
+                )
+
+                coachDialogueRow(
+                    coach: "zj",
+                    text: "Share your goal, schedule, meals, and training context. Then we can turn it into records, check-ins, and feedback!",
+                    delay: 4
+                )
+            }
+            .opacity(introComplete ? 0.34 : 1)
+            .blur(radius: introComplete ? 1.2 : 0)
+            .scaleEffect(introComplete ? 0.985 : 1)
+            .animation(.zymSoft, value: introComplete)
+
+            if introComplete {
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        compactCoachChoice(coach: "zj", badge: "Gentle encouragement")
+                        compactCoachChoice(coach: "lc", badge: "Tough accountability")
+                    }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .zymCard()
     }
 
-    private var coachStep: some View {
-        VStack(spacing: 12) {
-            coachCard(
-                coach: "zj",
-                badge: "Gentle encouragement",
-                description: "Warm, supportive, and steady.",
-                sample: "I'll help you keep momentum without overcomplicating your day."
-            )
-            coachCard(
-                coach: "lc",
-                badge: "Tough accountability",
-                description: "Direct, sharp, and demanding.",
-                sample: "I'll push you to stop drifting and start executing."
-            )
+    private func coachDialogueRow(coach: String, text: String, delay: Double) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            if coach == "lc" {
+                Spacer(minLength: 0)
+                CoachSpeechBubble(text: text, coach: coach, tone: .strong, tailDirection: .right)
+                CoachAvatar(coach: coach, state: .talking, size: 58)
+            } else {
+                CoachAvatar(coach: coach, state: .talking, size: 58)
+                CoachSpeechBubble(text: text, coach: coach, tailDirection: .left)
+                Spacer(minLength: 0)
+            }
         }
+        .zymAppear(delay: delay)
+    }
+
+    private func compactCoachChoice(coach: String, badge: String) -> some View {
+        let isSelected = state.coach == coach
+        let accent = Color.zymCoachAccent(coach)
+
+        return Button {
+            withAnimation(.zymSpring) {
+                state.coach = coach
+            }
+        } label: {
+            VStack(spacing: 10) {
+                CoachAvatar(coach: coach, state: isSelected ? .selected : .idle, size: 68)
+                Text(coach.uppercased())
+                    .font(.custom("Syne", size: 26))
+                    .foregroundColor(Color.zymText)
+                Text(badge.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(1.0)
+                    .foregroundColor(Color.zymCoachInk(coach))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity, minHeight: 136)
+            .padding(12)
+            .background(Color.white.opacity(isSelected ? 0.96 : 0.74))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accent.opacity(isSelected ? 0.42 : 0.16), lineWidth: isSelected ? 2 : 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0.03), radius: 14, x: 0, y: 8)
+        }
+        .buttonStyle(.plain)
     }
 
     private var basicsStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let weightUnitBinding = Binding<String>(
+            get: { state.weightUnit },
+            set: { newUnit in
+                let oldUnit = state.weightUnit
+                state.weight = coachWelcomeConvertWeight(state.weight, from: oldUnit, to: newUnit)
+                state.weightUnit = newUnit
+            }
+        )
+
+        return VStack(alignment: .leading, spacing: 14) {
             CoachAvatar(
                 coach: selectedCoach,
                 state: state.goal.isEmpty && state.trainingDays.isEmpty ? .idle : .talking,
@@ -568,7 +512,7 @@ struct CoachWelcomeFlowView: View {
                 welcomeMeasurementField(
                     "Weight",
                     text: $state.weight,
-                    unit: $state.weightUnit,
+                    unit: weightUnitBinding,
                     options: coachWeightUnitOptions,
                     placeholder: state.weightUnit == "kg" ? "81.5" : "180",
                     keyboard: .decimalPad,
@@ -619,16 +563,14 @@ struct CoachWelcomeFlowView: View {
 
     private var readyStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            CoachHero(
+            CoachAvatar(
                 coach: selectedCoach,
                 state: .celebrate,
-                size: 204,
-                showBubble: true,
+                size: 92,
                 bubbleText: selectedCoach == "lc"
                     ? "Profile saved. Now stop guessing and start executing."
                     : "You're ready. I'll help you build this step by step.",
-                bubbleTone: .strong,
-                tailDirection: .left
+                showBubble: true
             )
 
             VStack(alignment: .leading, spacing: 10) {
@@ -691,74 +633,6 @@ struct CoachWelcomeFlowView: View {
         return selectedCoach == "lc"
             ? "Give me the basics. I'll use this to set your calories and training structure."
             : "Let's set your baseline so I can guide you from the first reply."
-    }
-
-    private func coachCard(coach: String, badge: String, description: String, sample: String) -> some View {
-        let isSelected = state.coach == coach
-        let accent = Color.zymCoachAccent(coach)
-
-        return Button {
-            withAnimation(.zymSpring) {
-                state.coach = coach
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 14) {
-                CoachAvatar(coach: coach, state: isSelected ? .selected : .idle, size: 78)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(badge.uppercased())
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundColor(Color.zymCoachInk(coach))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.82))
-                            .clipShape(Capsule())
-
-                        Text(coach.uppercased())
-                            .font(.custom("Syne", size: 30))
-                            .foregroundColor(Color.zymText)
-
-                        Text(description)
-                            .font(.system(size: 13))
-                            .foregroundColor(Color.zymSubtext)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-
-                CoachHero(
-                    coach: coach,
-                    animationMode: isSelected ? .loop : .static,
-                    state: isSelected ? .selected : .idle,
-                    size: 148,
-                    showBubble: true,
-                    bubbleText: sample,
-                    bubbleTone: isSelected ? .strong : .soft,
-                    tailDirection: .left
-                )
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.96),
-                        Color.zymCoachSoft(coach).opacity(isSelected ? 0.86 : 0.58),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(accent.opacity(isSelected ? 0.42 : 0.16), lineWidth: isSelected ? 2 : 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .scaleEffect(isSelected ? (coach == "lc" ? 1.018 : 1.01) : 1)
-            .shadow(color: accent.opacity(isSelected ? 0.2 : 0.06), radius: 18, x: 0, y: 10)
-        }
-        .buttonStyle(.plain)
     }
 
     private func welcomeMeasurementField(
@@ -869,9 +743,17 @@ struct CoachWelcomeFlowView: View {
     private var stepTitle: String {
         switch step {
         case 0: return "Meet your coaches"
-        case 1: return "Choose your coach"
-        case 2: return "Build your coach profile"
+        case 1: return "Build your coach profile"
         default: return "You are ready"
+        }
+    }
+
+    private func scheduleIntroReveal() {
+        introComplete = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            withAnimation(.zymSoft) {
+                introComplete = true
+            }
         }
     }
 
@@ -926,7 +808,7 @@ struct CoachWelcomeFlowView: View {
               let updateURL = apiURL("/coach/records/profile/update"),
               !state.coach.isEmpty else {
             errorText = "Choose a coach before finishing setup."
-            step = 1
+            step = 0
             return
         }
 
@@ -1045,6 +927,18 @@ private func coachWelcomeHeightDisplay(_ value: String, unit: String) -> String 
 
 private func coachWelcomeWeightDisplay(_ value: String, unit: String) -> String {
     coachWelcomeWeightPayload(value, unit: unit) ?? ""
+}
+
+private func coachWelcomeConvertWeight(_ value: String, from oldUnit: String, to newUnit: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard oldUnit != newUnit, let numeric = Double(trimmed), numeric > 0 else {
+        return value
+    }
+    let converted = newUnit == "lb" ? numeric * 2.2046226218 : numeric * 0.45359237
+    if abs(converted.rounded() - converted) < 0.00001 {
+        return String(Int(converted.rounded()))
+    }
+    return String(format: "%.1f", converted)
 }
 
 private func coachWelcomeStripSuffix(_ value: String, suffixes: [String]) -> String {
