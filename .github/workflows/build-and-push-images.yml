@@ -1,15 +1,6 @@
 name: Build And Push Images
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "server/**"
-      - "web/**"
-      - ".github/workflows/build-and-push-images.yml"
-      - ".github/workflows/deploy-prod.yml"
-      - "infra/scripts/**"
   workflow_dispatch:
 
 permissions:
@@ -116,12 +107,8 @@ jobs:
             echo "- Server: \`${{ steps.meta.outputs.server_image }}\`"
             echo "- Platform: \`${IMAGE_PLATFORM}\`"
             echo
-            if [ "${{ github.event_name }}" = "push" ]; then
-              echo "An automatic production deploy job will run for this push to \`main\`."
-            else
-              echo "Automatic production deploy only runs for push events on \`main\`."
-            fi
-            echo "Use the manual \`Deploy Production ECS\` workflow for rollbacks or selective deploys."
+            echo "This AWS image workflow is manual-only after the GCP migration."
+            echo "Use the manual \`Deploy Production ECS\` workflow only for an intentional AWS rollback."
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-production:
