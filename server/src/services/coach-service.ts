@@ -154,6 +154,39 @@ function detectLatestMessageLanguage(message: string): 'English' | 'Chinese' | n
   return null;
 }
 
+function hasTrainingLogIntent(message: string): boolean {
+  const text = String(message || '').toLowerCase();
+  if (!text) return false;
+  const hasLogVerb = /(log|record|save|记下|记录|保存|帮我记|帮我记录)/i.test(text);
+  const hasTrainingNoun = /(training|workout|exercise|lift|lifting|训练|锻炼|健身|卧推|深蹲|硬拉|有氧|跑步)/i.test(text);
+  const hasPerformedSignal = /(today|just|did|finished|completed|trained|worked out|今天|刚|刚才|做了|练了|训练了|完成了)/i.test(text);
+  return hasLogVerb && hasTrainingNoun && hasPerformedSignal;
+}
+
+function claimsTrainingLogged(response: string): boolean {
+  const text = String(response || '').toLowerCase();
+  if (!text) return false;
+  const hasTrainingNoun = /(training|workout|exercise|训练|锻炼|健身)/i.test(text);
+  const hasSavedVerb = /(logged|recorded|saved|已记录|记录了|保存了|帮你记|帮你记录)/i.test(text);
+  return hasTrainingNoun && hasSavedVerb;
+}
+
+function buildFallbackTrainingEntry(message: string): Record<string, unknown> {
+  const normalized = sanitizePromptText(message, 500);
+  const trimmedName = normalized
+    .replace(/^(please\s+)?(log|record|save)\s+(my\s+)?/i, '')
+    .replace(/^(帮我|请帮我)?(记录|记下|保存)/, '')
+    .trim();
+
+  return {
+    name: trimmedName.slice(0, 80) || 'Training session',
+    sets: 0,
+    reps: '0',
+    weight_kg: 0,
+    notes: normalized,
+  };
+}
+
 function buildReplyLanguagePrompt(message: string): string {
   const language = detectLatestMessageLanguage(message);
   const languageLine = language
@@ -546,10 +579,27 @@ export class CoachService {
     });
 
     const latestToolResults = collectLatestToolResults(result.messages);
-    const finalResponse = ensureKnowledgeCitationLanguage(
+    let finalResponse = ensureKnowledgeCitationLanguage(
       sanitizeCoachResponseText(String(result.response || '').trim()),
       latestToolResults.get('search_knowledge'),
     );
+
+    if (
+      options.allowWriteTools !== false
+      && !latestToolResults.has('log_training')
+      && hasTrainingLogIntent(normalizedMessage)
+      && claimsTrainingLogged(finalResponse)
+    ) {
+      try {
+        await coachTypedToolsService.logTraining(userId, [buildFallbackTrainingEntry(normalizedMessage)]);
+        logger.warn(`[coach] auto-logged fallback training note for user=${userId} after missing log_training tool call`);
+      } catch (error) {
+        logger.error(`[coach] failed to auto-log fallback training note for user=${userId}`, error);
+        finalResponse = detectLatestMessageLanguage(normalizedMessage) === 'Chinese'
+          ? '我刚才没有成功把这次训练写进记录。请把动作、组数、次数或一句训练总结再发我一次，我会重新记录。'
+          : 'I did not successfully save that training log. Send the exercises, sets, reps, or a short session note again and I will record it.';
+      }
+    }
 
     await sessionStore.appendAssistantMessage(session, finalResponse);
     await sessionStore.saveToFile(session, sessionFile);

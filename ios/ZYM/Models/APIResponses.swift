@@ -180,6 +180,8 @@ func coachBodyFatValueToRange(_ value: Double?) -> String {
 struct CoachProfileData: Decodable {
     let height: String?
     let weight: String?
+    let preferred_weight_unit: String?
+    let preferred_height_unit: String?
     let height_cm: Double?
     let weight_kg: Double?
     let age: Int?
@@ -198,6 +200,10 @@ struct CoachProfileData: Decodable {
     private enum CodingKeys: String, CodingKey {
         case height
         case weight
+        case preferred_weight_unit
+        case preferredWeightUnit
+        case preferred_height_unit
+        case preferredHeightUnit
         case height_cm
         case heightCm
         case weight_kg
@@ -235,6 +241,8 @@ struct CoachProfileData: Decodable {
 
         height = container.decodeFlexibleString(forKey: .height) ?? container.decodeFlexibleString(forKey: .heightCm) ?? container.decodeFlexibleString(forKey: .height_cm)
         weight = container.decodeFlexibleString(forKey: .weight) ?? container.decodeFlexibleString(forKey: .weightKg) ?? container.decodeFlexibleString(forKey: .weight_kg)
+        preferred_weight_unit = container.decodeFlexibleString(forKey: .preferred_weight_unit) ?? container.decodeFlexibleString(forKey: .preferredWeightUnit)
+        preferred_height_unit = container.decodeFlexibleString(forKey: .preferred_height_unit) ?? container.decodeFlexibleString(forKey: .preferredHeightUnit)
         height_cm = container.decodeFlexibleDouble(forKeys: [.height_cm, .heightCm, .height])
         weight_kg = container.decodeFlexibleDouble(forKeys: [.weight_kg, .weightKg, .weight])
         age = container.decodeFlexibleInt(forKeys: [.age, .ageYears])

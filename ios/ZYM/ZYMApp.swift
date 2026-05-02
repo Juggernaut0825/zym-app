@@ -1,7 +1,16 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 
 final class ZYMAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        configurePlaybackAudioSession()
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -14,6 +23,15 @@ final class ZYMAppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         AppNotificationManager.shared.refreshAuthorizationStatus()
+    }
+
+    private func configurePlaybackAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            // Video playback still works without this; the category only allows sound while the mute switch is on.
+        }
     }
 }
 
@@ -55,10 +73,81 @@ struct ZYMApp: App {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
+                    try? AVAudioSession.sharedInstance().setActive(true)
                     notificationManager.refreshAuthorizationStatus()
                 }
             }
+            .zymInstallKeyboardDismissal()
         }
+    }
+}
+
+private final class ZYMKeyboardDismissCoordinator: NSObject, UIGestureRecognizerDelegate {
+    @objc func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var current = touch.view
+        while let view = current {
+            if view is UIControl || view is UITextField || view is UITextView {
+                return false
+            }
+            current = view.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+}
+
+private struct ZYMKeyboardDismissInstaller: UIViewRepresentable {
+    func makeCoordinator() -> ZYMKeyboardDismissCoordinator {
+        ZYMKeyboardDismissCoordinator()
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        DispatchQueue.main.async {
+            installGestures(from: view, coordinator: context.coordinator)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            installGestures(from: uiView, coordinator: context.coordinator)
+        }
+    }
+
+    private func installGestures(from view: UIView, coordinator: ZYMKeyboardDismissCoordinator) {
+        guard let window = view.window else { return }
+        let existingNames = Set((window.gestureRecognizers ?? []).compactMap(\.name))
+
+        if !existingNames.contains("zym.keyboard.dismiss.tap") {
+            let tap = UITapGestureRecognizer(target: coordinator, action: #selector(ZYMKeyboardDismissCoordinator.dismissKeyboard))
+            tap.name = "zym.keyboard.dismiss.tap"
+            tap.cancelsTouchesInView = false
+            tap.delegate = coordinator
+            window.addGestureRecognizer(tap)
+        }
+
+        if !existingNames.contains("zym.keyboard.dismiss.pan") {
+            let pan = UIPanGestureRecognizer(target: coordinator, action: #selector(ZYMKeyboardDismissCoordinator.dismissKeyboard))
+            pan.name = "zym.keyboard.dismiss.pan"
+            pan.cancelsTouchesInView = false
+            pan.delegate = coordinator
+            window.addGestureRecognizer(pan)
+        }
+    }
+}
+
+private extension View {
+    func zymInstallKeyboardDismissal() -> some View {
+        background(ZYMKeyboardDismissInstaller().frame(width: 0, height: 0))
     }
 }
 

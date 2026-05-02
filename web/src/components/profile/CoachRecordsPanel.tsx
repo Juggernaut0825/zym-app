@@ -316,72 +316,102 @@ export function CoachRecordsPanel(props: CoachRecordsPanelProps) {
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-        <input
-          className="input-shell"
-          placeholder="Height"
-          value={profileDraft.height}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))}
-        />
-        <input
-          className="input-shell"
-          placeholder="Weight"
-          value={profileDraft.weight}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))}
-        />
-        <input
-          className="input-shell"
-          inputMode="numeric"
-          placeholder="Age"
-          value={profileDraft.age}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, age: event.target.value.slice(0, 3) }))}
-        />
-        <input
-          className="input-shell"
-          inputMode="decimal"
-          placeholder="Body fat %"
-          value={profileDraft.body_fat_pct}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, body_fat_pct: event.target.value.slice(0, 5) }))}
-        />
-        <input
-          className="input-shell"
-          inputMode="numeric"
-          placeholder="Training days / week"
-          value={profileDraft.training_days}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, training_days: event.target.value.slice(0, 2) }))}
-        />
-        <input
-          className="input-shell"
-          placeholder="Gender"
-          value={profileDraft.gender}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, gender: event.target.value.slice(0, 40) }))}
-        />
-        <input
-          className="input-shell"
-          placeholder="Activity level"
-          value={profileDraft.activity_level}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, activity_level: event.target.value.slice(0, 60) }))}
-        />
-        <input
-          className="input-shell"
-          placeholder="Goal"
-          value={profileDraft.goal}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, goal: event.target.value.slice(0, 120) }))}
-        />
-        <input
-          className="input-shell"
-          placeholder="Experience level"
-          value={profileDraft.experience_level}
-          onChange={(event) => setProfileDraft((prev) => ({ ...prev, experience_level: event.target.value.slice(0, 40) }))}
-        />
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Height"
+            value={profileDraft.height}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, height: event.target.value.slice(0, 40) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Current height, for example 180 cm or 5'11.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Weight"
+            value={profileDraft.weight}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, weight: event.target.value.slice(0, 40) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Latest bodyweight in your preferred unit.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            inputMode="numeric"
+            placeholder="Age"
+            value={profileDraft.age}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, age: event.target.value.slice(0, 3) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Age used for calorie estimates.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            inputMode="decimal"
+            placeholder="Body fat %"
+            value={profileDraft.body_fat_pct}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, body_fat_pct: event.target.value.slice(0, 5) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Optional estimate if you track it.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            inputMode="numeric"
+            placeholder="Training days / week"
+            value={profileDraft.training_days}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, training_days: event.target.value.slice(0, 2) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">How many days you usually train each week.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Gender"
+            value={profileDraft.gender}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, gender: event.target.value.slice(0, 40) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Optional profile context for estimates.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Activity level"
+            value={profileDraft.activity_level}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, activity_level: event.target.value.slice(0, 60) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Daily movement outside training.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Goal"
+            value={profileDraft.goal}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, goal: event.target.value.slice(0, 120) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Main coaching goal, like cut, maintain, or bulk.</p>
+        </div>
+        <div>
+          <input
+            className="input-shell"
+            placeholder="Experience level"
+            value={profileDraft.experience_level}
+            onChange={(event) => setProfileDraft((prev) => ({ ...prev, experience_level: event.target.value.slice(0, 40) }))}
+          />
+          <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Training background, for example beginner or advanced.</p>
+        </div>
       </div>
 
-      <textarea
-        className="input-shell mt-3"
-        maxLength={2000}
-        placeholder="Notes"
-        value={profileDraft.notes}
-        onChange={(event) => setProfileDraft((prev) => ({ ...prev, notes: event.target.value.slice(0, 2000) }))}
-      />
+      <div className="mt-3">
+        <textarea
+          className="input-shell"
+          maxLength={2000}
+          placeholder="Notes"
+          value={profileDraft.notes}
+          onChange={(event) => setProfileDraft((prev) => ({ ...prev, notes: event.target.value.slice(0, 2000) }))}
+        />
+        <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Anything the coach should remember when interpreting your logs.</p>
+      </div>
 
       <div className="mt-4 flex gap-3">
         <button className={primaryButtonClass} type="button" onClick={() => void handleSaveProfile()} disabled={saving || loading}>

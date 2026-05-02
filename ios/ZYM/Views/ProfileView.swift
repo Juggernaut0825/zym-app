@@ -695,10 +695,22 @@ private struct ProfileEditSheet: View {
             Form {
                 Section("Profile") {
                     TextField("Display name", text: $displayName)
+                    Text("The name friends see in chats, posts, and profile cards.")
+                        .font(.footnote)
+                        .foregroundColor(Color.zymSubtext)
                     TextField("Bio", text: $bio, axis: .vertical)
                         .lineLimit(3...6)
+                    Text("A short intro about you, your training context, or what people should know.")
+                        .font(.footnote)
+                        .foregroundColor(Color.zymSubtext)
                     TextField("Fitness goal", text: $fitnessGoal)
+                    Text("Your public-facing goal, for example cut, maintain strength, or build muscle.")
+                        .font(.footnote)
+                        .foregroundColor(Color.zymSubtext)
                     TextField("Hobbies", text: $hobbies)
+                    Text("Optional interests that make your profile feel more personal.")
+                        .font(.footnote)
+                        .foregroundColor(Color.zymSubtext)
                 }
 
                 Section("Images") {
@@ -749,6 +761,7 @@ private struct ProfileEditSheet: View {
                 }
             }
             .navigationTitle("Edit Profile")
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1152,12 +1165,12 @@ private struct CoachRecordsDetailsSheet: View {
                                 .foregroundColor(Color.zymText)
 
                             LazyVGrid(columns: gridColumns, spacing: 8) {
-                                coachInputField("Height cm", text: binding(for: \.heightCm, max: 6), keyboard: .decimalPad)
-                                coachInputField("Weight kg", text: binding(for: \.weightKg, max: 6), keyboard: .decimalPad)
-                                coachInputField("Age", text: binding(for: \.age, max: 3), keyboard: .numberPad)
-                                coachInputField("Body fat %", text: binding(for: \.bodyFatPct, max: 5), keyboard: .decimalPad)
-                                coachInputField("Training days", text: binding(for: \.trainingDays, max: 2), keyboard: .numberPad)
-                                coachInputField("Timezone", text: binding(for: \.timezone, max: 80), keyboard: .default)
+                                coachInputField("Height cm", text: binding(for: \.heightCm, max: 6), keyboard: .decimalPad, hint: "Current height in centimeters.")
+                                coachInputField("Weight kg", text: binding(for: \.weightKg, max: 6), keyboard: .decimalPad, hint: "Latest bodyweight in kilograms.")
+                                coachInputField("Age", text: binding(for: \.age, max: 3), keyboard: .numberPad, hint: "Age used for calorie estimates.")
+                                coachInputField("Body fat %", text: binding(for: \.bodyFatPct, max: 5), keyboard: .decimalPad, hint: "Optional estimate if you track it.")
+                                coachInputField("Training days", text: binding(for: \.trainingDays, max: 2), keyboard: .numberPad, hint: "How many days you usually train each week.")
+                                coachInputField("Timezone", text: binding(for: \.timezone, max: 80), keyboard: .default, hint: "Used to place logs on the right local day.")
                             }
 
                             Picker("Gender", selection: $profileDraft.gender) {
@@ -1469,18 +1482,27 @@ private struct CoachRecordsDetailsSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
-    private func coachInputField(_ title: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        TextField(title, text: text)
-            .font(.system(size: 14))
-            .padding(10)
-            .background(Color.zymSurfaceSoft)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.zymLine, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .keyboardType(keyboard)
-            .textInputAutocapitalization(.never)
+    private func coachInputField(_ title: String, text: Binding<String>, keyboard: UIKeyboardType, hint: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(title, text: text)
+                .font(.system(size: 14))
+                .padding(10)
+                .background(Color.zymSurfaceSoft)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.zymLine, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(.never)
+
+            if !hint.isEmpty {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundColor(Color.zymSubtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func binding(for keyPath: WritableKeyPath<CoachProfileDraft, String>, max: Int) -> Binding<String> {

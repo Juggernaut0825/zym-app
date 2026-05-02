@@ -2474,7 +2474,12 @@ struct NativeVideoPlayerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.showsPlaybackControls = true
-        controller.player = AVPlayer(url: url)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let player = AVPlayer(url: url)
+        player.isMuted = false
+        player.volume = 1
+        controller.player = player
         controller.player?.play()
         return controller
     }

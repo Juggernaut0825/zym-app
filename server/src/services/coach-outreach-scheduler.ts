@@ -183,6 +183,9 @@ export class CoachOutreachScheduler {
     if (this.alreadySentForLocalDay(userId, localNow.day)) {
       return false;
     }
+    if (this.alreadyHasCoachMessageForLocalDay(topic, timezone, localNow.day)) {
+      return false;
+    }
 
     if (await this.maybeSendOnboarding(userId, coachId, timezone, topic, user.created_at, now)) {
       return true;
@@ -206,6 +209,64 @@ export class CoachOutreachScheduler {
       `)
       .get(userId, localDay) as { 1?: number } | undefined;
     return Boolean(row);
+  }
+
+  private alreadyHasCoachMessageForLocalDay(topic: string, timezone: string, localDay: string): boolean {
+    const rows = getDB()
+      .prepare(`
+        SELECT created_at
+        FROM messages
+        WHERE topic = ? AND from_user_id = 0
+        ORDER BY id DESC
+        LIMIT 20
+      `)
+      .all(topic) as Array<{ created_at?: string | null }>;
+
+    return rows.some((row) => (
+      localDateParts(parseIso(row.created_at) || new Date(0), timezone).day === localDay
+    ));
+  }
+
+  private reserveOutreachEvent(input: {
+    userId: number;
+    triggerType: string;
+    dedupeKey: string;
+    coachId: string;
+    localDay: string;
+    timezone: string;
+  }): boolean {
+    try {
+      getDB()
+        .prepare(`
+          INSERT INTO coach_outreach_events (user_id, trigger_type, dedupe_key, coach_id, local_day, payload, message_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          input.userId,
+          input.triggerType,
+          input.dedupeKey,
+          input.coachId,
+          input.localDay,
+          JSON.stringify({ timezone: input.timezone, status: 'reserved' }),
+          null,
+        );
+      return true;
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : error).toLowerCase();
+      if (message.includes('unique') || message.includes('duplicate')) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private clearReservedOutreachEvent(dedupeKey: string): void {
+    getDB()
+      .prepare(`
+        DELETE FROM coach_outreach_events
+        WHERE dedupe_key = ? AND message_id IS NULL
+      `)
+      .run(dedupeKey);
   }
 
   private async maybeSendOnboarding(
@@ -424,9 +485,24 @@ export class CoachOutreachScheduler {
       return false;
     }
 
-    const daily = await readDailyRecord(input.userId);
-    const stateContext = await this.buildStateContext(input.userId, input.timezone, input.localDay, daily);
-    const content = await CoachService.composeProactiveMessage(String(input.userId), `
+    const reserved = this.reserveOutreachEvent({
+      userId: input.userId,
+      triggerType: input.triggerType,
+      dedupeKey: input.dedupeKey,
+      coachId: input.coachId,
+      localDay: input.localDay,
+      timezone: input.timezone,
+    });
+    if (!reserved) {
+      return false;
+    }
+
+    let messageId: number | null = null;
+
+    try {
+      const daily = await readDailyRecord(input.userId);
+      const stateContext = await this.buildStateContext(input.userId, input.timezone, input.localDay, daily);
+      const content = await CoachService.composeProactiveMessage(String(input.userId), `
 Trigger: ${input.triggerType}
 User timezone: ${input.timezone}
 Local day: ${input.localDay}
@@ -434,71 +510,83 @@ Local day: ${input.localDay}
 ${input.instruction}
 ${stateContext}
     `.trim(), {
-      coachOverride: input.coachId,
-      platform: 'scheduler',
-      conversationScope: 'coach_dm',
-    });
+        coachOverride: input.coachId,
+        platform: 'scheduler',
+        conversationScope: 'coach_dm',
+      });
 
-    if (!content.trim()) {
-      return false;
-    }
+      if (!content.trim()) {
+        this.clearReservedOutreachEvent(input.dedupeKey);
+        return false;
+      }
 
-    const messageId = await MessageService.sendMessage(0, input.topic, content, []);
-    const activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
-      0,
-      input.topic,
-      messageId,
-      content,
-      [input.userId],
-    );
-    void PushNotificationService.sendMessageNotifications({
-      actorUserId: 0,
-      recipientUserIds: activityNotificationTargets,
-      topic: input.topic,
-      messageId,
-      snippet: content,
-    }).catch((error) => logger.warn('[outreach] failed to send coach push notification', error));
+      messageId = await MessageService.sendMessage(0, input.topic, content, []);
+      getDB()
+        .prepare(`
+          UPDATE coach_outreach_events
+          SET message_id = ?, payload = ?
+          WHERE dedupe_key = ?
+        `)
+        .run(
+          messageId,
+          JSON.stringify({ timezone: input.timezone, status: 'sent' }),
+          input.dedupeKey,
+        );
 
-    getDB()
-      .prepare(`
-        INSERT INTO coach_outreach_events (user_id, trigger_type, dedupe_key, coach_id, local_day, payload, message_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(
-        input.userId,
-        input.triggerType,
-        input.dedupeKey,
-        input.coachId,
-        input.localDay,
-        JSON.stringify({ timezone: input.timezone }),
-        messageId,
-      );
+      let activityNotificationTargets: number[] = [];
+      try {
+        activityNotificationTargets = ActivityNotificationService.createMessageNotifications(
+          0,
+          input.topic,
+          messageId,
+          content,
+          [input.userId],
+        );
+      } catch (error) {
+        logger.warn('[outreach] failed to create coach activity notification', error);
+      }
 
-    const [message] = await MessageService.getMessages(input.topic, 1);
-    await publishRealtimeEvent({
-      type: 'message_created',
-      topic: input.topic,
-      message: message || {
-        id: messageId,
+      if (activityNotificationTargets.length > 0) {
+        void PushNotificationService.sendMessageNotifications({
+          actorUserId: 0,
+          recipientUserIds: activityNotificationTargets,
+          topic: input.topic,
+          messageId,
+          snippet: content,
+        }).catch((error) => logger.warn('[outreach] failed to send coach push notification', error));
+      }
+
+      const [message] = await MessageService.getMessages(input.topic, 1);
+      await publishRealtimeEvent({
+        type: 'message_created',
         topic: input.topic,
-        from_user_id: 0,
-        content,
-        content_b64: encodeUtf8Base64(content),
-        media_urls: [],
-        mentions: [],
-        created_at: new Date().toISOString(),
-      },
-    });
-    await publishRealtimeEvent({
-      type: 'inbox_updated',
-      userIds: Array.from(new Set([
-        input.userId,
-        ...activityNotificationTargets,
-      ])),
-    });
+        message: message || {
+          id: messageId,
+          topic: input.topic,
+          from_user_id: 0,
+          content,
+          content_b64: encodeUtf8Base64(content),
+          media_urls: [],
+          mentions: [],
+          created_at: new Date().toISOString(),
+        },
+      });
+      await publishRealtimeEvent({
+        type: 'inbox_updated',
+        userIds: Array.from(new Set([
+          input.userId,
+          ...activityNotificationTargets,
+        ])),
+      });
 
-    logger.info(`[outreach] sent trigger=${input.triggerType} user=${input.userId} coach=${input.coachId}`);
-    return true;
+      logger.info(`[outreach] sent trigger=${input.triggerType} user=${input.userId} coach=${input.coachId}`);
+      return true;
+    } catch (error) {
+      if (!messageId) {
+        this.clearReservedOutreachEvent(input.dedupeKey);
+      }
+      throw error;
+    }
   }
 
   private async buildStateContext(

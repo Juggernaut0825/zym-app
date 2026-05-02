@@ -5601,30 +5601,42 @@ export default function AppPage() {
             <h2 className="text-lg font-bold text-slate-900 sm:text-xl">Edit Profile</h2>
             <p className="mt-1 text-[13px] text-slate-500 sm:text-sm">Changes sync to iOS and web for the same account.</p>
             <div className="mt-4 grid gap-2.5 sm:mt-5 sm:gap-3">
+              <div>
                 <input
                   className="input-shell"
                   placeholder="Display name"
                   value={profileDraft.display_name}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, display_name: event.target.value }))}
                 />
+                <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">The name friends see in chats, posts, and profile cards.</p>
+              </div>
+              <div>
                 <textarea
                   className="input-shell min-h-[96px]"
                   placeholder="Bio"
                   value={profileDraft.bio}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, bio: event.target.value }))}
                 />
+                <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">A short intro about you, your training context, or what people should know.</p>
+              </div>
+              <div>
                 <input
                   className="input-shell"
                   placeholder="Fitness goal"
                   value={profileDraft.fitness_goal}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, fitness_goal: event.target.value }))}
                 />
+                <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Your public-facing goal, for example cut, maintain strength, or build muscle.</p>
+              </div>
+              <div>
                 <input
                   className="input-shell"
                   placeholder="Hobbies"
                   value={profileDraft.hobbies}
                   onChange={(event) => setProfileDraft((prev) => ({ ...prev, hobbies: event.target.value }))}
                 />
+                <p className="mt-1 px-1 text-[11px] leading-5 text-slate-400">Optional interests that make your profile feel more personal.</p>
+              </div>
                 <button className={`${selectedCoachButtonClass} w-full sm:w-auto`} disabled={profilePending} onClick={() => void handleSaveProfile()}>
                   {profilePending ? 'Saving...' : 'Save profile'}
                 </button>

@@ -89,9 +89,16 @@ function buildRecentDays(range: number, endDay: string): string[] {
   return Array.from({ length: range }, (_, index) => addDays(endDay, index - range + 1));
 }
 
+function parseLocalDay(day: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || '').trim());
+  if (!match) return null;
+  const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function formatDay(day: string): string {
-  const parsed = new Date(`${day}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return day;
+  const parsed = parseLocalDay(day);
+  if (!parsed) return day;
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
@@ -100,8 +107,8 @@ function formatDay(day: string): string {
 }
 
 function formatChartDay(day: string): string {
-  const parsed = new Date(`${day}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return day.slice(5);
+  const parsed = parseLocalDay(day);
+  if (!parsed) return day.slice(5);
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
 }
 
@@ -232,6 +239,8 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
   const selectedHealth = selectedDayRecord?.health || null;
   const selectedMeals = selectedDayRecord?.meals || [];
   const selectedTraining = selectedDayRecord?.training || [];
+  const selectedOrLatestWeight = selectedCheckIn?.weight_kg ?? records?.progress?.latestWeightKg ?? null;
+  const selectedOrLatestBodyFat = selectedCheckIn?.body_fat_pct ?? records?.progress?.latestBodyFatPct ?? null;
   const progressDays = useMemo(() => buildRecentDays(progressRange, effectiveDay), [effectiveDay, progressRange]);
 
   const progressSeries = useMemo(() => progressDays.map((day, index, allDays) => {
@@ -338,24 +347,24 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
 
   const stats = [
     {
-      label: 'Daily Target',
-      value: formatNullableMetric(records?.profile?.daily_target as number | null | undefined, ' kcal'),
-      detail: 'Calculated from your saved profile',
+      label: 'Intake',
+      value: formatNullableMetric(selectedDayRecord?.total_intake, ' kcal'),
+      icon: 'restaurant',
     },
     {
-      label: 'Latest Weight',
-      value: displayWeight(records?.progress?.latestWeightKg, preferredWeightUnit),
-      detail: records?.progress?.latestWeightDay ? `Last weigh-in ${formatDay(records.progress.latestWeightDay)}` : 'No weigh-ins yet',
-    },
-    {
-      label: 'Selected Steps',
+      label: 'Steps',
       value: typeof selectedHealth?.steps === 'number' ? `${selectedHealth.steps}` : '--',
-      detail: selectedHealth?.synced_at ? 'Synced from Apple Health' : 'No health sync for this day',
+      icon: 'directions_walk',
     },
     {
-      label: '14d Delta',
-      value: displaySignedWeight(records?.progress?.weight14dDelta, preferredWeightUnit),
-      detail: records?.progress?.statusLabel || 'Need more signal',
+      label: 'Weight',
+      value: displayWeight(selectedOrLatestWeight, preferredWeightUnit),
+      icon: 'monitor_weight',
+    },
+    {
+      label: 'Body fat',
+      value: formatNullableMetric(selectedOrLatestBodyFat, '%'),
+      icon: 'percent',
     },
   ];
 
@@ -366,9 +375,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Calendar</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Progress, meals, training, and health in one place</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              Use the date picker to jump between days. The rest of the page stays anchored around the date you actually selected.
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <input
@@ -395,10 +401,14 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
           <div className="space-y-6">
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {stats.map((card) => (
-                <article key={card.label} className="rounded-[24px] bg-white/86 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{card.label}</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900">{card.value}</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">{card.detail}</p>
+                <article key={card.label} className="flex items-center gap-4 rounded-[24px] bg-white/86 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
+                  <span className="material-symbols-outlined grid h-11 w-11 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700" style={{ fontSize: 22 }}>
+                    {card.icon}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{card.label}</p>
+                    <p className="mt-1 truncate text-2xl font-semibold text-slate-900">{card.value}</p>
+                  </div>
                 </article>
               ))}
             </section>
@@ -407,7 +417,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Trend</p>
-                  <h3 className="mt-1 text-xl font-semibold text-slate-900">Weight trend anchored to {formatDay(effectiveDay)}</h3>
+                  <h3 className="mt-1 text-xl font-semibold text-slate-900">Weight trend through {formatDay(effectiveDay)}</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {([
@@ -491,7 +501,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-[18px] bg-white p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Body Fat</p>
-                      <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}</p>
+                      <p className="mt-1 text-base font-semibold text-slate-900">{formatNullableMetric(selectedOrLatestBodyFat, '%')}</p>
                     </div>
                     <div className="rounded-[18px] bg-white p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Activity Calories</p>
@@ -510,7 +520,6 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Selected day</p>
                   <h3 className="mt-1 text-xl font-semibold text-slate-900">{formatDay(effectiveDay)}</h3>
                 </div>
-                <p className="text-sm text-slate-500">One cleaner summary instead of separate history cards.</p>
               </div>
 
               <div className="mt-5 grid gap-4 lg:grid-cols-2">
@@ -518,7 +527,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
                   <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Check-in</p>
                     <p className="mt-1 text-sm text-slate-700">
-                      Weight {displayWeight(selectedCheckIn?.weight_kg, preferredWeightUnit)} · Body fat {formatNullableMetric(selectedCheckIn?.body_fat_pct, '%')}
+                      Weight {displayWeight(selectedOrLatestWeight, preferredWeightUnit)} · Body fat {formatNullableMetric(selectedOrLatestBodyFat, '%')}
                     </p>
                   </div>
                   <div className="rounded-[20px] bg-slate-50/85 px-4 py-3">

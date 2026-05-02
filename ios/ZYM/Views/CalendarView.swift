@@ -70,6 +70,10 @@ private func calendarDraftNumber(_ value: Double?) -> String {
 }
 
 private func calendarPreferredWeightUnit(from profile: CoachProfileData?) -> CalendarWeightUnit {
+    let preferred = (profile?.preferred_weight_unit ?? "").lowercased()
+    if preferred == "lb" || preferred == "lbs" {
+        return .lb
+    }
     let raw = (profile?.weight ?? "").lowercased()
     return raw.range(of: #"\b(lb|lbs|pound|pounds)\b"#, options: .regularExpression) == nil ? .kg : .lb
 }
@@ -120,7 +124,9 @@ private func calendarPickerDate(from day: String) -> Date {
 
 private func calendarAddDays(_ day: String, delta: Int) -> String {
     guard let date = calendarDate(from: day) else { return day }
-    let shifted = Calendar(identifier: .gregorian).date(byAdding: .day, value: delta, to: date) ?? date
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    let shifted = calendar.date(byAdding: .day, value: delta, to: date) ?? date
     return calendarLocalDay(from: shifted, timeZoneId: "UTC")
 }
 
@@ -148,6 +154,7 @@ private func calendarShortAxisLabel(_ day: String) -> String {
     guard let date = calendarDate(from: day) else { return day }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
     formatter.setLocalizedDateFormatFromTemplate("Md")
     return formatter.string(from: date)
 }
