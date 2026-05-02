@@ -71,23 +71,12 @@ private struct ZYMLaunchSplashView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.zymSecondary, Color.zymPrimaryDark],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 86, height: 86)
-                        .shadow(color: Color.zymSecondary.opacity(0.28), radius: 18, x: 0, y: 10)
-                    Text("Z")
-                        .font(.custom("Syne", size: 42))
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                }
-                .scaleEffect(animate ? 1 : 0.92)
+                Image("BrandLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 96, height: 96)
+                    .shadow(color: Color.zymSecondary.opacity(0.24), radius: 18, x: 0, y: 10)
+                    .scaleEffect(animate ? 1 : 0.92)
 
                 Text("ZYM")
                     .font(.custom("Syne", size: 30))

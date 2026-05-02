@@ -89,7 +89,7 @@ import {
 } from '@/lib/types';
 
 const APP_TITLE = 'ZYM Community Coach';
-const BASE_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none"><defs><linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#f28a3a"/><stop offset="50%" stop-color="#e17734"/><stop offset="100%" stop-color="#6c7cf6"/></linearGradient><filter id="glow"><feGaussianBlur stdDeviation="2" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="60" cy="60" r="55" fill="#0a0a0a" stroke="url(#logoGradient)" stroke-width="3"/><path d="M30 35 L90 35 L90 45 L50 75 L90 75 L90 85 L30 85 L30 75 L70 45 L30 45 Z" fill="url(#logoGradient)" filter="url(#glow)"/><path d="M75 30 L85 50 L78 50 L85 70 L75 50 L82 50 Z" fill="#fbbf24" opacity="0.9"/><circle cx="25" cy="60" r="3" fill="#f28a3a" opacity="0.65"/><circle cx="95" cy="60" r="3" fill="#6c7cf6" opacity="0.65"/><circle cx="60" cy="60" r="45" fill="none" stroke="#f28a3a" stroke-width="1" opacity="0.28"/><circle cx="60" cy="60" r="50" fill="none" stroke="#6c7cf6" stroke-width="0.5" opacity="0.22"/></svg>`;
+const BRAND_ICON_HREF = '/logo-192.png';
 
 const tabs = [
   { key: 'messages', label: 'Message', icon: 'chat_bubble' },
@@ -883,19 +883,6 @@ function TypingPill(props: {
   );
 }
 
-function buildFaviconHref(unreadCount: number): string {
-  if (unreadCount <= 0) {
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(BASE_FAVICON_SVG)}`;
-  }
-
-  const badge = unreadCount > 99 ? '99+' : String(unreadCount);
-  const svg = BASE_FAVICON_SVG.replace(
-    '</svg>',
-    `<circle cx="92" cy="28" r="20" fill="#dc2626" stroke="#ffffff" stroke-width="4"/><text x="92" y="34" text-anchor="middle" font-family="Arial, sans-serif" font-size="${badge.length > 2 ? 14 : 18}" font-weight="700" fill="#ffffff">${badge}</text></svg>`,
-  );
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 function parseDisplayDate(value?: string | null): Date | null {
   if (!value) return null;
   const raw = String(value).trim();
@@ -1468,7 +1455,7 @@ export default function AppPage() {
       iconLink.rel = 'icon';
       document.head.appendChild(iconLink);
     }
-    iconLink.href = buildFaviconHref(totalUnreadCount);
+    iconLink.href = BRAND_ICON_HREF;
   }, [totalUnreadCount]);
 
   useEffect(() => {
@@ -5821,7 +5808,7 @@ export default function AppPage() {
               title="ZYM"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.svg" alt="ZYM logo" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+              <img src="/logo-120.png" alt="ZYM logo" style={{ width: 36, height: 36, objectFit: 'contain' }} />
             </button>
 
             <nav className="mt-8 flex flex-col gap-4">
@@ -6448,8 +6435,9 @@ export default function AppPage() {
           }}
         >
           <div className="surface-card" style={{ width: 220, padding: 20, textAlign: 'center' }}>
-            <div className="zym-shimmer zym-float" style={{ width: 64, height: 64, margin: '0 auto', borderRadius: 18, display: 'grid', placeItems: 'center' }}>
-              <strong style={{ color: 'var(--sage-600)', fontSize: 26, fontFamily: 'var(--font-display)' }}>Z</strong>
+            <div className="zym-float" style={{ width: 72, height: 72, margin: '0 auto', borderRadius: 22, display: 'grid', placeItems: 'center' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-120.png" alt="ZYM logo" style={{ width: 72, height: 72, objectFit: 'contain' }} />
             </div>
             <p style={{ marginTop: 12, fontWeight: 700, fontFamily: 'var(--font-display)' }}>ZYM</p>
             <p style={{ marginTop: 6, color: 'var(--ink-500)', fontSize: 12 }}>Loading your space...</p>

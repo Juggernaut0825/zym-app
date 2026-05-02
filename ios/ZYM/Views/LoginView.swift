@@ -45,15 +45,11 @@ struct LoginView: View {
                     )
                     .clipShape(Capsule())
 
-                    Text("ZYM")
-                        .font(.custom("Syne", size: 52))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.zymSecondaryDark, Color.zymPrimaryDark],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                    Image("BrandLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 116, height: 116)
+                        .shadow(color: Color.zymSecondary.opacity(0.22), radius: 18, x: 0, y: 10)
                     Text("AI coach + community")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)

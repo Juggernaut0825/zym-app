@@ -277,9 +277,9 @@ function LoginScreen() {
       <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-clamp(2.5rem,6vh,5rem))] w-full max-w-[480px] flex-col justify-center gap-[clamp(1.25rem,3vh,2.25rem)]">
         <section className="rounded-[28px] border border-white/60 bg-white/70 p-[clamp(1.5rem,4vw,2.5rem)] text-sm text-[color:var(--ink-900)] shadow-[0_30px_80px_rgba(59,49,40,0.12)] backdrop-blur-2xl">
           <div className="mb-[clamp(1.5rem,3vh,2rem)] flex items-center justify-center gap-3">
-            <div className="flex size-[clamp(3rem,6vw,3.5rem)] items-center justify-center rounded-2xl bg-white shadow-[0_18px_32px_rgba(105,121,247,0.12)]">
+            <div className="flex size-[clamp(3.5rem,7vw,4.25rem)] items-center justify-center rounded-2xl bg-white shadow-[0_18px_32px_rgba(105,121,247,0.12)]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.svg" alt="ZYM logo" className="size-[clamp(2rem,4vw,2.5rem)] object-contain" />
+              <img src="/logo-120.png" alt="ZYM logo" className="size-[clamp(3rem,6vw,3.75rem)] object-contain" />
             </div>
             <div>
               <h1 className="text-3xl font-bold tracking-tight text-[color:var(--ink-900)]">ZYM</h1>

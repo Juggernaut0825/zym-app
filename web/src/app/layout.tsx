@@ -3,6 +3,11 @@ import './globals.css';
 export const metadata = {
   title: 'ZYM Community Coach',
   description: 'Lifestyle fitness coaching with AI personas and social accountability.',
+  icons: {
+    icon: '/logo-192.png',
+    shortcut: '/favicon.png',
+    apple: '/apple-touch-icon.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
