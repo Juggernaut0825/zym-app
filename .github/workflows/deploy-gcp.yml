@@ -53,6 +53,7 @@ jobs:
           tar \
             --exclude='.git' \
             --exclude='.env*' \
+            --exclude='gha-creds-*.json' \
             --exclude='ios' \
             --exclude='server/dist' \
             --exclude='server/node_modules' \
@@ -86,13 +87,13 @@ jobs:
             exit 1
           fi
 
-          tar -xzf "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
-          rm -f "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+          sudo tar --overwrite --no-same-owner -xzf "/tmp/zym-app-${GITHUB_SHA}.tar.gz" -C "${GCP_REMOTE_APP_DIR}"
+          sudo rm -f "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
 
-          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml build api ws worker scheduler web
-          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
-          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
-          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml ps
+          sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml build api ws worker scheduler web
+          sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
+          sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+          sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml ps
           REMOTE_SCRIPT
           )"
 
