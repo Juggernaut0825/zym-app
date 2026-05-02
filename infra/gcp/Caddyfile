@@ -1,0 +1,24 @@
+{
+	email ops@zym8.com
+}
+
+app.zym8.com {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+api.zym8.com {
+	encode zstd gzip
+	reverse_proxy api:3001
+}
+
+ws.zym8.com {
+	encode zstd gzip
+	reverse_proxy ws:8080
+}
+
+zym8.com, www.zym8.com {
+	encode zstd gzip
+	root * /srv/zym-site
+	file_server
+}

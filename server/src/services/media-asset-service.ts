@@ -7,6 +7,7 @@ import {
   mediaPathFromFileName,
   normalizeMediaStorageValue,
 } from '../security/media-url.js';
+import { GCSStorageProvider } from '../storage/gcs-storage-provider.js';
 import { LocalStorageProvider } from '../storage/local-storage-provider.js';
 import { S3StorageProvider } from '../storage/s3-storage-provider.js';
 import {
@@ -158,7 +159,14 @@ function normalizeKind(value: unknown, mimeType: string): MediaAssetKind {
 }
 
 function normalizeProvider(value: unknown): StorageProviderKind {
-  return value === 's3' ? 's3' : 'local';
+  if (value === 's3' || value === 'gcs') {
+    return value;
+  }
+  return 'local';
+}
+
+function isBucketBackedProvider(provider: StorageProvider): provider is StorageProvider & { bucket: string } {
+  return (provider.kind === 's3' || provider.kind === 'gcs') && 'bucket' in provider;
 }
 
 function hashBuffer(buffer: Buffer): string {
@@ -279,6 +287,9 @@ export class MediaAssetService {
     if (kind === 's3') {
       return new S3StorageProvider();
     }
+    if (kind === 'gcs') {
+      return new GCSStorageProvider();
+    }
     if (!uploadsDir) {
       throw new Error('uploadsDir is required for local media storage');
     }
@@ -287,7 +298,8 @@ export class MediaAssetService {
 
   static createFromEnvironment(options: { uploadsDir: string }): MediaAssetService {
     const providerName = safeString(process.env.MEDIA_STORAGE_PROVIDER, 32).toLowerCase() || 'local';
-    const provider = MediaAssetService.buildProvider(providerName === 's3' ? 's3' : 'local', options.uploadsDir);
+    const providerKind: StorageProviderKind = providerName === 's3' || providerName === 'gcs' ? providerName : 'local';
+    const provider = MediaAssetService.buildProvider(providerKind, options.uploadsDir);
     return new MediaAssetService(provider, options);
   }
 
@@ -300,7 +312,7 @@ export class MediaAssetService {
   }
 
   private buildPublicProviderFromEnvironment(): StorageProvider | null {
-    if (this.storageProvider.kind !== 's3') {
+    if (this.storageProvider.kind !== 's3' && this.storageProvider.kind !== 'gcs') {
       return null;
     }
     const publicBucket = safeString(process.env.MEDIA_PUBLIC_BUCKET, 255);
@@ -311,7 +323,9 @@ export class MediaAssetService {
     if (currentBucket && currentBucket === publicBucket) {
       return this.storageProvider;
     }
-    return new S3StorageProvider({ bucket: publicBucket });
+    return this.storageProvider.kind === 'gcs'
+      ? new GCSStorageProvider({ bucket: publicBucket })
+      : new S3StorageProvider({ bucket: publicBucket });
   }
 
   private selectProviderForVisibility(visibility: MediaAssetVisibility): StorageProvider {
@@ -329,7 +343,9 @@ export class MediaAssetService {
     }
     const provider = kind === 's3'
       ? new S3StorageProvider({ bucket: safeString(bucket, 255) || undefined })
-      : MediaAssetService.buildProvider(kind, this.uploadsDir);
+      : kind === 'gcs'
+        ? new GCSStorageProvider({ bucket: safeString(bucket, 255) || undefined })
+        : MediaAssetService.buildProvider(kind, this.uploadsDir);
     this.providerCache.set(cacheKey, provider);
     return provider;
   }
@@ -472,7 +488,7 @@ export class MediaAssetService {
       id,
       ownerUserId,
       provider.kind,
-      provider.kind === 's3' && 'bucket' in provider ? (provider as any).bucket || null : null,
+      isBucketBackedProvider(provider) ? provider.bucket || null : null,
       fileName,
       fileName,
       mimeType,
@@ -534,9 +550,7 @@ export class MediaAssetService {
       id,
       ownerUserId,
       provider.kind,
-      provider.kind === 's3' && 'bucket' in provider
-        ? (provider as any).bucket || null
-        : null,
+      isBucketBackedProvider(provider) ? provider.bucket || null : null,
       fileName,
       fileName,
       mimeType,

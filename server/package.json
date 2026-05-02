@@ -34,6 +34,7 @@
     "@aws-sdk/client-servicediscovery": "^3.1029.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@chroma-core/default-embed": "^0.1.9",
+    "@google-cloud/storage": "^7.19.0",
     "@types/nodemailer": "^7.0.11",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",

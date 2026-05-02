@@ -110,6 +110,7 @@ export class ActivityNotificationService {
     snippet: string,
     participantUserIds: number[],
   ): number[] {
+    const actorUserId = Number.isInteger(fromUserId) && fromUserId > 0 ? fromUserId : null;
     const recipients = Array.from(new Set(
       participantUserIds
         .map((item) => Number(item))
@@ -142,7 +143,7 @@ export class ActivityNotificationService {
         topic,
         messageId,
         messageId,
-        fromUserId,
+        actorUserId,
         snippet.slice(0, 400),
       );
     });

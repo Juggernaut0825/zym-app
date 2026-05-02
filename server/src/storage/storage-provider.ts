@@ -1,4 +1,4 @@
-export type StorageProviderKind = 'local' | 's3';
+export type StorageProviderKind = 'local' | 's3' | 'gcs';
 
 export type MediaAssetVisibility = 'private' | 'friends' | 'public' | 'authenticated';
 

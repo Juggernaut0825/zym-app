@@ -927,7 +927,7 @@ function buildPublicMediaDelivery(asset: { objectKey: string; visibility: MediaA
   const baseUrl = normalizePublicMediaBaseUrl();
   if (!baseUrl) return null;
   if (asset.visibility !== 'public') return null;
-  if (asset.storageProvider && asset.storageProvider !== 's3') return null;
+  if (asset.storageProvider && asset.storageProvider !== 's3' && asset.storageProvider !== 'gcs') return null;
   const encodedKey = encodeObjectKeyForPublicUrl(asset.objectKey);
   if (!encodedKey) return null;
   const absoluteUrl = `${baseUrl}/${encodedKey}`;
