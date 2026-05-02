@@ -1,0 +1,130 @@
+name: Deploy Production GCP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production-gcp
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_PROJECT_ID || 'zymapp-491715' }}
+  GCP_ZONE: ${{ vars.GCP_ZONE != '' && vars.GCP_ZONE || 'us-central1-a' }}
+  GCP_INSTANCE: ${{ vars.GCP_INSTANCE != '' && vars.GCP_INSTANCE || 'zym-prod-vm' }}
+  GCP_REMOTE_APP_DIR: ${{ vars.GCP_REMOTE_APP_DIR != '' && vars.GCP_REMOTE_APP_DIR || '/opt/zym-app' }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/504218135873/locations/global/workloadIdentityPools/github-actions/providers/github' }}
+  GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT != '' && vars.GCP_DEPLOY_SERVICE_ACCOUNT || 'github-gcp-deployer@zymapp-491715.iam.gserviceaccount.com' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.zym8.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Create deployment archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+          tar \
+            --exclude='.git' \
+            --exclude='.env*' \
+            --exclude='ios' \
+            --exclude='server/dist' \
+            --exclude='server/node_modules' \
+            --exclude='web/.next' \
+            --exclude='web/.next-prod' \
+            --exclude='web/node_modules' \
+            -czf "${archive}" .
+          echo "archive=${archive}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload archive to GCP VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud compute scp \
+            --quiet \
+            --project "${GCP_PROJECT_ID}" \
+            --zone "${GCP_ZONE}" \
+            "${{ steps.archive.outputs.archive }}" \
+            "${GCP_INSTANCE}:/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+
+      - name: Deploy with Docker Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_script="$(cat <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "${GCP_REMOTE_APP_DIR}"
+
+          if [ ! -f ".env.gcp.prod" ]; then
+            echo "Missing ${GCP_REMOTE_APP_DIR}/.env.gcp.prod on the production VM." >&2
+            exit 1
+          fi
+
+          tar -xzf "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+          rm -f "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+
+          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml build api ws worker scheduler web
+          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
+          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
+          docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml ps
+          REMOTE_SCRIPT
+          )"
+
+          gcloud compute ssh \
+            --quiet \
+            --project "${GCP_PROJECT_ID}" \
+            --zone "${GCP_ZONE}" \
+            "${GCP_INSTANCE}" \
+            --command "GITHUB_SHA='${GITHUB_SHA}' GCP_REMOTE_APP_DIR='${GCP_REMOTE_APP_DIR}' bash -s" <<< "${remote_script}"
+
+      - name: Smoke check production
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 8 --retry-all-errors --retry-delay 5 -fsS https://api.zym8.com/health
+          echo
+          curl --retry 8 --retry-all-errors --retry-delay 5 -fsS https://ws.zym8.com/health
+          echo
+          curl --retry 8 --retry-all-errors --retry-delay 5 -fsSI https://app.zym8.com/login | sed -n '1,12p'
+
+      - name: Publish workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## GCP production deploy"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Project: \`${GCP_PROJECT_ID}\`"
+            echo "- Instance: \`${GCP_INSTANCE}\`"
+            echo "- Zone: \`${GCP_ZONE}\`"
+            echo "- App: https://app.zym8.com"
+            echo "- API: https://api.zym8.com/health"
+            echo "- WS: https://ws.zym8.com/health"
+          } >> "${GITHUB_STEP_SUMMARY}"
