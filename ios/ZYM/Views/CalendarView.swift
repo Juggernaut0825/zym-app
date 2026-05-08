@@ -298,7 +298,7 @@ struct CalendarView: View {
                     .padding(.bottom, 20)
                 }
             }
-            .navigationTitle("Calendar")
+            .navigationTitle("Progress")
         }
         .sheet(item: $mealDraft) { draft in
             CalendarMealEditSheet(draft: draft) { updated in

@@ -17,6 +17,8 @@ const DEFAULT_INTERVAL_MINUTES = 10;
 const DEFAULT_NIGHTLY_HOUR = 20;
 const DEFAULT_INACTIVITY_DAYS = 3;
 const DEFAULT_ONBOARDING_DELAY_HOURS = 6;
+const DEFAULT_MORNING_GREETING_HOUR = 8;
+const DEFAULT_WEEKLY_INACTIVITY_DAYS = 7;
 
 interface OutreachUser {
   id: number;
@@ -107,6 +109,23 @@ function localDayDistance(fromDay: string | null | undefined, toDay: string): nu
   return Math.round((toDate.getTime() - fromDate.getTime()) / 86_400_000);
 }
 
+function shiftLocalDay(day: string, deltaDays: number): string | null {
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + deltaDays);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function dailyBucketHasActivity(bucket: any): boolean {
+  if (!bucket || typeof bucket !== 'object') return false;
+  return (
+    (Array.isArray(bucket.meals) && bucket.meals.length > 0)
+    || (Array.isArray(bucket.training) && bucket.training.length > 0)
+    || Boolean(bucket.check_in)
+    || Boolean(bucket.health)
+  );
+}
+
 export class CoachOutreachScheduler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -190,13 +209,13 @@ export class CoachOutreachScheduler {
     if (await this.maybeSendOnboarding(userId, coachId, timezone, topic, user.created_at, now)) {
       return true;
     }
-    if (await this.maybeSendProgressCheckIn(userId, coachId, timezone, topic, localNow, now)) {
+    if (await this.maybeSendMorningGreeting(userId, coachId, timezone, topic, localNow)) {
       return true;
     }
-    if (await this.maybeSendInactivity(userId, coachId, timezone, topic, localNow, now)) {
+    if (await this.maybeSendWeeklyInactivity(userId, coachId, timezone, topic, localNow, now)) {
       return true;
     }
-    return this.maybeSendNightlyCheckIn(userId, coachId, timezone, topic, localNow);
+    return false;
   }
 
   private alreadySentForLocalDay(userId: number, localDay: string): boolean {
@@ -306,7 +325,127 @@ export class CoachOutreachScheduler {
       triggerType: 'onboarding',
       localDay: localDateParts(now, timezone).day,
       dedupeKey,
-      instruction: 'Welcome the user to coaching, help them start the conversation, and ask one simple actionable check-in question about their current goal or training situation.',
+      instruction: 'Welcome the user to coaching, help them start the conversation, and ask one simple question about their goal, training days, or experience level so you can build the first plan.',
+    });
+  }
+
+  private async maybeSendMorningGreeting(
+    userId: number,
+    coachId: 'zj' | 'lc',
+    timezone: string,
+    topic: string,
+    localNow: { day: string; hour: number; minute: number },
+  ): Promise<boolean> {
+    const morningHour = Number(process.env.COACH_MORNING_GREETING_HOUR || DEFAULT_MORNING_GREETING_HOUR);
+    if (localNow.hour !== morningHour || localNow.minute > 20) {
+      return false;
+    }
+
+    const previousDay = shiftLocalDay(localNow.day, -1);
+    if (!previousDay) return false;
+
+    const latestUserMessage = getDB()
+      .prepare(`
+        SELECT created_at
+        FROM messages
+        WHERE topic = ? AND from_user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(topic, userId) as { created_at?: string | null } | undefined;
+
+    const latestUserMessageDay = localDateParts(parseIso(latestUserMessage?.created_at) || new Date(0), timezone).day;
+    const daily = await readDailyRecord(userId);
+    const hadPriorDayActivity = latestUserMessageDay === previousDay || dailyBucketHasActivity(daily[previousDay]);
+    if (!hadPriorDayActivity) {
+      return false;
+    }
+
+    const recentCoachMessages = getDB()
+      .prepare(`
+        SELECT created_at
+        FROM messages
+        WHERE topic = ? AND from_user_id = 0
+        ORDER BY id DESC
+        LIMIT 10
+      `)
+      .all(topic) as Array<{ created_at?: string | null }>;
+    const alreadyMessagedToday = recentCoachMessages
+      .some((row) => localDateParts(parseIso(row.created_at) || new Date(0), timezone).day === localNow.day);
+    if (alreadyMessagedToday) {
+      return false;
+    }
+
+    const dedupeKey = `morning_greeting:${userId}:${localNow.day}`;
+    return this.sendOutreach({
+      userId,
+      coachId,
+      timezone,
+      topic,
+      triggerType: 'morning_greeting',
+      localDay: localNow.day,
+      dedupeKey,
+      instruction: `The user had meaningful activity yesterday (${previousDay}). Send a short, specific morning coach message for today. Reference yesterday only if useful. Give one concrete next action for training, food, recovery, or consistency. Do not sound like a generic greeting.`,
+    });
+  }
+
+  private async maybeSendWeeklyInactivity(
+    userId: number,
+    coachId: 'zj' | 'lc',
+    timezone: string,
+    topic: string,
+    localNow: { day: string; hour: number; minute: number },
+    now: Date,
+  ): Promise<boolean> {
+    if (localNow.hour < 9 || localNow.hour > 18 || localNow.minute > 20) {
+      return false;
+    }
+
+    const weeklyDays = Number(process.env.COACH_WEEKLY_INACTIVITY_DAYS || DEFAULT_WEEKLY_INACTIVITY_DAYS);
+    const latestEvent = getDB()
+      .prepare(`
+        SELECT sent_at
+        FROM coach_outreach_events
+        WHERE user_id = ? AND trigger_type = 'weekly_inactivity'
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(userId) as { sent_at?: string | null } | undefined;
+    if (daysSince(parseIso(latestEvent?.sent_at), now) < weeklyDays) {
+      return false;
+    }
+
+    const latestUserMessage = getDB()
+      .prepare(`
+        SELECT created_at
+        FROM messages
+        WHERE topic = ? AND from_user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(topic, userId) as { created_at?: string | null } | undefined;
+    if (daysSince(parseIso(latestUserMessage?.created_at), now) < weeklyDays) {
+      return false;
+    }
+
+    const daily = await readDailyRecord(userId);
+    const hasRecentRecord = Object.keys(daily)
+      .filter((day) => localDayDistance(day, localNow.day) >= 0 && localDayDistance(day, localNow.day) < weeklyDays)
+      .some((day) => dailyBucketHasActivity(daily[day]));
+    if (hasRecentRecord) {
+      return false;
+    }
+
+    const dedupeKey = `weekly_inactivity:${userId}:${localNow.day}`;
+    return this.sendOutreach({
+      userId,
+      coachId,
+      timezone,
+      topic,
+      triggerType: 'weekly_inactivity',
+      localDay: localNow.day,
+      dedupeKey,
+      instruction: 'The user has no coach interaction and no meal/training/progress records in the past week. Send one concise weekly restart nudge. Offer a simple 3-day restart plan. Do not guilt-trip or ask for a daily check-in.',
     });
   }
 

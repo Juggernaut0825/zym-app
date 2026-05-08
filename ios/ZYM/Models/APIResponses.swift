@@ -354,3 +354,55 @@ struct CoachRecordsResponse: Decodable {
     let records: [CoachDayRecord]
     let stats: CoachRecordsStats
 }
+
+struct TrainingPlanExercise: Codable, Identifiable {
+    let id: String
+    let order: Int?
+    let name: String
+    let sets: Int
+    let reps: String
+    let rest_seconds: Int?
+    let target_weight_kg: Double?
+    let cue: String?
+    let notes: String?
+    let completed_at: String?
+}
+
+struct TrainingPlan: Codable, Identifiable {
+    let id: String
+    let day: String
+    let coach_id: String?
+    let title: String
+    let summary: String?
+    let timezone: String?
+    let exercises: [TrainingPlanExercise]
+}
+
+struct TodayResponse: Decodable {
+    let day: String
+    let timezone: String
+    let selectedCoach: String?
+    let profile: CoachProfileData
+    let progress: CoachProgressSummary?
+    let record: CoachDayRecord
+    let trainingPlan: TrainingPlan?
+}
+
+struct ChallengeSummary: Codable, Identifiable {
+    let id: Int
+    let title: String
+    let goal_type: String
+    let target_count: Int
+    let start_date: String
+    let end_date: String
+    let coach_id: String?
+    let status: String
+    let role: String
+    let member_count: Int
+    let today_status: String?
+}
+
+struct ChallengesResponse: Decodable {
+    let day: String
+    let challenges: [ChallengeSummary]
+}

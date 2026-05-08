@@ -4,6 +4,7 @@ import {
   ActivityNotification,
   AbuseReport,
   AuthSession,
+  ChallengesResponse,
   CoachRecordsResponse,
   FeedComment,
   ChatMessage,
@@ -25,6 +26,8 @@ import {
   PostReactionResponse,
   SecurityEvent,
   StoredUserLocation,
+  TodayResponse,
+  TrainingPlan,
   RequestsResponse,
   UserSummary,
 } from './types';
@@ -791,6 +794,95 @@ export async function updateProfile(payload: {
 export async function getCoachRecords(userId: number, days = 21): Promise<CoachRecordsResponse> {
   const safeDays = Math.min(120, Math.max(1, Math.floor(Number(days) || 21)));
   return request<CoachRecordsResponse>(`/coach/records/${userId}?days=${safeDays}`);
+}
+
+export async function getToday(userId: number): Promise<TodayResponse> {
+  return request<TodayResponse>(`/today/${userId}`);
+}
+
+export async function getTrainingPlan(userId: number, day?: string): Promise<{ day: string; timezone: string; plan: TrainingPlan | null }> {
+  const params = new URLSearchParams();
+  if (day) params.set('day', day);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return request<{ day: string; timezone: string; plan: TrainingPlan | null }>(`/coach/training-plan/${userId}${suffix}`);
+}
+
+export async function setTrainingPlan(payload: {
+  userId: number;
+  day?: string;
+  timezone?: string;
+  title: string;
+  summary?: string;
+  exercises: Array<{
+    name: string;
+    sets: number;
+    reps: string;
+    rest_seconds?: number;
+    target_weight_kg?: number;
+    cue?: string;
+    notes?: string;
+  }>;
+}): Promise<{ success: boolean; day: string; timezone: string; plan: TrainingPlan }> {
+  return request('/coach/training-plan', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function completeTrainingPlanExercise(payload: {
+  userId: number;
+  day: string;
+  exerciseId: string;
+  completed: boolean;
+  occurredAt?: string;
+  timezone?: string;
+}): Promise<{ success: boolean; day: string; completed: boolean; exercise: unknown; plan: TrainingPlan }> {
+  return request('/coach/training-plan/exercise/complete', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getChallenges(userId: number): Promise<ChallengesResponse> {
+  return request<ChallengesResponse>(`/challenges/${userId}`);
+}
+
+export async function createChallenge(payload: {
+  userId: number;
+  title: string;
+  goalType?: string;
+  targetCount?: number;
+  startDate?: string;
+  endDate?: string;
+  groupId?: number;
+  coachId?: 'zj' | 'lc';
+}): Promise<{ success: boolean; challengeId: number }> {
+  return request('/challenges', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function completeChallenge(payload: {
+  userId: number;
+  challengeId: number;
+  localDay?: string;
+  status?: string;
+  sourceType?: string;
+  sourceId?: string;
+  note?: string;
+}): Promise<{ success: boolean; challengeId: number; localDay: string; status: string }> {
+  return request(`/challenges/${payload.challengeId}/completion`, {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: payload.userId,
+      localDay: payload.localDay,
+      status: payload.status,
+      sourceType: payload.sourceType,
+      sourceId: payload.sourceId,
+      note: payload.note,
+    }),
+  });
 }
 
 export async function updateCoachRecordProfile(payload: {

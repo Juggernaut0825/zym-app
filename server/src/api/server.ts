@@ -3267,6 +3267,159 @@ app.get('/groups/user/:userId', requireSameUserIdFromParam('userId'), async (req
   res.json({ groups });
 });
 
+app.post('/challenges',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(40, 10 * 60_000, 'challenge-create'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    title: { required: true, type: 'string', minLength: 2, maxLength: 120 },
+    goalType: { type: 'string', maxLength: 40 },
+    targetCount: { type: 'number', integer: true, min: 1, max: 30 },
+    startDate: { type: 'string', pattern: COACH_DAY_PATTERN },
+    endDate: { type: 'string', pattern: COACH_DAY_PATTERN },
+    groupId: { type: 'number', integer: true, min: 1 },
+    coachId: { type: 'string', maxLength: 10 },
+  }),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const title = sanitizePlainText(req.body.title, 120);
+      const goalTypeRaw = sanitizePlainText(req.body.goalType || 'plan_completion', 40).toLowerCase();
+      const allowedGoalTypes = new Set(['workouts', 'meals', 'steps', 'plan_completion']);
+      const goalType = allowedGoalTypes.has(goalTypeRaw) ? goalTypeRaw : 'plan_completion';
+      const targetCount = Math.max(1, Math.min(30, Math.floor(Number(req.body.targetCount || 1))));
+      const timezoneRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
+      const timezone = isValidTimeZone(String(timezoneRow?.timezone || '')) ? String(timezoneRow?.timezone) : 'UTC';
+      const startDate = isValidDayKey(String(req.body.startDate || '')) ? String(req.body.startDate) : localDayForTimezone(new Date(), timezone);
+      const endDate = isValidDayKey(String(req.body.endDate || '')) ? String(req.body.endDate) : startDate;
+      const groupId = Number.isInteger(Number(req.body.groupId)) ? Number(req.body.groupId) : null;
+      const coachId = normalizeCoachId(req.body.coachId) || resolveSelectedCoachForUser(userId) || 'zj';
+
+      const result = getDB().prepare(`
+        INSERT INTO challenges (owner_user_id, group_id, title, goal_type, target_count, start_date, end_date, coach_id, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `).run(userId, groupId, title, goalType, targetCount, startDate, endDate, coachId);
+      const challengeId = Number(result.lastInsertRowid || 0);
+      getDB().prepare(`
+        INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
+        VALUES (?, ?, 'owner')
+      `).run(challengeId, userId);
+
+      res.json({ success: true, challengeId });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to create challenge' });
+    }
+  });
+
+app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
+    const timezone = isValidTimeZone(String(userRow?.timezone || '')) ? String(userRow?.timezone) : 'UTC';
+    const today = localDayForTimezone(new Date(), timezone);
+    const rows = getDB().prepare(`
+      SELECT
+        c.*,
+        cm.role,
+        (SELECT COUNT(*) FROM challenge_members m WHERE m.challenge_id = c.id) AS member_count,
+        (SELECT status FROM challenge_completions cc WHERE cc.challenge_id = c.id AND cc.user_id = ? AND cc.local_day = ? LIMIT 1) AS today_status
+      FROM challenges c
+      JOIN challenge_members cm ON cm.challenge_id = c.id
+      WHERE cm.user_id = ?
+        AND c.status = 'active'
+      ORDER BY c.created_at DESC
+      LIMIT 20
+    `).all(userId, today, userId) as Array<Record<string, unknown>>;
+
+    res.json({
+      day: today,
+      challenges: rows.map((row) => ({
+        id: Number(row.id),
+        owner_user_id: Number(row.owner_user_id),
+        group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
+        title: sanitizePlainText(row.title, 120),
+        goal_type: sanitizePlainText(row.goal_type, 40),
+        target_count: Number(row.target_count || 1),
+        start_date: sanitizePlainText(row.start_date, 20),
+        end_date: sanitizePlainText(row.end_date, 20),
+        coach_id: normalizeCoachId(row.coach_id) || 'zj',
+        status: sanitizePlainText(row.status, 20),
+        role: sanitizePlainText(row.role, 20),
+        member_count: Number(row.member_count || 0),
+        today_status: sanitizePlainText(row.today_status, 30) || null,
+        created_at: sanitizePlainText(row.created_at, 80),
+      })),
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load challenges' });
+  }
+});
+
+app.post('/challenges/:challengeId/join',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(60, 10 * 60_000, 'challenge-join'),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const challengeId = Number(req.params.challengeId);
+      if (!Number.isInteger(challengeId) || challengeId <= 0) {
+        return res.status(400).json({ error: 'Invalid challengeId' });
+      }
+      const challenge = getDB().prepare('SELECT id FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active');
+      if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+      getDB().prepare(`
+        INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
+        VALUES (?, ?, 'member')
+      `).run(challengeId, userId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to join challenge' });
+    }
+  });
+
+app.post('/challenges/:challengeId/completion',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(120, 10 * 60_000, 'challenge-completion'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    localDay: { type: 'string', pattern: COACH_DAY_PATTERN },
+    status: { type: 'string', maxLength: 30 },
+    sourceType: { type: 'string', maxLength: 40 },
+    sourceId: { type: 'string', maxLength: 120 },
+    note: { type: 'string', maxLength: 500 },
+  }),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const challengeId = Number(req.params.challengeId);
+      if (!Number.isInteger(challengeId) || challengeId <= 0) {
+        return res.status(400).json({ error: 'Invalid challengeId' });
+      }
+      const membership = getDB().prepare(`
+        SELECT 1 FROM challenge_members WHERE challenge_id = ? AND user_id = ? LIMIT 1
+      `).get(challengeId, userId);
+      if (!membership) return res.status(403).json({ error: 'Join the challenge before completing it' });
+      const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
+      const timezone = isValidTimeZone(String(userRow?.timezone || '')) ? String(userRow?.timezone) : 'UTC';
+      const localDay = isValidDayKey(String(req.body.localDay || '')) ? String(req.body.localDay) : localDayForTimezone(new Date(), timezone);
+      const status = sanitizePlainText(req.body.status || 'completed', 30) || 'completed';
+      const sourceType = sanitizePlainText(req.body.sourceType, 40) || null;
+      const sourceId = sanitizePlainText(req.body.sourceId, 120) || null;
+      const note = sanitizePlainText(req.body.note, 500) || null;
+
+      getDB().prepare(`
+        INSERT INTO challenge_completions (challenge_id, user_id, local_day, status, source_type, source_id, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(challenge_id, user_id, local_day)
+        DO UPDATE SET status = excluded.status, source_type = excluded.source_type, source_id = excluded.source_id, note = excluded.note, created_at = CURRENT_TIMESTAMP
+      `).run(challengeId, userId, localDay, status, sourceType, sourceId, note);
+
+      res.json({ success: true, challengeId, localDay, status });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to complete challenge' });
+    }
+  });
+
 app.get('/profile/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   const db = getDB();
   const user = db
@@ -3559,6 +3712,139 @@ app.get('/coach/records/:userId', requireSameUserIdFromParam('userId'), async (r
     res.status(400).json({ error: err.message || 'Failed to load coach records' });
   }
 });
+
+app.get('/today/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const profile = await coachTypedToolsService.getProfile(String(userId));
+    const timezone = isValidTimeZone(String((profile as any)?.timezone || ''))
+      ? String((profile as any).timezone)
+      : 'UTC';
+    const today = localDayForTimezone(new Date(), timezone);
+    const { daily, changed } = await loadCoachDailyRecords(userId);
+    const progressSummary = computeCoachProgressSummary(daily, (profile as any)?.goal);
+    let shouldPersistDaily = changed;
+    const bucket = daily[today] || {
+      meals: [],
+      training: [],
+      total_intake: 0,
+      total_burned: 0,
+    };
+
+    recomputeCoachDailyTotals(bucket);
+    const db = getDB();
+    const healthRow = db.prepare(`
+      SELECT date, steps, calories_burned, active_minutes, synced_at
+      FROM health_data
+      WHERE user_id = ? AND date = ?
+      LIMIT 1
+    `).get(userId, today) as Record<string, unknown> | undefined;
+    const health = normalizeCoachDailyHealth(bucket.health) || normalizeCoachDailyHealth(healthRow) || null;
+    if (health && (!bucket.health || JSON.stringify(bucket.health) !== JSON.stringify(health))) {
+      bucket.health = health;
+      daily[today] = bucket;
+      shouldPersistDaily = true;
+    }
+
+    const trainingPlan = await coachTypedToolsService.getTrainingPlan(String(userId), {
+      day: today,
+      timezone,
+    });
+    const selectedCoach = resolveSelectedCoachForUser(userId);
+    const enabledCoaches = resolveEnabledCoachesForUser(userId);
+
+    if (shouldPersistDaily) {
+      await writeJsonAtomic(getCoachDailyPath(userId), daily);
+    }
+
+    res.json({
+      day: today,
+      timezone,
+      selectedCoach,
+      enabledCoaches,
+      profile,
+      progress: progressSummary,
+      record: {
+        day: today,
+        total_intake: bucket.total_intake,
+        total_burned: bucket.total_burned,
+        check_in: bucket.check_in || null,
+        health,
+        meals: bucket.meals,
+        training: bucket.training,
+      },
+      trainingPlan: (trainingPlan as any)?.plan || null,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load today' });
+  }
+});
+
+app.get('/coach/training-plan/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const result = await coachTypedToolsService.getTrainingPlan(String(userId), {
+      day: req.query.day,
+      timezone: req.query.timezone,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load training plan' });
+  }
+});
+
+app.post('/coach/training-plan',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(80, 10 * 60_000, 'coach-training-plan-update'),
+  async (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const result = await coachTypedToolsService.setTrainingPlan(String(userId), {
+        day: req.body.day,
+        timezone: req.body.timezone,
+        title: req.body.title,
+        summary: req.body.summary,
+        exercises: req.body.exercises,
+      });
+      trackSecurityEvent(req, 'coach_training_plan_updated', {
+        userId,
+        metadata: {
+          day: (result as any).day,
+          exerciseCount: Array.isArray((result as any).plan?.exercises) ? (result as any).plan.exercises.length : 0,
+        },
+      });
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update training plan' });
+    }
+  });
+
+app.post('/coach/training-plan/exercise/complete',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(120, 10 * 60_000, 'coach-training-plan-complete'),
+  async (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const result = await coachTypedToolsService.toggleTrainingPlanExerciseCompletion(String(userId), {
+        day: req.body.day,
+        exerciseId: req.body.exerciseId,
+        completed: req.body.completed,
+        occurredAt: req.body.occurredAt,
+        timezone: req.body.timezone,
+      });
+      trackSecurityEvent(req, 'coach_training_plan_exercise_completed', {
+        userId,
+        metadata: {
+          day: (result as any).day,
+          exerciseId: req.body.exerciseId,
+          completed: Boolean(req.body.completed),
+        },
+      });
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update training plan exercise' });
+    }
+  });
 
 app.post('/coach/records/profile/update',
   requireSameUserIdFromBody('userId'),

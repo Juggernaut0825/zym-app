@@ -1346,6 +1346,207 @@ export class CoachTypedToolsService {
     if (!Number.isFinite(Number(daily[day].total_burned))) daily[day].total_burned = 0;
   }
 
+  private recomputeDayTotals(bucket: Record<string, any>): void {
+    if (!Array.isArray(bucket.meals)) bucket.meals = [];
+    if (!Array.isArray(bucket.training)) bucket.training = [];
+    bucket.total_intake = Math.round(
+      bucket.meals.reduce((sum: number, meal: any) => sum + (Number(meal?.calories) || 0), 0) * 100,
+    ) / 100;
+    bucket.total_burned = Math.round(
+      bucket.training.reduce((sum: number, entry: any) => {
+        const explicitVolume = Number(entry?.volume_kg);
+        if (Number.isFinite(explicitVolume) && explicitVolume > 0) {
+          return sum + Math.round(explicitVolume / 10);
+        }
+        const sets = clampInt(entry?.sets, 0, 60, 0);
+        const repsText = safeString(entry?.reps, 20) || '0';
+        const reps = clampInt(repsText, 0, 200, 0);
+        const weightKg = Number.isFinite(Number(entry?.weight_kg)) ? Number(entry.weight_kg) : 0;
+        return sum + Math.round((sets * reps * weightKg) / 10);
+      }, 0),
+    );
+  }
+
+  async listRecentRecords(
+    userId: string,
+    input: { kind?: unknown; days?: unknown; limit?: unknown } = {},
+  ): Promise<Record<string, unknown>> {
+    const kind = safeString(input.kind, 20).toLowerCase();
+    const includeMeals = !kind || kind === 'all' || kind === 'meal' || kind === 'meals';
+    const includeTraining = !kind || kind === 'all' || kind === 'training' || kind === 'workout' || kind === 'workouts';
+    if (!includeMeals && !includeTraining) {
+      throw new Error('kind must be meal, training, or all');
+    }
+
+    const days = clampInt(input.days, 1, 120, 14);
+    const limit = clampInt(input.limit, 1, 50, 12);
+    const daily = await readJson<Record<string, any>>(this.getDailyPath(userId), {});
+    const sortedDays = Object.keys(daily)
+      .filter((day) => normalizeDateOnly(day))
+      .sort((left, right) => right.localeCompare(left))
+      .slice(0, days);
+
+    const records: Array<Record<string, unknown>> = [];
+    for (const day of sortedDays) {
+      const bucket = daily[day] && typeof daily[day] === 'object' ? daily[day] : {};
+      if (includeMeals && Array.isArray(bucket.meals)) {
+        for (const meal of bucket.meals) {
+          records.push({
+            kind: 'meal',
+            day,
+            id: safeString(meal?.id, 120),
+            time: safeString(meal?.time, 20),
+            description: safeString(meal?.description, 500),
+            calories: toNumber(meal?.calories, 0, 10000) ?? 0,
+            protein_g: toNumber(meal?.protein_g, 0, 500) ?? 0,
+            carbs_g: toNumber(meal?.carbs_g, 0, 1000) ?? 0,
+            fat_g: toNumber(meal?.fat_g, 0, 500) ?? 0,
+          });
+        }
+      }
+      if (includeTraining && Array.isArray(bucket.training)) {
+        for (const entry of bucket.training) {
+          records.push({
+            kind: 'training',
+            day,
+            id: safeString(entry?.id, 120),
+            time: safeString(entry?.time, 20),
+            name: safeString(entry?.name, 120),
+            sets: clampInt(entry?.sets, 0, 60, 0),
+            reps: safeString(entry?.reps, 20),
+            weight_kg: toNumber(entry?.weight_kg, 0, 500) ?? 0,
+            notes: safeString(entry?.notes, 500),
+          });
+        }
+      }
+    }
+
+    records.sort((left, right) => {
+      const leftKey = `${left.day || ''}T${left.time || '00:00'}`;
+      const rightKey = `${right.day || ''}T${right.time || '00:00'}`;
+      return rightKey.localeCompare(leftKey);
+    });
+
+    return {
+      records: records.slice(0, limit),
+    };
+  }
+
+  async updateMealRecord(userId: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const day = normalizeDateOnly(input.day);
+    const mealId = safeString(input.mealId ?? input.id, 120);
+    if (!day) throw new Error('Valid day is required');
+    if (!mealId) throw new Error('mealId is required');
+
+    const dailyPath = this.getDailyPath(userId);
+    const daily = await readJson<Record<string, any>>(dailyPath, {});
+    const bucket = daily[day];
+    if (!bucket || typeof bucket !== 'object' || !Array.isArray(bucket.meals)) {
+      throw new Error('Day record not found');
+    }
+    const target = bucket.meals.find((meal: any) => safeString(meal?.id, 120) === mealId);
+    if (!target) throw new Error('Meal record not found');
+
+    if (input.description !== undefined) target.description = safeString(input.description, 500);
+    if (input.calories !== undefined) target.calories = toNumber(input.calories, 0, 10000) ?? 0;
+    if (input.protein_g !== undefined) target.protein_g = toNumber(input.protein_g, 0, 500) ?? 0;
+    if (input.carbs_g !== undefined) target.carbs_g = toNumber(input.carbs_g, 0, 1000) ?? 0;
+    if (input.fat_g !== undefined) target.fat_g = toNumber(input.fat_g, 0, 500) ?? 0;
+    const nextTime = input.time !== undefined ? safeString(input.time, 8) : '';
+    if (nextTime && /^\d{2}:\d{2}$/.test(nextTime)) target.time = nextTime;
+    const nextTimezone = input.timezone !== undefined ? safeString(input.timezone, 80) : '';
+    if (nextTimezone && isValidTimeZone(nextTimezone)) target.timezone = nextTimezone;
+    const occurredAt = safeString(input.occurredAt ?? input.occurred_at_utc, 80);
+    if (occurredAt) {
+      const parsed = new Date(occurredAt);
+      if (!Number.isFinite(parsed.getTime())) throw new Error('occurredAt must be a valid ISO-8601 datetime');
+      target.occurred_at_utc = parsed.toISOString();
+    }
+
+    this.recomputeDayTotals(bucket);
+    await writeJsonAtomic(dailyPath, daily);
+    return {
+      day,
+      meal: target,
+      totalIntake: bucket.total_intake,
+    };
+  }
+
+  async updateTrainingRecord(userId: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const day = normalizeDateOnly(input.day);
+    const trainingId = safeString(input.trainingId ?? input.id, 120);
+    if (!day) throw new Error('Valid day is required');
+    if (!trainingId) throw new Error('trainingId is required');
+
+    const dailyPath = this.getDailyPath(userId);
+    const daily = await readJson<Record<string, any>>(dailyPath, {});
+    const bucket = daily[day];
+    if (!bucket || typeof bucket !== 'object' || !Array.isArray(bucket.training)) {
+      throw new Error('Day record not found');
+    }
+    const target = bucket.training.find((entry: any) => safeString(entry?.id, 120) === trainingId);
+    if (!target) throw new Error('Training record not found');
+
+    if (input.name !== undefined) target.name = safeString(input.name, 120);
+    if (input.sets !== undefined) target.sets = clampInt(input.sets, 0, 60, 0);
+    if (input.reps !== undefined) target.reps = safeString(input.reps, 20);
+    if (input.weight_kg !== undefined) target.weight_kg = toNumber(input.weight_kg, 0, 500) ?? 0;
+    if (input.notes !== undefined) target.notes = safeString(input.notes, 500);
+    const nextTime = input.time !== undefined ? safeString(input.time, 8) : '';
+    if (nextTime && /^\d{2}:\d{2}$/.test(nextTime)) target.time = nextTime;
+    const nextTimezone = input.timezone !== undefined ? safeString(input.timezone, 80) : '';
+    if (nextTimezone && isValidTimeZone(nextTimezone)) target.timezone = nextTimezone;
+    const occurredAt = safeString(input.occurredAt ?? input.occurred_at_utc, 80);
+    if (occurredAt) {
+      const parsed = new Date(occurredAt);
+      if (!Number.isFinite(parsed.getTime())) throw new Error('occurredAt must be a valid ISO-8601 datetime');
+      target.occurred_at_utc = parsed.toISOString();
+    }
+    const sets = clampInt(target.sets, 0, 60, 0);
+    const reps = clampInt(target.reps, 0, 200, 0);
+    const weightKg = Number.isFinite(Number(target.weight_kg)) ? Number(target.weight_kg) : 0;
+    target.volume_kg = Math.round(sets * reps * weightKg * 100) / 100;
+
+    this.recomputeDayTotals(bucket);
+    await writeJsonAtomic(dailyPath, daily);
+    return {
+      day,
+      training: target,
+      totalBurnedToday: bucket.total_burned,
+    };
+  }
+
+  async deleteRecord(userId: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const kind = safeString(input.kind, 20).toLowerCase();
+    const day = normalizeDateOnly(input.day);
+    const recordId = safeString(input.recordId ?? input.id ?? input.mealId ?? input.trainingId, 120);
+    if (kind !== 'meal' && kind !== 'training') throw new Error('kind must be meal or training');
+    if (!day) throw new Error('Valid day is required');
+    if (!recordId) throw new Error('recordId is required');
+
+    const dailyPath = this.getDailyPath(userId);
+    const daily = await readJson<Record<string, any>>(dailyPath, {});
+    const bucket = daily[day];
+    const listKey = kind === 'meal' ? 'meals' : 'training';
+    if (!bucket || typeof bucket !== 'object' || !Array.isArray(bucket[listKey])) {
+      throw new Error('Day record not found');
+    }
+    const before = bucket[listKey].length;
+    bucket[listKey] = bucket[listKey].filter((entry: any) => safeString(entry?.id, 120) !== recordId);
+    if (bucket[listKey].length === before) {
+      throw new Error('Record not found');
+    }
+    this.recomputeDayTotals(bucket);
+    await writeJsonAtomic(dailyPath, daily);
+    return {
+      day,
+      kind,
+      deletedId: recordId,
+      totalIntake: bucket.total_intake,
+      totalBurnedToday: bucket.total_burned,
+    };
+  }
+
   async logCheckIn(userId: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const stamp = await this.resolveLogStamp(userId, {
       localDate: payload.localDate ?? payload.day,

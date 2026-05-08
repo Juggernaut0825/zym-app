@@ -284,8 +284,14 @@ struct ConversationView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(minHeight: 44, alignment: .center)
                             .frame(maxWidth: .infinity)
-                            .background(messageTooLong ? Color.red.opacity(0.08) : Color.zymSurfaceSoft.opacity(0.82))
+                            .foregroundColor(Color.zymText)
+                            .tint(Color.zymPrimaryDark)
+                            .background(messageTooLong ? Color.red.opacity(0.08) : Color.white.opacity(0.92))
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(messageTooLong ? Color.red.opacity(0.35) : Color.zymLine, lineWidth: 1)
+                            )
                             .accessibilityLabel("Message")
                             .focused($messageFieldFocused)
 
@@ -507,6 +513,7 @@ struct ConversationView: View {
                     withAnimation(.zymSpring) {
                         messages.append(mapped)
                     }
+                    persistMessagesToCache(messages)
                     scheduleCoachReplyRevealIfNeeded(for: mapped)
                 }
 
@@ -534,6 +541,7 @@ struct ConversationView: View {
     }
 
     private func loadMessages() {
+        loadCachedMessagesIfAvailable()
         guard let url = apiURL("/messages/\(conversation.id)") else { return }
         var request = URLRequest(url: url)
         applyAuthorizationHeader(&request, token: appState.token)
@@ -544,11 +552,28 @@ struct ConversationView: View {
                 withAnimation(.zymSoft) {
                     messages = response.messages
                 }
+                persistMessagesToCache(response.messages)
                 pruneCoachReplyRevealAnimations(validMessageIds: Set(response.messages.map(\.id)))
                 markConversationRead(messageId: response.messages.last?.id)
                 scrollToLatestRequest += 1
             }
         }.resume()
+    }
+
+    private func loadCachedMessagesIfAvailable() {
+        guard let userId = appState.userId else { return }
+        let cached = ConversationMessageCache.load(userId: userId, topic: conversation.id)
+        guard !cached.isEmpty else { return }
+        withAnimation(.zymSoft) {
+            messages = cached
+        }
+        pruneCoachReplyRevealAnimations(validMessageIds: Set(cached.map(\.id)))
+        scrollToLatestRequest += 1
+    }
+
+    private func persistMessagesToCache(_ nextMessages: [Message]) {
+        guard let userId = appState.userId else { return }
+        ConversationMessageCache.save(nextMessages, userId: userId, topic: conversation.id)
     }
 
     private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool = true) {
@@ -1211,7 +1236,7 @@ struct ConversationView: View {
                     infoNotice = parseAPIErrorMessage(from: data) ?? "Failed to open direct message."
                     return
                 }
-                appState.requestedTabIndex = 0
+                appState.requestedTabIndex = 1
                 appState.requestedConversationTopic = payload.topic
                 profileSheetConversation = nil
                 infoNotice = "Direct message ready."
@@ -2766,7 +2791,32 @@ func isVideoURL(_ url: String) -> Bool {
     return lower.contains(".mp4") || lower.contains(".mov") || lower.contains(".webm") || lower.contains(".m4v")
 }
 
-struct Message: Identifiable, Decodable {
+private enum ConversationMessageCache {
+    private static let limit = 80
+
+    static func load(userId: Int, topic: String) -> [Message] {
+        guard let data = UserDefaults.standard.data(forKey: key(userId: userId, topic: topic)),
+              let messages = try? JSONDecoder().decode([Message].self, from: data) else {
+            return []
+        }
+        return messages
+    }
+
+    static func save(_ messages: [Message], userId: Int, topic: String) {
+        let limitedMessages = Array(messages.suffix(limit))
+        guard let data = try? JSONEncoder().encode(limitedMessages) else { return }
+        UserDefaults.standard.set(data, forKey: key(userId: userId, topic: topic))
+    }
+
+    private static func key(userId: Int, topic: String) -> String {
+        let safeTopic = topic
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        return "zym.messageCache.v1.\(userId).\(safeTopic)"
+    }
+}
+
+struct Message: Identifiable, Codable {
     let id: Int
     let topic: String?
     let from_user_id: Int
@@ -2829,6 +2879,19 @@ struct Message: Identifiable, Decodable {
             media_urls: try container.decodeIfPresent([String].self, forKey: .media_urls),
             is_coach: try container.decode(Bool.self, forKey: .is_coach)
         )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(topic, forKey: .topic)
+        try container.encode(from_user_id, forKey: .from_user_id)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encode(created_at, forKey: .created_at)
+        try container.encode(username, forKey: .username)
+        try container.encodeIfPresent(avatar_url, forKey: .avatar_url)
+        try container.encodeIfPresent(media_urls, forKey: .media_urls)
+        try container.encode(is_coach, forKey: .is_coach)
     }
 }
 

@@ -11,9 +11,13 @@ import {
   getActivityNotifications,
   createPostComment,
   createPost,
+  createChallenge,
   deletePost,
   deleteAccount,
+  completeChallenge,
+  completeTrainingPlanExercise,
   createAbuseReport,
+  getChallenges,
   getConversationNotificationPreference,
   getAuthSessions,
   getAbuseReports,
@@ -32,6 +36,7 @@ import {
   getPostComments,
   getPublicProfile,
   getProfile,
+  getToday,
   getStoredLocation,
   getUserPublic,
   logoutSession,
@@ -76,6 +81,7 @@ import {
   Friend,
   GroupMember,
   HealthMomentumResponse,
+  ChallengeSummary,
   LocationSelection,
   LeaderboardEntry,
   MentionNotification,
@@ -85,6 +91,7 @@ import {
   PublicProfileResponse,
   PublicUser,
   Profile,
+  TodayResponse,
   UserSummary,
 } from '@/lib/types';
 
@@ -92,13 +99,14 @@ const APP_TITLE = 'ZYM Community Coach';
 const BRAND_ICON_HREF = '/logo-192.png';
 
 const tabs = [
+  { key: 'today', label: 'Today', icon: 'home' },
   { key: 'messages', label: 'Message', icon: 'chat_bubble' },
   { key: 'community', label: 'Community', icon: 'groups' },
-  { key: 'calendar', label: 'Calendar', icon: 'calendar_month' },
+  { key: 'progress', label: 'Progress', icon: 'monitoring' },
   { key: 'profile', label: 'Profile', icon: 'person' },
 ] as const;
 
-const visibleTabs = tabs;
+const visibleTabs = tabs.filter((item) => item.key !== 'profile');
 
 type VisibleTabKey = (typeof tabs)[number]['key'];
 type TabKey = VisibleTabKey | 'friends';
@@ -167,6 +175,7 @@ const MAX_PROFILE_BACKGROUND_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_CHAT_MESSAGE_CHARACTERS = 8000;
 const GROUP_MEMBER_LIMIT = 500;
 const MESSAGE_BUBBLE_THEME_STORAGE_KEY_PREFIX = 'zym.web.messageBubbleTheme.v1.user';
+const MESSAGE_CACHE_STORAGE_KEY_PREFIX = 'zym.web.messageCache.v1.user';
 const HASHTAG_STOP_WORDS = new Set([
   'about', 'after', 'also', 'and', 'back', 'been', 'being', 'both', 'but', 'came', 'come', 'does', 'dont',
   'even', 'feel', 'felt', 'from', 'have', 'into', 'just', 'keep', 'more', 'need', 'over', 'really', 'some',
@@ -555,6 +564,10 @@ function messageDraftsStorageKey(userId: number): string {
   return `${MESSAGE_DRAFTS_STORAGE_KEY_PREFIX}.${userId}`;
 }
 
+function messageCacheStorageKey(userId: number, topic: string): string {
+  return `${MESSAGE_CACHE_STORAGE_KEY_PREFIX}.${userId}.${encodeURIComponent(topic).slice(0, 160)}`;
+}
+
 function postDraftStorageKey(userId: number): string {
   return `${POST_DRAFT_STORAGE_KEY_PREFIX}.${userId}`;
 }
@@ -602,6 +615,73 @@ function persistMessageDrafts(userId: number, drafts: Record<string, string>) {
     localStorage.setItem(key, JSON.stringify(compact));
   } catch {
     // Ignore storage failures in private mode.
+  }
+}
+
+function normalizeCachedMessage(value: unknown): ChatMessage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<ChatMessage>;
+  const id = Number(item.id);
+  const fromUserId = Number(item.from_user_id);
+  const topic = String(item.topic || '').trim();
+  const createdAt = String(item.created_at || '').trim();
+  if (!Number.isFinite(id) || !Number.isFinite(fromUserId) || !topic || !createdAt) return null;
+  return {
+    id,
+    topic,
+    from_user_id: fromUserId,
+    content: typeof item.content === 'string' ? item.content : null,
+    media_urls: Array.isArray(item.media_urls) ? item.media_urls.map((url) => String(url)).slice(0, 12) : [],
+    mentions: Array.isArray(item.mentions) ? item.mentions.map((mention) => String(mention)).slice(0, 20) : [],
+    reply_to: item.reply_to === null || item.reply_to === undefined ? null : Number(item.reply_to),
+    created_at: createdAt,
+    username: String(item.username || ''),
+    display_name: item.display_name === null || item.display_name === undefined ? null : String(item.display_name),
+    avatar_url: item.avatar_url === null || item.avatar_url === undefined ? null : String(item.avatar_url),
+    is_coach: Boolean(item.is_coach),
+    client_message_id: item.client_message_id === null || item.client_message_id === undefined ? null : String(item.client_message_id),
+  };
+}
+
+function loadCachedMessages(userId: number, topic: string): ChatMessage[] {
+  if (typeof window === 'undefined') return [];
+  if (!Number.isInteger(userId) || userId <= 0 || !topic) return [];
+  try {
+    const raw = localStorage.getItem(messageCacheStorageKey(userId, topic));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeCachedMessage)
+      .filter((message): message is ChatMessage => Boolean(message))
+      .sort((left, right) => {
+        const byDate = Date.parse(left.created_at || '') - Date.parse(right.created_at || '');
+        return byDate || Number(left.id) - Number(right.id);
+      })
+      .slice(-120);
+  } catch {
+    return [];
+  }
+}
+
+function persistCachedMessages(userId: number, topic: string, rows: ChatMessage[]) {
+  if (typeof window === 'undefined') return;
+  if (!Number.isInteger(userId) || userId <= 0 || !topic) return;
+  try {
+    const compact = rows
+      .filter((message) => message.topic === topic)
+      .sort((left, right) => {
+        const byDate = Date.parse(left.created_at || '') - Date.parse(right.created_at || '');
+        return byDate || Number(left.id) - Number(right.id);
+      })
+      .slice(-120);
+    if (compact.length === 0) {
+      localStorage.removeItem(messageCacheStorageKey(userId, topic));
+      return;
+    }
+    localStorage.setItem(messageCacheStorageKey(userId, topic), JSON.stringify(compact));
+  } catch {
+    // Ignore storage quota/private mode failures.
   }
 }
 
@@ -923,11 +1003,12 @@ function TabGlyph({ icon, active, size = 24 }: { icon: TabIcon; active: boolean;
 
 function normalizeTabKey(value: string | null): TabKey {
   const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'today' || raw === 'home') return 'today';
   if (raw === 'message' || raw === 'messages' || raw === 'chat') return 'messages';
   if (raw === 'community' || raw === 'feed' || raw === 'friends') return 'community';
-  if (raw === 'leaderboard' || raw === 'calendar') return 'calendar';
+  if (raw === 'leaderboard' || raw === 'calendar' || raw === 'progress') return 'progress';
   if (raw === 'profile') return 'profile';
-  return 'messages';
+  return 'today';
 }
 
 export default function AppPage() {
@@ -949,7 +1030,7 @@ export default function AppPage() {
   const skipTypingPulseRef = useRef(false);
   const notificationAudioContextRef = useRef<AudioContext | null>(null);
   const lastNotificationKeyRef = useRef<string>('');
-  const lastVisibleTabRef = useRef<VisibleTabKey>('messages');
+  const lastVisibleTabRef = useRef<VisibleTabKey>('today');
 
   const [ready, setReady] = useState(false);
   const [showAppIntro, setShowAppIntro] = useState(true);
@@ -967,7 +1048,7 @@ export default function AppPage() {
   const [communityNotificationsOpen, setCommunityNotificationsOpen] = useState(false);
   const [coachPickerOpen, setCoachPickerOpen] = useState(false);
 
-  const [tab, setTab] = useState<TabKey>('messages');
+  const [tab, setTab] = useState<TabKey>('today');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationQuery, setConversationQuery] = useState('');
   const [activeTopic, setActiveTopic] = useState('');
@@ -1062,6 +1143,14 @@ export default function AppPage() {
   const [leaderboardMetric, setLeaderboardMetric] = useState<'steps' | 'calories'>('steps');
   const [healthSync, setHealthSync] = useState({ steps: '0', calories: '0' });
   const [syncPending, setSyncPending] = useState(false);
+  const [todayData, setTodayData] = useState<TodayResponse | null>(null);
+  const [todayLoading, setTodayLoading] = useState(false);
+  const [challengeDay, setChallengeDay] = useState('');
+  const [challenges, setChallenges] = useState<ChallengeSummary[]>([]);
+  const [challengesLoading, setChallengesLoading] = useState(false);
+  const [challengePendingId, setChallengePendingId] = useState<number | null>(null);
+  const [challengeTitle, setChallengeTitle] = useState('7-day consistency');
+  const [challengeGoalType, setChallengeGoalType] = useState('plan_completion');
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDraft, setProfileDraft] = useState({ display_name: '', bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
@@ -1474,6 +1563,19 @@ export default function AppPage() {
   }, [createGroupOpen, groupSettingsOpen, deleteAccountDialogOpen, abuseReportDraft.open]);
 
   const panelMomentum = useMemo(() => {
+    if (tab === 'today') {
+      return {
+        kicker: 'Daily Action',
+        title: 'Know what to do next',
+        subtitle: 'Today turns coach memory, meals, training, and friends into one clear plan.',
+        stats: [
+          { label: 'Training', value: String(todayData?.record?.training?.length || 0) },
+          { label: 'Meals', value: String(todayData?.record?.meals?.length || 0) },
+          { label: 'Challenges', value: String(challenges.length) },
+        ],
+      };
+    }
+
     if (tab === 'messages') {
       return {
         kicker: 'Daily Momentum',
@@ -1515,7 +1617,7 @@ export default function AppPage() {
       };
     }
 
-    if (tab === 'calendar') {
+    if (tab === 'progress') {
       return {
         kicker: 'Daily Record',
         title: 'See the whole day without opening coach menus',
@@ -1550,6 +1652,8 @@ export default function AppPage() {
     conversationCounts.group,
     leaderboard,
     selectedCoach,
+    todayData,
+    challenges.length,
     authSessions.length,
     securityEvents.length,
     abuseReports.length,
@@ -1591,18 +1695,19 @@ export default function AppPage() {
     selectedCoachRef.current = coach;
     setEnabledCoaches((prev) => (prev.includes(coach) ? prev : [coach, ...prev]));
     setWelcomeFlowOpen(false);
-    setTab('messages');
+    setTab('today');
     if (topic) {
       requestedTopicRef.current = topic;
       setActiveTopic(topic);
       setMobileConversationListOpen(false);
-      window.history.replaceState({}, '', buildAppUrl('messages', 'done', topic));
+      window.history.replaceState({}, '', buildAppUrl('today', 'done'));
       void loadInbox(userId).then(() => {
         setActiveTopic(topic);
       });
     } else {
-      window.history.replaceState({}, '', buildAppUrl('messages', 'done'));
+      window.history.replaceState({}, '', buildAppUrl('today', 'done'));
     }
+    void loadTodayData(userId);
     showNotice('Coach profile saved.');
   };
 
@@ -1863,6 +1968,7 @@ export default function AppPage() {
 
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
+    persistCachedMessages(authUserIdRef.current, message.topic, nextMessages);
     return inserted;
   };
 
@@ -2015,6 +2121,8 @@ export default function AppPage() {
       loadInbox(auth.userId, initialFriends),
       loadFeed(auth.userId),
       loadLeaderboard(auth.userId),
+      loadTodayData(auth.userId),
+      loadChallengesData(auth.userId),
       loadProfile(auth.userId),
       loadActivityNotifications(auth.userId),
       loadNotificationPreferences(auth.userId),
@@ -2260,6 +2368,18 @@ export default function AppPage() {
   useEffect(() => {
     if (!ready || !authUserId || tab !== 'messages') return;
     void loadMentions(authUserId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authUserId, tab]);
+
+  useEffect(() => {
+    if (!ready || !authUserId || (tab !== 'today' && tab !== 'progress')) return;
+    void loadTodayData(authUserId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authUserId, tab]);
+
+  useEffect(() => {
+    if (!ready || !authUserId || (tab !== 'today' && tab !== 'community')) return;
+    void loadChallengesData(authUserId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authUserId, tab]);
 
@@ -2589,12 +2709,20 @@ export default function AppPage() {
 
   async function loadMessagesForTopic(topic: string) {
     try {
+      const cacheUserId = authUserIdRef.current || authUserId;
+      const cached = loadCachedMessages(cacheUserId, topic);
+      if (cached.length > 0 && activeTopicRef.current === topic) {
+        messagesRef.current = cached;
+        setMessages(cached);
+        scrollChatToBottom('auto');
+      }
       const rows = await getMessages(topic);
       if (activeTopicRef.current !== topic) return;
       clearCoachReplyRevealQueue();
       setAnimatedCoachReplies({});
       messagesRef.current = rows;
       setMessages(rows);
+      persistCachedMessages(cacheUserId, topic, rows);
       scrollChatToBottom('auto');
       const latestMessageId = rows.length > 0 ? rows[rows.length - 1]?.id : undefined;
       if (authUserId > 0) {
@@ -2713,6 +2841,40 @@ export default function AppPage() {
       setError(err.message || 'Failed to load leaderboard.');
     } finally {
       setLeaderboardLoading(false);
+    }
+  }
+
+  async function loadTodayData(userId = authUserId) {
+    if (!userId) return;
+    try {
+      setTodayLoading(true);
+      const result = await getToday(userId);
+      setTodayData(result);
+      if (result.selectedCoach) {
+        setSelectedCoach(result.selectedCoach);
+        selectedCoachRef.current = result.selectedCoach;
+      }
+      if (Array.isArray(result.enabledCoaches)) {
+        setEnabledCoaches(result.enabledCoaches.filter((item): item is CoachId => item === 'zj' || item === 'lc'));
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load Today.');
+    } finally {
+      setTodayLoading(false);
+    }
+  }
+
+  async function loadChallengesData(userId = authUserId) {
+    if (!userId) return;
+    try {
+      setChallengesLoading(true);
+      const result = await getChallenges(userId);
+      setChallengeDay(result.day);
+      setChallenges(result.challenges || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load challenges.');
+    } finally {
+      setChallengesLoading(false);
     }
   }
 
@@ -2849,6 +3011,7 @@ export default function AppPage() {
       const nextMessages = [...messagesRef.current, optimistic];
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
+      persistCachedMessages(authUserId, activeTopic, nextMessages);
       scrollChatToBottom('smooth');
 
       const response = await sendMessage({
@@ -2870,11 +3033,89 @@ export default function AppPage() {
       const nextMessages = messagesRef.current.filter((item) => item.id !== optimisticId && item.client_message_id !== clientMessageId);
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
+      persistCachedMessages(authUserId, activeTopic, nextMessages);
       setComposer((current) => (current.trim() ? current : text));
       setAttachments((current) => (current.length > 0 ? current : filesToUpload));
       setError(err.message || 'Failed to send message.');
     } finally {
       setPendingSend(false);
+    }
+  }
+
+  async function openCoachWithPrompt(prompt: string) {
+    if (!authUserId) return;
+    const coach = selectedCoachRef.current || selectedCoach;
+    const topic = buildCoachTopic(authUserId, coach);
+    requestedTopicRef.current = topic;
+    setActiveTopic(topic);
+    setTab('messages');
+    setMobileConversationListOpen(false);
+    setComposer(prompt);
+    window.history.replaceState({}, '', buildAppUrl('messages', undefined, topic));
+    void loadInbox(authUserId).then(() => setActiveTopic(topic));
+  }
+
+  async function handleTogglePlanExercise(exerciseId: string, completed: boolean) {
+    if (!authUserId || !todayData?.day) return;
+    try {
+      await completeTrainingPlanExercise({
+        userId: authUserId,
+        day: todayData.day,
+        exerciseId,
+        completed,
+        timezone: todayData.timezone,
+      });
+      await loadTodayData(authUserId);
+      showNotice(completed ? 'Exercise completed.' : 'Exercise reopened.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update exercise.');
+    }
+  }
+
+  async function handleCreateChallenge() {
+    if (!authUserId || !challengeTitle.trim()) return;
+    try {
+      setChallengesLoading(true);
+      const start = challengeDay || todayData?.day;
+      await createChallenge({
+        userId: authUserId,
+        title: challengeTitle.trim(),
+        goalType: challengeGoalType,
+        targetCount: 1,
+        startDate: start,
+        endDate: start ? (() => {
+          const date = new Date(`${start}T00:00:00.000Z`);
+          date.setUTCDate(date.getUTCDate() + 6);
+          return date.toISOString().slice(0, 10);
+        })() : undefined,
+        coachId: selectedCoach,
+      });
+      await loadChallengesData(authUserId);
+      showNotice('Challenge created.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create challenge.');
+    } finally {
+      setChallengesLoading(false);
+    }
+  }
+
+  async function handleCompleteChallenge(challenge: ChallengeSummary) {
+    if (!authUserId) return;
+    try {
+      setChallengePendingId(challenge.id);
+      await completeChallenge({
+        userId: authUserId,
+        challengeId: challenge.id,
+        localDay: challengeDay || todayData?.day,
+        status: challenge.today_status === 'completed' ? 'partial' : 'completed',
+        sourceType: 'today',
+      });
+      await loadChallengesData(authUserId);
+      showNotice(challenge.today_status === 'completed' ? 'Challenge status updated.' : 'Challenge completed today.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update challenge.');
+    } finally {
+      setChallengePendingId(null);
     }
   }
 
@@ -3985,6 +4226,147 @@ export default function AppPage() {
     </header>
   );
 
+  const renderMiniTrophy = () => (
+    <svg className="today-trophy" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M22 12h20v9c0 8-4.3 14-10 14S22 29 22 21v-9Z" fill="none" stroke="currentColor" strokeWidth="4" strokeLinejoin="round" />
+      <path d="M22 17h-8v4c0 6 4 10 10 10M42 17h8v4c0 6-4 10-10 10" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M32 35v9M23 52h18M27 44h10l3 8H24l3-8Z" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+
+  const renderTodayPage = () => {
+    const record = todayData?.record;
+    const plan = todayData?.trainingPlan || null;
+    const exercises = plan?.exercises || [];
+    const completedExercises = exercises.filter((exercise) => exercise.completed_at).length;
+    const planComplete = exercises.length > 0 && completedExercises === exercises.length;
+    const mealsLogged = record?.meals?.length || 0;
+    const trainingLogged = record?.training?.length || 0;
+    const calories = Number(record?.total_intake || 0);
+    const protein = (record?.meals || []).reduce((sum, meal) => sum + Number(meal.protein_g || 0), 0);
+    const todayGoal = String(todayData?.profile?.goal || profile?.fitness_goal || 'Build consistency');
+    const experienceLevel = String(todayData?.profile?.experience_level || '').trim();
+    const primaryCoach = selectedCoach || todayData?.selectedCoach || 'zj';
+
+    return (
+      <div className="flex h-full flex-col overflow-y-auto">
+        <header className="border-b border-slate-200/60 bg-white px-4 py-3 sm:px-5 md:px-8">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h1 className="text-[1.35rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">Today</h1>
+              <p className="mt-1 text-xs text-slate-500">
+                {todayData?.day || 'Today'} · {todayGoal}{experienceLevel ? ` · ${experienceLevel}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2">
+                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>task_alt</span>
+                {trainingLogged} training
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2">
+                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>restaurant</span>
+                {mealsLogged} meals
+              </span>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex flex-1 flex-col gap-0 px-4 py-2 sm:px-5 md:px-8">
+          <section className="border-b border-slate-200/70 py-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Training</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  {plan?.title || (todayLoading ? 'Loading today plan...' : 'No plan yet')}
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  {plan?.summary || 'Ask your coach for a simple plan based on your goal and experience level.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={selectedCoachButtonClass}
+                  type="button"
+                  onClick={() => void openCoachWithPrompt(plan ? 'Can you adjust today plan for my current energy and equipment?' : 'What should I train today? Please build me a simple plan based on my goal and experience level.')}
+                >
+                  {plan ? 'Modify plan' : 'Ask coach'}
+                </button>
+                {planComplete ? <span className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white">{renderMiniTrophy()} Done</span> : null}
+              </div>
+            </div>
+
+            {exercises.length > 0 ? (
+              <div className="mt-4 divide-y divide-slate-200/70">
+                {exercises.map((exercise) => {
+                  const done = Boolean(exercise.completed_at);
+                  return (
+                    <div key={exercise.id} className="flex items-center gap-3 py-3">
+                      <button
+                        type="button"
+                        className={`flex size-9 shrink-0 items-center justify-center rounded-full border transition ${done ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 text-slate-500 hover:border-slate-900 hover:text-slate-900'}`}
+                        onClick={() => void handleTogglePlanExercise(exercise.id, !done)}
+                        aria-label={done ? `Reopen ${exercise.name}` : `Complete ${exercise.name}`}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{done ? 'check' : 'radio_button_unchecked'}</span>
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900">{exercise.name}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {exercise.sets} sets · {exercise.reps} reps{exercise.target_weight_kg ? ` · ${exercise.target_weight_kg}kg` : ''}{exercise.cue ? ` · ${exercise.cue}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="grid gap-0 border-b border-slate-200/70 py-5 md:grid-cols-3 md:divide-x md:divide-slate-200/70">
+            <div className="py-2 md:pr-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Food</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{mealsLogged}</p>
+              <p className="text-sm text-slate-500">meal{mealsLogged === 1 ? '' : 's'} logged today</p>
+              <p className="mt-2 text-xs text-slate-400">{Math.round(calories)} kcal · {Math.round(protein)}g protein</p>
+              <button className="mt-3 text-sm font-semibold text-slate-900 underline-offset-4 hover:underline" type="button" onClick={() => void openCoachWithPrompt('I want to log a meal. I will describe it or attach a photo next.')}>
+                Log meal in Message
+              </button>
+            </div>
+            <div className="py-2 md:px-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Progress</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{todayData?.progress?.statusLabel || 'Building baseline'}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">{todayData?.progress?.trendNarrative || 'Log training or meals and ZYM will start showing a trend.'}</p>
+            </div>
+            <div className="py-2 md:pl-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Community</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{challenges.length}</p>
+              <p className="text-sm text-slate-500">active challenge{challenges.length === 1 ? '' : 's'}</p>
+              <button className="mt-3 text-sm font-semibold text-slate-900 underline-offset-4 hover:underline" type="button" onClick={() => setTab('community')}>
+                Open Community
+              </button>
+            </div>
+          </section>
+
+          <section className="py-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Ask {primaryCoach.toUpperCase()}</p>
+                <p className="mt-2 text-sm text-slate-500">Use Message for adjustments, meal photos, form checks, and record edits.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {['What should I train today?', 'Log what I just did', 'I feel tired today'].map((prompt) => (
+                  <button key={prompt} className="btn btn-ghost" type="button" onClick={() => void openCoachWithPrompt(prompt)}>
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  };
+
   const renderMessagePage = () => {
     const showConversationList = isWideMessageLayout || mobileConversationListOpen || !activeConversation;
     const showConversationPane = isWideMessageLayout || !mobileConversationListOpen;
@@ -4886,6 +5268,68 @@ export default function AppPage() {
         <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <section className="min-h-0 overflow-y-auto pr-1">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
+              <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Accountability</p>
+                    <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Challenges</h2>
+                    <p className="mt-1 text-sm text-slate-500">Keep the social layer focused on execution, not noise.</p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_150px_auto]">
+                    <input
+                      className="input-shell"
+                      value={challengeTitle}
+                      onChange={(event) => setChallengeTitle(event.target.value.slice(0, 120))}
+                      placeholder="Challenge title"
+                    />
+                    <select
+                      className="input-shell"
+                      value={challengeGoalType}
+                      onChange={(event) => setChallengeGoalType(event.target.value)}
+                    >
+                      <option value="plan_completion">Plan</option>
+                      <option value="workouts">Workouts</option>
+                      <option value="meals">Meals</option>
+                      <option value="steps">Steps</option>
+                    </select>
+                    <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading} onClick={() => void handleCreateChallenge()}>
+                      Create
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 divide-y divide-slate-200/70">
+                  {challengesLoading && challenges.length === 0 ? (
+                    <p className="py-4 text-sm text-slate-500">Loading challenges...</p>
+                  ) : null}
+                  {!challengesLoading && challenges.length === 0 ? (
+                    <p className="py-4 text-sm text-slate-500">No active challenges yet. Start with one simple consistency target.</p>
+                  ) : null}
+                  {challenges.map((challenge) => {
+                    const completed = challenge.today_status === 'completed';
+                    return (
+                      <div key={challenge.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900">{challenge.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {challenge.goal_type.replace(/_/g, ' ')} · {challenge.member_count} member{challenge.member_count === 1 ? '' : 's'} · {challenge.start_date} to {challenge.end_date}
+                          </p>
+                        </div>
+                        <button
+                          className={`inline-flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition ${completed ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                          type="button"
+                          disabled={challengePendingId === challenge.id}
+                          onClick={() => void handleCompleteChallenge(challenge)}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 17 }}>{completed ? 'check' : 'flag'}</span>
+                          {challengePendingId === challenge.id ? 'Saving...' : completed ? 'Done today' : 'Mark done'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
               <section className="rounded-[24px] bg-white/62 p-4 shadow-[0_22px_54px_rgba(15,23,42,0.06)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3 sm:gap-4">
@@ -5472,11 +5916,11 @@ export default function AppPage() {
     );
   };
 
-  const renderCalendarPage = () => (
+  const renderProgressPage = () => (
     <div className="flex h-full flex-col">
       {renderAppHeader(
-        'Calendar',
-        '',
+        'Progress',
+        'Meals, training, health sync, and coach records in one place.',
         undefined,
         undefined,
         undefined,
@@ -5815,7 +6259,7 @@ export default function AppPage() {
         <aside className="fixed left-0 top-0 z-30 hidden h-screen w-20 flex-col items-center border-r border-slate-200/50 bg-[rgba(255,255,255,0.52)] py-6 backdrop-blur-xl md:flex">
             <button
               type="button"
-              onClick={() => setTab('messages')}
+              onClick={() => setTab('today')}
               className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-[0_18px_34px_rgba(105,121,247,0.18)]"
               title="ZYM"
             >
@@ -5872,9 +6316,10 @@ export default function AppPage() {
         </aside>
 
         <section className={`mobile-app-content relative z-10 h-dvh min-w-0 overflow-hidden md:ml-20 md:h-screen md:pb-0 ${isOnline ? '' : 'pt-12'}`}>
+            {activeTab === 'today' ? renderTodayPage() : null}
             {activeTab === 'messages' ? renderMessagePage() : null}
             {activeTab === 'community' ? renderCommunityPage() : null}
-            {activeTab === 'calendar' ? renderCalendarPage() : null}
+            {activeTab === 'progress' ? renderProgressPage() : null}
             {activeTab === 'profile' ? renderProfilePage() : null}
             {profileViewer.open && profileViewer.surface === 'content-page' ? renderProfileViewerPage('content-page') : null}
         </section>

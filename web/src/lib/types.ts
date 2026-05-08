@@ -466,6 +466,67 @@ export interface CoachRecordsResponse {
   };
 }
 
+export interface TrainingPlanExercise {
+  id: string;
+  exercise_key?: string | null;
+  order: number;
+  name: string;
+  sets: number;
+  reps: string;
+  rest_seconds?: number | null;
+  target_weight_kg?: number | null;
+  cue?: string | null;
+  notes?: string | null;
+  demo_url?: string | null;
+  demo_thumbnail?: string | null;
+  completed_at?: string | null;
+}
+
+export interface TrainingPlan {
+  id: string;
+  day: string;
+  coach_id: 'zj' | 'lc';
+  title: string;
+  summary?: string | null;
+  timezone?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  exercises: TrainingPlanExercise[];
+}
+
+export interface TodayResponse {
+  day: string;
+  timezone: string;
+  selectedCoach?: 'zj' | 'lc' | null;
+  enabledCoaches?: Array<'zj' | 'lc'>;
+  profile: CoachProfileData;
+  progress?: CoachProgressSummary;
+  record: CoachDayRecord;
+  trainingPlan?: TrainingPlan | null;
+}
+
+export interface ChallengeSummary {
+  id: number;
+  owner_user_id: number;
+  group_id: number | null;
+  title: string;
+  goal_type: string;
+  target_count: number;
+  start_date: string;
+  end_date: string;
+  coach_id: 'zj' | 'lc';
+  status: string;
+  role: string;
+  member_count: number;
+  today_status: string | null;
+  created_at: string;
+}
+
+export interface ChallengesResponse {
+  day: string;
+  challenges: ChallengeSummary[];
+}
+
 export interface MessageSocketEvent {
   type: 'message_created';
   topic: string;

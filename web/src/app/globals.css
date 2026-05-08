@@ -63,6 +63,7 @@ body {
   font-family: var(--font-body);
   color: var(--ink-900);
   background: #ffffff;
+  color-scheme: light;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -171,11 +172,37 @@ select {
   transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
+.input-shell::placeholder {
+  color: #94a3b8;
+}
+
 .input-shell:focus {
   outline: none;
   background: rgba(255, 255, 255, 0.96);
   border-color: rgba(148, 163, 184, 0.08);
   box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.08);
+}
+
+.today-trophy {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  animation: today-trophy-pop 720ms var(--ease-spring) both;
+}
+
+@keyframes today-trophy-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.82);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .coach-avatar-wrap {

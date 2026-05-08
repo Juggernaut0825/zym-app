@@ -64,7 +64,7 @@ struct InboxView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        Text("Chats")
+                        Text("Message")
                             .font(.system(size: 34, weight: .bold))
                             .foregroundColor(Color.zymText)
                             .padding(.top, showAddMenu ? 2 : 0)
@@ -654,7 +654,7 @@ struct AddCoachView: View {
         if pendingCoachId == coachId {
             return "Adding..."
         }
-        return isEnabled ? "Open In Chats" : "Interact"
+        return isEnabled ? "Open In Message" : "Interact"
     }
 
     private func enableCoach(_ coachId: String) {

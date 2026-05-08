@@ -444,7 +444,7 @@ struct FeedView: View {
                     notificationHint = parseAPIError(data) ?? "Failed to open direct message."
                     return
                 }
-                appState.requestedTabIndex = 0
+                appState.requestedTabIndex = 1
                 appState.requestedConversationTopic = payload.topic
                 profileConversation = nil
                 notificationHint = "Direct message ready."
@@ -675,8 +675,8 @@ struct FeedView: View {
         }
 
         if notification.source_type == "message" || notification.mention?.source_type == "message" {
-            appState.requestedTabIndex = 0
-            notificationHint = "Message alerts are live. Open Chats to reply."
+            appState.requestedTabIndex = 1
+            notificationHint = "Message alerts are live. Open Message to reply."
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
                 withAnimation(.easeOut(duration: 0.2)) {
                     notificationHint = ""

@@ -1327,7 +1327,7 @@ struct AddFriendView: View {
                     nearbyStatusText = "Failed to open chat."
                     return
                 }
-                appState.requestedTabIndex = 0
+                appState.requestedTabIndex = 1
                 appState.requestedConversationTopic = payload.topic
                 profileConversation = nil
                 dismiss()

@@ -448,6 +448,41 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS challenges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_user_id INTEGER NOT NULL,
+      group_id INTEGER,
+      title TEXT NOT NULL,
+      goal_type TEXT NOT NULL,
+      target_count INTEGER NOT NULL DEFAULT 1,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      coach_id TEXT NOT NULL DEFAULT 'zj',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS challenge_members (
+      challenge_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (challenge_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS challenge_completions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      challenge_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      local_day TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed',
+      source_type TEXT,
+      source_id TEXT,
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(challenge_id, user_id, local_day)
+    );
+
     CREATE TABLE IF NOT EXISTS abuse_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       reporter_user_id INTEGER NOT NULL,

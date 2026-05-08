@@ -293,7 +293,20 @@ struct CoachWelcomeFlowView: View {
         if step == 0 {
             return introComplete && !state.coach.isEmpty
         }
+        if step == 1 {
+            return hasRequiredCoachContext
+        }
         return true
+    }
+
+    private var hasRequiredCoachContext: Bool {
+        !state.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !state.trainingDays.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !state.experienceLevel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var requiredContextMessage: String {
+        "Goal, training days, and experience level are required so your coach can calibrate the plan."
     }
 
     private var footerBar: some View {
@@ -311,7 +324,7 @@ struct CoachWelcomeFlowView: View {
             if step < totalSteps - 1 {
                 Button("Continue") {
                     guard canContinue else {
-                        errorText = "Choose a coach before continuing."
+                        errorText = step == 0 ? "Choose a coach before continuing." : requiredContextMessage
                         return
                     }
                     errorText = ""
@@ -320,13 +333,13 @@ struct CoachWelcomeFlowView: View {
                     }
                 }
                 .buttonStyle(ZYMPrimaryButton())
-                .disabled(pending || loadingExisting || (step == 0 && !introComplete))
+                .disabled(pending || loadingExisting || !canContinue)
             } else {
                 Button(pending ? "Saving..." : "Enter ZYM") {
                     saveAndFinish()
                 }
                 .buttonStyle(ZYMPrimaryButton())
-                .disabled(pending || loadingExisting)
+                .disabled(pending || loadingExisting || !hasRequiredCoachContext)
             }
         }
         .padding(.horizontal, 18)
@@ -530,6 +543,11 @@ struct CoachWelcomeFlowView: View {
             }
 
             welcomeInputField("Goal", text: $state.goal, keyboard: .default, placeholder: "Maintain strength while leaning out")
+
+            Text(requiredContextMessage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(hasRequiredCoachContext ? Color.zymSubtext : Color.zymSecondaryDark)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("EXTRA NOTES")
@@ -812,6 +830,13 @@ struct CoachWelcomeFlowView: View {
             step = 0
             return
         }
+        guard hasRequiredCoachContext else {
+            errorText = requiredContextMessage
+            withAnimation(.zymSoft) {
+                step = 1
+            }
+            return
+        }
 
         pending = true
         errorText = ""
@@ -838,7 +863,7 @@ struct CoachWelcomeFlowView: View {
             var body: [String: Any] = [
                 "userId": userId,
                 "timezone": TimeZone.current.identifier,
-                "seed_initial_check_in": true,
+                "seed_initial_check_in": false,
             ]
             if let height = coachWelcomeHeightPayload(state.height, unit: state.heightUnit) { body["height"] = height }
             if let weight = coachWelcomeWeightPayload(state.weight, unit: state.weightUnit) { body["weight"] = weight }
@@ -848,7 +873,7 @@ struct CoachWelcomeFlowView: View {
             if !state.gender.isEmpty { body["gender"] = state.gender }
             if !state.activityLevel.isEmpty { body["activity_level"] = state.activityLevel }
             if !state.goal.isEmpty { body["goal"] = state.goal }
-            if !state.experienceLevel.isEmpty { body["experience_level"] = state.experienceLevel }
+            body["experience_level"] = state.experienceLevel
             if !state.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["notes"] = state.notes.trimmingCharacters(in: .whitespacesAndNewlines) }
 
             var updateRequest = URLRequest(url: updateURL)

@@ -399,12 +399,22 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     return () => window.clearTimeout(timer);
   }, [step, loadingExisting]);
 
-  const canContinue = step !== 0 || (introComplete && Boolean(state.coach));
+  const requiredProfileMissing = !state.goal || !state.trainingDays || !state.experienceLevel;
+  const canContinue = step === 0
+    ? introComplete && Boolean(state.coach)
+    : step === 1
+      ? !requiredProfileMissing
+      : true;
 
   async function handleFinish() {
     if (!state.coach) {
       setError('Choose a coach before finishing setup.');
       setStep(0);
+      return;
+    }
+    if (requiredProfileMissing) {
+      setError('Set your goal, training days, and experience level before entering ZYM.');
+      setStep(1);
       return;
     }
 
@@ -422,10 +432,10 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
         gender: state.gender || undefined,
         activity_level: state.activityLevel || undefined,
         goal: state.goal || undefined,
-        experience_level: state.experienceLevel || undefined,
+        experience_level: state.experienceLevel,
         notes: state.notes.trim() || undefined,
         timezone: detectLocalTimezone(),
-        seed_initial_check_in: true,
+        seed_initial_check_in: false,
       });
       setCoach(state.coach);
       onComplete(state.coach);
@@ -464,7 +474,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
               <CoachAvatar coach="zj" state="talking" size={62} />
               <CoachSpeechBubble
                 coach="zj"
-                text="Share your goal, schedule, meals, and training context. Then we can turn it into records, check-ins, and feedback!"
+                text="Share your goal, schedule, and experience level. Then ZYM can build your first Today plan."
                 tailDirection="left"
               />
             </div>
@@ -572,6 +582,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
               {profileSelectField('Activity level', state.activityLevel, (activityLevel) => setState((prev) => ({ ...prev, activityLevel })), activityLevelOptions)}
               {profileSelectField('Experience level', state.experienceLevel, (experienceLevel) => setState((prev) => ({ ...prev, experienceLevel })), experienceLevelOptions)}
             </div>
+            <p className="mt-2 px-1 text-xs text-slate-500">Required: goal, training days, and experience level. Experience level controls how detailed your coach should be.</p>
 
             <div className="mt-4">
               {profileTextField({
@@ -684,13 +695,13 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 className="btn btn-primary"
                 onClick={() => {
                   if (!canContinue) {
-                    setError('Choose a coach before continuing.');
+                    setError(step === 0 ? 'Choose a coach before continuing.' : 'Set your goal, training days, and experience level before continuing.');
                     return;
                   }
                   setError('');
                   setStep((current) => Math.min(totalSteps - 1, current + 1));
                 }}
-                disabled={pending || loadingExisting || (step === 0 && !introComplete)}
+                disabled={pending || loadingExisting || !canContinue}
               >
                 Continue
               </button>
@@ -699,7 +710,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 type="button"
                 className="btn btn-primary"
                 onClick={() => void handleFinish()}
-                disabled={pending || loadingExisting}
+                disabled={pending || loadingExisting || requiredProfileMissing}
               >
                 {pending ? 'Saving...' : 'Enter ZYM'}
               </button>
