@@ -67,12 +67,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          remote_archive="/home/runner/zym-app-${GITHUB_SHA}.tar.gz"
           gcloud compute scp \
             --quiet \
             --project "${GCP_PROJECT_ID}" \
             --zone "${GCP_ZONE}" \
             "${{ steps.archive.outputs.archive }}" \
-            "${GCP_INSTANCE}:/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+            "runner@${GCP_INSTANCE}:${remote_archive}"
 
       - name: Deploy with Docker Compose
         shell: bash
@@ -81,14 +82,15 @@ jobs:
           remote_script="$(cat <<'REMOTE_SCRIPT'
           set -euo pipefail
           cd "${GCP_REMOTE_APP_DIR}"
+          remote_archive="/home/runner/zym-app-${GITHUB_SHA}.tar.gz"
 
           if [ ! -f ".env.gcp.prod" ]; then
             echo "Missing ${GCP_REMOTE_APP_DIR}/.env.gcp.prod on the production VM." >&2
             exit 1
           fi
 
-          sudo tar --overwrite --no-same-owner -xzf "/tmp/zym-app-${GITHUB_SHA}.tar.gz" -C "${GCP_REMOTE_APP_DIR}"
-          sudo rm -f "/tmp/zym-app-${GITHUB_SHA}.tar.gz"
+          sudo tar --overwrite --no-same-owner -xzf "${remote_archive}" -C "${GCP_REMOTE_APP_DIR}"
+          rm -f "${remote_archive}"
 
           sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml build api ws worker scheduler web
           sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
@@ -101,7 +103,7 @@ jobs:
             --quiet \
             --project "${GCP_PROJECT_ID}" \
             --zone "${GCP_ZONE}" \
-            "${GCP_INSTANCE}" \
+            "runner@${GCP_INSTANCE}" \
             --command "GITHUB_SHA='${GITHUB_SHA}' GCP_REMOTE_APP_DIR='${GCP_REMOTE_APP_DIR}' bash -s" <<< "${remote_script}"
 
       - name: Smoke check production
