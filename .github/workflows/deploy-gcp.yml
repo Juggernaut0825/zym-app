@@ -89,11 +89,28 @@ jobs:
             exit 1
           fi
 
+          cleanup_stale_compose_recreate_containers() {
+            stale_ids="$(
+              sudo docker ps -a --format '{{.ID}}\t{{.Names}}\t{{.State}}' |
+                awk -F '\t' '$2 ~ /^[0-9a-f]+_gcp-(api|ws|worker|scheduler|web|caddy)-1$/ && $3 != "running" { print $1 }'
+            )"
+
+            if [ -n "${stale_ids}" ]; then
+              echo "Removing stale Docker Compose recreate containers:"
+              echo "${stale_ids}"
+              echo "${stale_ids}" | xargs sudo docker rm -f
+            fi
+          }
+
           sudo tar --overwrite --no-same-owner -xzf "${remote_archive}" -C "${GCP_REMOTE_APP_DIR}"
           rm -f "${remote_archive}"
 
+          cleanup_stale_compose_recreate_containers
           sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml build api ws worker scheduler web
-          sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
+          if ! sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy; then
+            cleanup_stale_compose_recreate_containers
+            sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml up -d api ws worker scheduler web caddy
+          fi
           sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
           sudo docker compose --env-file .env.gcp.prod -f infra/gcp/docker-compose.prod.yml ps
           REMOTE_SCRIPT
