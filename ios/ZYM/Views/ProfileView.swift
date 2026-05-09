@@ -1198,6 +1198,14 @@ private struct CoachRecordsDetailsSheet: View {
                             }
                             .pickerStyle(.menu)
 
+                            Picker("Experience level", selection: $profileDraft.experienceLevel) {
+                                Text("Experience not set").tag("")
+                                ForEach(coachExperienceLevelOptions, id: \.value) { option in
+                                    Text(option.label).tag(option.value)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
                             Button(action: saveProfileDraft) {
                                 Text(saving ? "Saving..." : "Save profile record")
                                     .frame(maxWidth: .infinity)
@@ -1565,6 +1573,8 @@ private struct CoachRecordsDetailsSheet: View {
         if !activity.isEmpty { body["activity_level"] = activity }
         let goal = coachTrim(profileDraft.goal, limit: 20)
         if !goal.isEmpty { body["goal"] = goal }
+        let experience = coachTrim(profileDraft.experienceLevel, limit: 24)
+        if !experience.isEmpty { body["experience_level"] = experience }
         let timezone = coachTrim(profileDraft.timezone, limit: 80)
         if !timezone.isEmpty { body["timezone"] = timezone }
 
@@ -1738,6 +1748,7 @@ private struct CoachRecordProfile: Codable {
     var gender: String?
     var activity_level: String?
     var goal: String?
+    var experience_level: String?
     var timezone: String?
 }
 
@@ -1827,6 +1838,7 @@ private struct CoachProfileDraft {
     var gender = ""
     var activityLevel = ""
     var goal = ""
+    var experienceLevel = ""
     var timezone = ""
 
     init() {}
@@ -1840,6 +1852,7 @@ private struct CoachProfileDraft {
         gender = profile.gender ?? ""
         activityLevel = profile.activity_level ?? ""
         goal = profile.goal ?? ""
+        experienceLevel = profile.experience_level ?? ""
         timezone = profile.timezone ?? TimeZone.current.identifier
     }
 }

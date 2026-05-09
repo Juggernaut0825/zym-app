@@ -1,6 +1,7 @@
 import { getDB } from '../database/runtime-db.js';
 
 export type ActivityNotificationSourceType = 'message' | 'post_comment' | 'post_reaction';
+export type ActivityNotificationFeedScope = 'all' | 'post';
 
 export interface ActivityNotification {
   id: number;
@@ -227,8 +228,9 @@ export class ActivityNotificationService {
     return [postOwnerId];
   }
 
-  static listNotifications(userId: number, limit = 40): ActivityNotification[] {
+  static listNotifications(userId: number, limit = 40, scope: ActivityNotificationFeedScope = 'all'): ActivityNotification[] {
     const safeLimit = Math.min(80, Math.max(1, Math.floor(Number(limit) || 40)));
+    const sourceClause = scope === 'post' ? "AND an.source_type IN ('post_comment', 'post_reaction')" : '';
     const rows = getDB()
       .prepare(`
         SELECT
@@ -246,6 +248,7 @@ export class ActivityNotificationService {
         FROM activity_notifications an
         LEFT JOIN users u ON u.id = an.actor_user_id
         WHERE an.user_id = ?
+          ${sourceClause}
         ORDER BY datetime(an.created_at) DESC
         LIMIT ?
       `)

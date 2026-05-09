@@ -2660,7 +2660,8 @@ app.get('/notifications/mentions/:userId', requireSameUserIdFromParam('userId'),
 
 app.get('/notifications/feed/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
   const userId = toUserId(req.params.userId);
-  const notifications = ActivityNotificationService.listNotifications(userId);
+  const scope = String(req.query.source || req.query.scope || '').trim().toLowerCase() === 'post' ? 'post' : 'all';
+  const notifications = ActivityNotificationService.listNotifications(userId, 40, scope);
   res.json({ notifications });
 });
 

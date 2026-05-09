@@ -1467,6 +1467,191 @@ private struct ConversationNotificationPreferencePayload: Codable {
     let muted: Bool
 }
 
+private struct ConversationCoachRecordsPayload: Decodable {
+    let profile: CoachProfileData
+}
+
+private struct ConversationCoachProfileDraft {
+    var goal = ""
+    var trainingDays = ""
+    var activityLevel = ""
+    var experienceLevel = ""
+    var notes = ""
+    var timezone = TimeZone.current.identifier
+
+    init() {}
+
+    init(profile: CoachProfileData) {
+        goal = profile.goal ?? ""
+        trainingDays = profile.training_days.map(String.init) ?? ""
+        activityLevel = profile.activity_level ?? ""
+        experienceLevel = profile.experience_level ?? ""
+        notes = profile.notes ?? ""
+        timezone = profile.timezone ?? TimeZone.current.identifier
+    }
+}
+
+private struct ConversationCoachProfileEditorView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var draft = ConversationCoachProfileDraft()
+    @State private var loading = false
+    @State private var saving = false
+    @State private var statusText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Coach profile")
+                    .font(.custom("Syne", size: 20))
+                    .foregroundColor(Color.zymText)
+                Text(profileSummary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if loading {
+                ProgressView()
+            }
+
+            coachOptionPicker("Goal", selection: $draft.goal, options: coachGoalOptions, placeholder: "Goal not set")
+            coachOptionPicker("Training days", selection: $draft.trainingDays, options: coachTrainingDayOptions, placeholder: "Training days not set")
+            coachOptionPicker("Experience level", selection: $draft.experienceLevel, options: coachExperienceLevelOptions, placeholder: "Experience not set")
+            coachOptionPicker("Activity level", selection: $draft.activityLevel, options: coachActivityLevelOptions, placeholder: "Activity not set")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Coach notes")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                TextField("Anything your coach should remember.", text: $draft.notes, axis: .vertical)
+                    .lineLimit(3...6)
+                    .zymFieldStyle()
+            }
+
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(statusText.lowercased().contains("saved") ? Color.zymPrimaryDark : .red)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: saveProfile) {
+                    Text(saving ? "Saving..." : "Save profile")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(ZYMPrimaryButton())
+                .disabled(loading || saving)
+
+                Button(action: loadProfile) {
+                    Text("Refresh")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(ZYMGhostButton())
+                .disabled(loading || saving)
+            }
+        }
+        .zymCard()
+        .onAppear(perform: loadProfile)
+    }
+
+    private var profileSummary: String {
+        let goal = coachGoalOptions.first(where: { $0.value == draft.goal })?.label ?? "Goal missing"
+        let days = coachTrainingDayOptions.first(where: { $0.value == draft.trainingDays })?.label ?? "Days missing"
+        let experience = coachExperienceLevelOptions.first(where: { $0.value == draft.experienceLevel })?.label ?? "Experience missing"
+        return "\(goal) · \(days) · \(experience)"
+    }
+
+    private func coachOptionPicker(_ title: String, selection: Binding<String>, options: [CoachOption], placeholder: String) -> some View {
+        Picker(title, selection: selection) {
+            Text(placeholder).tag("")
+            ForEach(options, id: \.value) { option in
+                Text(option.label).tag(option.value)
+            }
+        }
+        .pickerStyle(.menu)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.zymSurfaceSoft.opacity(0.64))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func loadProfile() {
+        guard !loading,
+              let userId = appState.userId,
+              let url = apiURL("/coach/records/\(userId)?days=1") else { return }
+
+        loading = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                loading = false
+                if let error {
+                    statusText = error.localizedDescription
+                    return
+                }
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode),
+                      let data,
+                      let decoded = try? JSONDecoder().decode(ConversationCoachRecordsPayload.self, from: data) else {
+                    statusText = parseAPIErrorMessage(from: data) ?? "Failed to load coach profile."
+                    return
+                }
+                draft = ConversationCoachProfileDraft(profile: decoded.profile)
+            }
+        }.resume()
+    }
+
+    private func saveProfile() {
+        guard let userId = appState.userId,
+              let url = apiURL("/coach/records/profile/update") else { return }
+
+        guard !draft.goal.isEmpty, !draft.trainingDays.isEmpty, !draft.experienceLevel.isEmpty else {
+            statusText = "Set goal, training days, and experience level first."
+            return
+        }
+
+        saving = true
+        statusText = ""
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+
+        var body: [String: Any] = [
+            "userId": userId,
+            "goal": draft.goal,
+            "training_days": Int(draft.trainingDays) ?? 0,
+            "experience_level": draft.experienceLevel,
+            "timezone": draft.timezone,
+        ]
+        if !draft.activityLevel.isEmpty { body["activity_level"] = draft.activityLevel }
+        let notes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !notes.isEmpty { body["notes"] = String(notes.prefix(1200)) }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                saving = false
+                if let error {
+                    statusText = error.localizedDescription
+                    return
+                }
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(statusCode) else {
+                    statusText = parseAPIErrorMessage(from: data) ?? "Failed to save coach profile."
+                    return
+                }
+                statusText = "Profile saved."
+            }
+        }.resume()
+    }
+}
+
 private struct ConversationNotificationSettingsView: View {
     let conversation: Conversation
 
@@ -1497,6 +1682,12 @@ private struct ConversationNotificationSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .zymAppear(delay: 0.03)
+
+                    if conversation.isCoach {
+                        ConversationCoachProfileEditorView()
+                            .environmentObject(appState)
+                            .zymAppear(delay: 0.06)
+                    }
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Chat notifications")

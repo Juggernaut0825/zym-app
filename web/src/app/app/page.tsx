@@ -69,6 +69,7 @@ import { CoachCalendarPanel } from '@/components/chat/CoachCalendarPanel';
 import { MediaPreviewGrid } from '@/components/media/MediaPreviewGrid';
 import { WelcomeFlow } from '@/components/onboarding/WelcomeFlow';
 import { CoachAvatar } from '@/components/onboarding/CoachAvatar';
+import { CoachProfileEditor } from '@/components/profile/CoachProfileEditor';
 import {
   ActivityNotification,
   AppSocketEvent,
@@ -1319,11 +1320,7 @@ export default function AppPage() {
         kind: 'activity' as const,
         title: activityNotificationTitle(item),
         snippet: item.snippet || (item.source_type === 'post_reaction' ? 'Someone liked your post.' : 'Open to view details.'),
-        icon: item.source_type === 'message'
-          ? 'mail'
-          : item.source_type === 'post_comment'
-            ? 'comment'
-            : 'favorite',
+        icon: item.source_type === 'post_comment' ? 'comment' : 'favorite',
         is_read: item.is_read,
         created_at: item.created_at,
         activity: item,
@@ -2820,7 +2817,7 @@ export default function AppPage() {
 
     try {
       setActivityNotificationsLoading(true);
-      const rows = await getActivityNotifications(userId);
+      const rows = await getActivityNotifications(userId, 'post');
       setActivityNotifications(rows);
     } catch (err: any) {
       console.warn('[notifications] failed to load feed notifications', err);
@@ -4264,17 +4261,23 @@ export default function AppPage() {
     </header>
   );
 
-  const renderCompletionGraphic = () => (
-    <div className="today-complete-graphic" aria-label="Plan complete">
-      <svg viewBox="0 0 180 120" aria-hidden="true">
-        <path className="today-complete-glow" d="M32 82c10-38 42-58 78-52 26 4 45 21 50 48 3 17-7 28-25 28H54c-17 0-27-9-22-24Z" />
-        <path className="today-complete-shadow" d="M46 100h88" />
-        <path className="today-complete-cup" d="M70 34h40v19c0 17-8 28-20 28S70 70 70 53V34Z" />
-        <path className="today-complete-handle" d="M70 42H55v9c0 12 8 20 21 20M110 42h15v9c0 12-8 20-21 20" />
-        <path className="today-complete-stem" d="M90 81v13M72 98h36M79 94h22" />
-        <path className="today-complete-spark" d="M128 24v12M122 30h12M52 31v10M47 36h10" />
+  const renderPlanGraphic = (state: 'empty' | 'complete') => (
+    <div className={`today-plan-illustration today-plan-illustration-${state}`} aria-label={state === 'complete' ? 'Plan complete' : 'Plan preview'}>
+      <svg viewBox="0 0 320 210" aria-hidden="true">
+        <path className="today-plan-shadow" d="M72 184h176" />
+        <path className="today-plan-board" d="M126 44h116c9 0 16 7 16 16v105c0 9-7 16-16 16H126c-9 0-16-7-16-16V60c0-9 7-16 16-16Z" />
+        <path className="today-plan-clip" d="M158 38h52c5 0 9 4 9 9v18h-70V47c0-5 4-9 9-9Z" />
+        <circle className="today-plan-clip-dot" cx="184" cy="40" r="8" />
+        <path className="today-plan-line" d="M165 83h58M165 104h70M165 125h50" />
+        <path className="today-plan-line today-plan-line-soft" d="M165 147h62" />
+        <path className="today-plan-badge" d="M130 72h26v26h-26zM130 114h26v26h-26z" />
+        <path className="today-plan-checks" d={state === 'complete' ? 'M136 84l5 5 10-12M136 126l5 5 10-12M176 150l9 9 19-23' : 'M135 84h16M135 126h16'} />
+        <path className="today-plan-weight" d="M63 139c0-13 10-23 23-23h12c13 0 23 10 23 23v8H63v-8Z" />
+        <path className="today-plan-weight-handle" d="M78 118c2-15 24-15 28 0" />
+        <path className="today-plan-plate" d="M50 151h21v21H50zM113 151h21v21h-21z" />
+        <path className="today-plan-pencil" d="M262 82l18 8-42 76-18 8 4-20 38-72Z" />
+        <path className="today-plan-spark" d="M82 64v14M75 71h14M267 50v12M261 56h12" />
       </svg>
-      <span>Done</span>
     </div>
   );
 
@@ -4286,34 +4289,92 @@ export default function AppPage() {
     const todayGoal = String(todayData?.profile?.goal || profile?.fitness_goal || 'Build consistency');
     const experienceLevel = String(todayData?.profile?.experience_level || '').trim();
     const primaryCoach = selectedCoach || todayData?.selectedCoach || 'zj';
+    const displayDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+      todayData?.day ? new Date(`${todayData.day}T00:00:00`) : new Date(),
+    );
+    const progressTotal = Math.max(exercises.length, 1);
+    const completionPercent = Math.round((completedExercises / progressTotal) * 100);
+    const consistencyDays = Math.min(7, Math.max(0, todayData?.progress?.checkInDays || 0));
+    const progressStatus = todayData?.progress?.statusLabel || (planComplete ? 'Complete' : plan ? 'On track' : 'Ready');
+    const planTitle = plan?.title || (todayLoading ? 'Loading today plan...' : 'No plan for today yet');
 
     return (
-      <div className="flex h-full flex-col overflow-y-auto">
-        <header className="border-b border-slate-200/60 bg-white px-4 py-3 sm:px-5 md:px-8">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div className="flex h-full flex-col overflow-y-auto bg-white">
+        <header className="px-4 py-5 sm:px-5 md:px-8 md:py-7">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="text-[1.35rem] font-semibold tracking-tight text-slate-900 sm:text-[1.8rem]">Today</h1>
-              <p className="mt-1 text-xs text-slate-500">
-                {todayData?.day || 'Today'} · {todayGoal}{experienceLevel ? ` · ${experienceLevel}` : ''}
-              </p>
+              <h1 className="text-[2.4rem] font-semibold text-slate-950 sm:text-[3rem]">Today</h1>
+              <p className="mt-1 text-sm font-medium text-slate-500">{displayDate} · {todayGoal}</p>
             </div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2">
-                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>task_alt</span>
-                {completedExercises}/{Math.max(exercises.length, 1)}
-              </span>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-[0_10px_28px_rgba(15,23,42,0.04)]">
+              <span className="material-symbols-outlined text-[var(--coach-zj)]" style={{ fontSize: 18 }}>task_alt</span>
+              {completedExercises} / {progressTotal}
             </div>
           </div>
         </header>
 
-        <div className="flex flex-1 flex-col gap-3 px-4 py-3 sm:px-5 md:px-8">
-          <section className="rounded-[28px] border border-slate-200/70 bg-white/76 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.045)] sm:p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-1 flex-col gap-4 px-4 pb-6 sm:px-5 md:px-8">
+          <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr_1fr]">
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.045)]">
+              <p className="text-sm font-semibold text-slate-900">Daily progress</p>
+              <div className="mt-4 flex items-center gap-5">
+                <div
+                  className="today-progress-ring"
+                  style={{ background: `conic-gradient(var(--coach-zj) ${completionPercent}%, #edf1f7 0)` }}
+                >
+                  <div>
+                    <strong>{completedExercises} / {progressTotal}</strong>
+                    <span>exercises</span>
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">{planComplete ? 'Nice work.' : "Let's get it done."}</p>
+                  <p className="mt-1 text-sm text-slate-500">{planComplete ? 'Plan is wrapped for today.' : "You've got this."}</p>
+                  <div className="mt-4 grid grid-cols-7 gap-2 text-center text-[11px] font-semibold text-slate-500">
+                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => (
+                      <span key={`${day}-${index}`} className={`rounded-full px-1 py-1 ${index === 4 ? 'bg-[var(--coach-zj)] text-white' : 'bg-slate-100'}`}>{day}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.045)]">
+              <p className="text-sm font-semibold text-slate-900">Today’s focus</p>
+              <div className="mt-4 flex items-start gap-4">
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                  <span className="material-symbols-outlined" style={{ fontSize: 24 }}>track_changes</span>
+                </span>
+                <div>
+                  <p className="text-base font-semibold text-slate-900">{todayGoal}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{experienceLevel ? `${experienceLevel} plan rhythm.` : 'Small steps, big results.'}</p>
+                  <span className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{progressStatus}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.045)]">
+              <div className="flex items-start gap-4">
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--coach-zj-soft)] text-[var(--coach-zj)]">
+                  <span className="material-symbols-outlined" style={{ fontSize: 24 }}>auto_awesome</span>
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Coach insight</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {plan ? 'Keep the session simple and finish every row with clean reps.' : 'Ask your coach for a plan that fits your energy and equipment.'}
+                  </p>
+                  <p className="mt-3 text-sm font-semibold text-[var(--coach-zj)]">— {primaryCoach.toUpperCase()}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.055)] sm:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Training</p>
-                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-                  {plan?.title || (todayLoading ? 'Loading today plan...' : 'No plan yet')}
-                </h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--coach-zj)]">Training</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">{planTitle}</h2>
+                {plan?.summary ? <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">{plan.summary}</p> : null}
               </div>
               <div className="flex flex-wrap items-start gap-2">
                 <button
@@ -4323,60 +4384,114 @@ export default function AppPage() {
                 >
                   {plan ? 'Modify plan' : 'Ask coach'}
                 </button>
-                {planComplete ? renderCompletionGraphic() : null}
               </div>
             </div>
 
             {exercises.length > 0 ? (
-              <div className="mt-4 divide-y divide-slate-200/70">
-                {exercises.map((exercise) => {
-                  const done = Boolean(exercise.completed_at);
-                  return (
-                    <div key={exercise.id} className="flex items-center gap-3 py-3">
-                      <button
-                        type="button"
-                        className={`flex size-9 shrink-0 items-center justify-center rounded-full border transition ${done ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 text-slate-500 hover:border-slate-900 hover:text-slate-900'}`}
-                        onClick={() => void handleTogglePlanExercise(exercise.id, !done)}
-                        aria-label={done ? `Reopen ${exercise.name}` : `Complete ${exercise.name}`}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{done ? 'check' : 'radio_button_unchecked'}</span>
-                      </button>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-slate-900">{exercise.name}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          {exercise.sets} sets · {exercise.reps} reps{exercise.target_weight_kg ? ` · ${exercise.target_weight_kg}kg` : ''}{exercise.cue ? ` · ${exercise.cue}` : ''}
-                        </p>
+              <div className={`mt-5 grid gap-5 ${planComplete ? 'xl:grid-cols-[minmax(0,1fr)_280px]' : ''}`}>
+                <div className="divide-y divide-slate-200/80">
+                  {exercises.map((exercise) => {
+                    const done = Boolean(exercise.completed_at);
+                    return (
+                      <div key={exercise.id} className="grid grid-cols-[auto_42px_minmax(0,1fr)_auto] items-center gap-3 py-3">
+                        <button
+                          type="button"
+                          className={`flex size-8 shrink-0 items-center justify-center rounded-full border transition ${done ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 text-slate-400 hover:border-slate-900 hover:text-slate-900'}`}
+                          onClick={() => void handleTogglePlanExercise(exercise.id, !done)}
+                          aria-label={done ? `Reopen ${exercise.name}` : `Complete ${exercise.name}`}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: 17 }}>{done ? 'check' : 'radio_button_unchecked'}</span>
+                        </button>
+                        <span className="flex size-10 items-center justify-center rounded-[12px] bg-[var(--coach-zj-soft)] text-[var(--coach-zj)]">
+                          <span className="material-symbols-outlined" style={{ fontSize: 21 }}>fitness_center</span>
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-950">{exercise.name}</p>
+                          <p className="mt-0.5 truncate text-xs text-slate-500">
+                            {exercise.sets} sets · {exercise.reps} reps{exercise.target_weight_kg ? ` · ${exercise.target_weight_kg}kg` : ''}{exercise.cue ? ` · ${exercise.cue}` : ''}
+                          </p>
+                        </div>
+                        <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 sm:inline-flex">{exercise.sets} x {exercise.reps}</span>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {planComplete ? <div className="hidden xl:block">{renderPlanGraphic('complete')}</div> : null}
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+                <div>
+                  <p className="max-w-lg text-sm leading-6 text-slate-500">Your coach can build a plan that fits your goals, energy, and equipment.</p>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button className={selectedCoachButtonClass} type="button" onClick={() => void openCoachWithPrompt('Generate a training plan for today based on my current profile.')}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 17 }}>auto_awesome</span>
+                      Generate plan
+                    </button>
+                    <button className="btn btn-ghost" type="button" onClick={() => void openCoachWithPrompt('Help me log a quick workout for today.')}>
+                      Log quick workout
+                    </button>
+                  </div>
+                  <div className="mt-6 rounded-[18px] bg-[var(--coach-zj-soft)] px-4 py-3 text-sm font-medium text-slate-600">
+                    Not sure what to do? Ask {primaryCoach.toUpperCase()} for a plan tailored to how you feel today.
+                  </div>
+                </div>
+                <div className="hidden lg:block">{renderPlanGraphic('empty')}</div>
+              </div>
+            )}
           </section>
 
-          <section className="border-b border-slate-200/70 py-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Community</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{challenges.length}</p>
+          <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-base font-semibold text-slate-950">Community</p>
+                  <p className="mt-1 text-sm text-slate-500">You have {friends.length} active connection{friends.length === 1 ? '' : 's'}</p>
+                  <div className="mt-4 flex -space-x-2">
+                    {friends.slice(0, 3).map((friend) => (
+                      <span key={friend.id} className="flex size-9 items-center justify-center rounded-full border-2 border-white bg-slate-100 text-xs font-semibold text-slate-600">
+                        {avatarInitial(displayUserName(friend, friend.username))}
+                      </span>
+                    ))}
+                    <button className="flex size-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700" type="button" onClick={() => setTab('community')}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+                    </button>
+                  </div>
+                </div>
+                <button className="btn btn-ghost" type="button" onClick={() => setTab('community')}>
+                  View
+                </button>
               </div>
-              <button className="btn btn-ghost" type="button" onClick={() => setTab('community')}>
-                Open
-              </button>
             </div>
-          </section>
 
-          <section className="py-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Ask {primaryCoach.toUpperCase()}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {['What should I train today?', 'Log what I just did', 'I feel tired today'].map((prompt) => (
-                  <button key={prompt} className="btn btn-ghost" type="button" onClick={() => void openCoachWithPrompt(prompt)}>
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+              <p className="text-base font-semibold text-slate-950">Ask {primaryCoach.toUpperCase()}</p>
+              <p className="mt-1 text-sm text-slate-500">Get guidance, log your session, or check in.</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {[
+                  ['What should I train today?', 'chat_bubble'],
+                  ['Log what I just did', 'edit_square'],
+                  ['I feel tired today', 'sentiment_sad'],
+                ].map(([prompt, icon]) => (
+                  <button key={prompt} className="btn btn-ghost justify-center" type="button" onClick={() => void openCoachWithPrompt(prompt)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{icon}</span>
                     {prompt}
                   </button>
                 ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)] md:max-w-xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-base font-semibold text-slate-950">7-day consistency</p>
+                <p className="mt-1 text-sm text-slate-500">{consistencyDays} / 7 days</p>
+              </div>
+              <div
+                className="today-mini-ring"
+                style={{ background: `conic-gradient(#14a394 ${Math.round((consistencyDays / 7) * 100)}%, #edf1f7 0)` }}
+              >
+                <span>{Math.round((consistencyDays / 7) * 100)}%</span>
               </div>
             </div>
           </section>
@@ -4553,6 +4668,15 @@ export default function AppPage() {
           ) : conversationSettingsOpen ? (
             <div className="flex-1 overflow-y-auto px-3.5 py-4 sm:px-5 sm:py-5 md:px-6">
               <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+                {activeConversation?.type === 'coach' ? (
+                  <CoachProfileEditor
+                    userId={authUserId}
+                    active={conversationSettingsOpen}
+                    onNotice={setNotice}
+                    onError={setError}
+                  />
+                ) : null}
+
                 <section className="rounded-[24px] bg-white/78 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.06)] sm:p-5">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Notifications</p>
                   <h3 className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">Control this chat’s alerts</h3>
@@ -5292,16 +5416,6 @@ export default function AppPage() {
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Accountability</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Challenges</h2>
                   </div>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => {
-                      setCommunityComposerOpen(true);
-                      setCommunityCreateMode('challenge');
-                    }}
-                  >
-                    Create
-                  </button>
                 </div>
 
                 <div className="mt-4 divide-y divide-slate-200/70">
@@ -5416,8 +5530,12 @@ export default function AppPage() {
 
                     {communityCreateMode === 'challenge' ? (
                       <div className="grid gap-4">
+                        <div className="rounded-[20px] bg-slate-50/80 p-4">
+                          <p className="text-sm font-semibold text-slate-900">Create a challenge</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">Set the card title, what members will see, and how each day gets counted.</p>
+                        </div>
                         <label className="grid gap-1.5">
-                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Title</span>
+                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Title shown on card</span>
                           <input
                             className="input-shell"
                             value={challengeTitle}
@@ -5426,7 +5544,7 @@ export default function AppPage() {
                           />
                         </label>
                         <label className="grid gap-1.5">
-                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Description</span>
+                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Description for members</span>
                           <textarea
                             className="input-shell min-h-[96px] resize-none"
                             value={challengeDescription}
@@ -5436,7 +5554,7 @@ export default function AppPage() {
                         </label>
                         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                           <label className="grid gap-1.5">
-                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Type</span>
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Daily completion type</span>
                             <select
                               className="input-shell"
                               value={challengeGoalType}

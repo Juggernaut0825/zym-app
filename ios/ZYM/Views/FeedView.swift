@@ -36,20 +36,31 @@ private enum CommunityComposerDestination: Identifiable {
 
 private struct CommunityComposerChoice: View {
     let title: String
+    let subtitle: String
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
+        HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Color.zymPrimaryDark)
+                .frame(width: 34, height: 34)
+                .background(Color.zymSurfaceSoft.opacity(0.86))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
+            }
         }
-        .foregroundColor(Color.zymText)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .frame(width: 214, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(Color.white.opacity(0.96))
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
     }
 }
@@ -215,13 +226,13 @@ struct FeedView: View {
                                             composerDestination = .post
                                             composerMenuOpen = false
                                         }) {
-                                            CommunityComposerChoice(title: "Post", systemImage: "square.and.pencil")
+                                            CommunityComposerChoice(title: "Post", subtitle: "Share an update", systemImage: "square.and.pencil")
                                         }
                                         Button(action: {
                                             composerDestination = .challenge
                                             composerMenuOpen = false
                                         }) {
-                                            CommunityComposerChoice(title: "Challenge", systemImage: "flag")
+                                            CommunityComposerChoice(title: "Challenge", subtitle: "Publish accountability", systemImage: "flag")
                                         }
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .trailing)))
@@ -350,7 +361,7 @@ struct FeedView: View {
         var nextActivity: [FeedActivityNotification] = []
         var nextMentions: [MentionNotificationPayload] = []
 
-        if let activityURL = apiURL("/notifications/feed/\(userId)") {
+        if let activityURL = apiURL("/notifications/feed/\(userId)?source=post") {
             group.enter()
             var request = URLRequest(url: activityURL)
             applyAuthorizationHeader(&request, token: appState.token)
@@ -764,13 +775,10 @@ struct FeedView: View {
             return
         }
 
-        if notification.source_type == "message" || notification.mention?.source_type == "message" {
-            appState.requestedTabIndex = 1
-            notificationHint = "Message alerts are live. Open Message to reply."
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    notificationHint = ""
-                }
+        notificationHint = "This notification is no longer available."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                notificationHint = ""
             }
         }
     }
@@ -827,6 +835,12 @@ struct CreateChallengeView: View {
     @State private var isCreating = false
     @State private var errorText = ""
     let onCreated: () -> Void
+    private let goalOptions: [(value: String, title: String, subtitle: String, icon: String)] = [
+        ("plan_completion", "Plan", "Finish today’s workout", "checklist"),
+        ("workouts", "Workouts", "Log a training day", "figure.strengthtraining.traditional"),
+        ("meals", "Meals", "Hit a nutrition action", "fork.knife"),
+        ("steps", "Steps", "Move enough today", "figure.walk"),
+    ]
 
     var body: some View {
         NavigationView {
@@ -835,31 +849,71 @@ struct CreateChallengeView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        challengeField(label: "Title") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Image(systemName: "flag.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(Color.zymPrimaryDark)
+                                .frame(width: 42, height: 42)
+                                .background(Color.zymSurfaceSoft.opacity(0.86))
+                                .clipShape(Circle())
+                            Text("Publish challenge")
+                                .font(.custom("Syne", size: 24))
+                                .foregroundColor(Color.zymText)
+                            Text("Make the goal clear enough that every member knows what counts today.")
+                                .font(.system(size: 13))
+                                .foregroundColor(Color.zymSubtext)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .zymCard()
+
+                        challengeField(label: "Title", hint: "Shown on the challenge card.") {
                             TextField("7-day consistency", text: $title)
                                 .foregroundColor(Color.zymText)
                                 .zymFieldStyle()
                         }
 
-                        challengeField(label: "Description") {
+                        challengeField(label: "Description", hint: "What members should do and why it matters.") {
                             TextField("What does finishing this challenge mean?", text: $descriptionText, axis: .vertical)
                                 .foregroundColor(Color.zymText)
                                 .lineLimit(4...7)
                                 .zymFieldStyle()
                         }
 
-                        challengeField(label: "Type") {
-                            Picker("Type", selection: $goalType) {
-                                Text("Plan completion").tag("plan_completion")
-                                Text("Workouts").tag("workouts")
-                                Text("Meals").tag("meals")
-                                Text("Steps").tag("steps")
+                        challengeField(label: "Daily completion", hint: "This is how the app labels the action for each day.") {
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(goalOptions, id: \.value) { option in
+                                    Button {
+                                        goalType = option.value
+                                    } label: {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: option.icon)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundColor(goalType == option.value ? .white : Color.zymPrimaryDark)
+                                                .frame(width: 30, height: 30)
+                                                .background(goalType == option.value ? Color.zymPrimaryDark : Color.zymSurfaceSoft)
+                                                .clipShape(Circle())
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(option.title)
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundColor(Color.zymText)
+                                                Text(option.subtitle)
+                                                    .font(.system(size: 11))
+                                                    .foregroundColor(Color.zymSubtext)
+                                                    .lineLimit(2)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(11)
+                                        .background(goalType == option.value ? Color.zymSurfaceSoft.opacity(0.96) : Color.white.opacity(0.76))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                .stroke(goalType == option.value ? Color.zymPrimaryDark.opacity(0.32) : Color.zymLine.opacity(0.7), lineWidth: 1)
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(14)
-                            .background(Color.zymSurfaceSoft.opacity(0.76))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
 
                         if !errorText.isEmpty {
@@ -887,14 +941,21 @@ struct CreateChallengeView: View {
         }
     }
 
-    private func challengeField<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+    private func challengeField<Content: View>(label: String, hint: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(label)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.2)
                 .foregroundColor(Color.zymSubtext)
             content()
+            Text(hint)
+                .font(.system(size: 11))
+                .foregroundColor(Color.zymSubtext)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(12)
+        .background(Color.white.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func createChallenge() {
@@ -1569,17 +1630,11 @@ struct FeedUnifiedNotification: Identifiable {
         self.kind = "activity"
         self.title = activity.source_type == "post_comment"
             ? "\(actor) commented on your post"
-            : activity.source_type == "post_reaction"
-                ? "\(actor) liked your post"
-                : "\(actor) sent you a message"
+            : "\(actor) liked your post"
         self.snippet = activity.snippet
         self.created_at = activity.created_at
         self.is_read = activity.is_read
-        self.iconName = activity.source_type == "post_comment"
-            ? "bubble.left"
-            : activity.source_type == "post_reaction"
-                ? "heart"
-                : "message"
+        self.iconName = activity.source_type == "post_comment" ? "bubble.left" : "heart"
         self.post_id = activity.post_id
         self.source_type = activity.source_type
         self.activity = activity
@@ -1590,13 +1645,11 @@ struct FeedUnifiedNotification: Identifiable {
         let actor = mention.actor_username ?? "Someone"
         self.id = "mention-\(mention.id)"
         self.kind = "mention"
-        self.title = mention.source_type == "post_comment"
-            ? "\(actor) mentioned you in a comment"
-            : "\(actor) mentioned you in chat"
+        self.title = "\(actor) mentioned you in a comment"
         self.snippet = mention.snippet
         self.created_at = mention.created_at
         self.is_read = mention.is_read
-        self.iconName = mention.source_type == "post_comment" ? "at.circle" : "message.badge"
+        self.iconName = "at.circle"
         self.post_id = nil
         self.source_type = mention.source_type
         self.activity = nil

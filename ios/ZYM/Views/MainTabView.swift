@@ -208,8 +208,8 @@ private struct TodayView: View {
                     loadAll()
                 }
             }
-            .navigationTitle("Today")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: loadAll) {
@@ -226,20 +226,29 @@ private struct TodayView: View {
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color.zymSubtext)
-                Text(primaryGoalText)
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundColor(Color.zymText)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Today")
+                        .font(.system(size: 48, weight: .regular))
+                        .foregroundColor(Color.zymText)
+                    Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(Color.zymSubtext)
+                }
+                Spacer(minLength: 12)
+                TodayPill(text: "\(completedExercises)/\(max(totalExercises, 1)) done", systemImage: "checkmark.circle")
+                    .padding(.top, 10)
             }
+
+            Text(primaryGoalText)
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(Color.zymText)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 TodayPill(text: experienceText, systemImage: "figure.strengthtraining.traditional")
-                TodayPill(text: "\(completedExercises)/\(totalExercises) done", systemImage: "checkmark.circle")
+                TodayPill(text: hasCompletedPlan ? "Complete" : "On track", systemImage: "target")
             }
 
             if isLoading && today == nil {
@@ -256,20 +265,59 @@ private struct TodayView: View {
     }
 
     private var trainingSection: some View {
-        TodayCardSection(title: "Training", actionTitle: "Message coach", action: openCoach) {
+        TodayCardSection(title: "Training") {
             if let plan = today?.trainingPlan {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .center, spacing: 12) {
-                        Text(plan.title)
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(Color.zymText)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 8)
-                        if hasCompletedPlan {
-                            TodayCompletionMark()
-                                .frame(width: 86, height: 58)
-                                .transition(.scale.combined(with: .opacity))
+                        ZStack {
+                            Circle()
+                                .fill(Color.zymSurfaceSoft.opacity(0.92))
+                                .frame(width: 52, height: 52)
+                            Image(systemName: "dumbbell")
+                                .font(.system(size: 21, weight: .semibold))
+                                .foregroundColor(Color.zymPrimaryDark)
                         }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(plan.title)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(Color.zymText)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let summary = plan.summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(summary)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color.zymSubtext)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Button(action: openCoach) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color.zymPrimaryDark)
+                                .frame(width: 38, height: 38)
+                                .background(Color.zymSurfaceSoft.opacity(0.82))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if hasCompletedPlan {
+                        HStack(spacing: 14) {
+                            TodayPlanCompleteGraphic()
+                                .frame(width: 116, height: 86)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Plan complete")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(Color.zymText)
+                                Text("You finished every exercise today.")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color.zymSurfaceSoft.opacity(0.54))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     }
 
                     VStack(spacing: 0) {
@@ -284,6 +332,16 @@ private struct TodayView: View {
                             }
                         }
                     }
+
+                    Button(action: openCoach) {
+                        HStack {
+                            Text(hasCompletedPlan ? "Adjust tomorrow" : "Modify plan")
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(ZYMPrimaryButton())
                 }
             } else {
                 HStack(alignment: .center, spacing: 16) {
@@ -666,54 +724,42 @@ private struct TodayShortcutButton: View {
     }
 }
 
-private struct TodayCompletionMark: View {
+private struct TodayPlanCompleteGraphic: View {
     var body: some View {
         Canvas { context, size in
             let w = size.width
             let h = size.height
-            let glow = Path(ellipseIn: CGRect(x: w * 0.12, y: h * 0.02, width: w * 0.76, height: h * 0.82))
-            context.fill(glow, with: .color(Color.zymCoachBlue.opacity(0.08)))
-
             var base = Path()
-            base.move(to: CGPoint(x: w * 0.26, y: h * 0.86))
-            base.addLine(to: CGPoint(x: w * 0.74, y: h * 0.86))
-            context.stroke(base, with: .color(Color.zymSubtext.opacity(0.28)), lineWidth: 4)
+            base.move(to: CGPoint(x: w * 0.15, y: h * 0.88))
+            base.addLine(to: CGPoint(x: w * 0.85, y: h * 0.88))
+            context.stroke(base, with: .color(Color.zymSubtext.opacity(0.22)), lineWidth: 5)
 
-            let cupRect = CGRect(x: w * 0.36, y: h * 0.18, width: w * 0.28, height: h * 0.38)
-            context.fill(Path(roundedRect: cupRect, cornerRadius: w * 0.04), with: .color(Color.zymSurfaceSoft))
-            context.stroke(Path(roundedRect: cupRect, cornerRadius: w * 0.04), with: .color(Color.zymPrimaryDark), lineWidth: 3)
+            let board = CGRect(x: w * 0.34, y: h * 0.16, width: w * 0.42, height: h * 0.64)
+            context.fill(Path(roundedRect: board, cornerRadius: 10), with: .color(Color.zymSurface))
+            context.stroke(Path(roundedRect: board, cornerRadius: 10), with: .color(Color.zymLine), lineWidth: 1.4)
 
-            var leftHandle = Path()
-            leftHandle.move(to: CGPoint(x: w * 0.36, y: h * 0.28))
-            leftHandle.addCurve(
-                to: CGPoint(x: w * 0.36, y: h * 0.48),
-                control1: CGPoint(x: w * 0.2, y: h * 0.25),
-                control2: CGPoint(x: w * 0.2, y: h * 0.49)
-            )
-            context.stroke(leftHandle, with: .color(Color.zymPrimaryDark), lineWidth: 3)
+            let clip = CGRect(x: w * 0.45, y: h * 0.08, width: w * 0.2, height: h * 0.15)
+            context.fill(Path(roundedRect: clip, cornerRadius: 6), with: .color(Color.zymPrimaryDark))
 
-            var rightHandle = Path()
-            rightHandle.move(to: CGPoint(x: w * 0.64, y: h * 0.28))
-            rightHandle.addCurve(
-                to: CGPoint(x: w * 0.64, y: h * 0.48),
-                control1: CGPoint(x: w * 0.8, y: h * 0.25),
-                control2: CGPoint(x: w * 0.8, y: h * 0.49)
-            )
-            context.stroke(rightHandle, with: .color(Color.zymPrimaryDark), lineWidth: 3)
+            for index in 0..<3 {
+                let y = h * (0.33 + Double(index) * 0.16)
+                let checkStart = CGPoint(x: w * 0.41, y: y + h * 0.04)
+                var check = Path()
+                check.move(to: checkStart)
+                check.addLine(to: CGPoint(x: w * 0.45, y: y + h * 0.08))
+                check.addLine(to: CGPoint(x: w * 0.53, y: y - h * 0.02))
+                context.stroke(check, with: .color(Color.green.opacity(0.82)), lineWidth: 3)
 
-            var stem = Path()
-            stem.move(to: CGPoint(x: w * 0.5, y: h * 0.57))
-            stem.addLine(to: CGPoint(x: w * 0.5, y: h * 0.74))
-            stem.move(to: CGPoint(x: w * 0.39, y: h * 0.75))
-            stem.addLine(to: CGPoint(x: w * 0.61, y: h * 0.75))
-            context.stroke(stem, with: .color(Color.zymPrimaryDark), lineWidth: 3)
+                var line = Path()
+                line.move(to: CGPoint(x: w * 0.58, y: y + h * 0.03))
+                line.addLine(to: CGPoint(x: w * 0.69, y: y + h * 0.03))
+                context.stroke(line, with: .color(Color.zymSubtext.opacity(0.24)), lineWidth: 3)
+            }
 
-            var spark = Path()
-            spark.move(to: CGPoint(x: w * 0.76, y: h * 0.15))
-            spark.addLine(to: CGPoint(x: w * 0.76, y: h * 0.28))
-            spark.move(to: CGPoint(x: w * 0.7, y: h * 0.215))
-            spark.addLine(to: CGPoint(x: w * 0.82, y: h * 0.215))
-            context.stroke(spark, with: .color(Color.zymCoachBlue), lineWidth: 2.4)
+            let weight = CGRect(x: w * 0.14, y: h * 0.62, width: w * 0.25, height: h * 0.17)
+            context.fill(Path(roundedRect: weight, cornerRadius: 10), with: .color(Color.zymPrimaryDark.opacity(0.9)))
+            context.fill(Path(ellipseIn: CGRect(x: w * 0.08, y: h * 0.74, width: w * 0.15, height: w * 0.15)), with: .color(Color.zymPrimary.opacity(0.85)))
+            context.fill(Path(ellipseIn: CGRect(x: w * 0.29, y: h * 0.74, width: w * 0.15, height: w * 0.15)), with: .color(Color.zymPrimary.opacity(0.85)))
         }
     }
 }

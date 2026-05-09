@@ -638,8 +638,9 @@ export async function getMentionNotifications(userId: number): Promise<MentionNo
   return response.mentions;
 }
 
-export async function getActivityNotifications(userId: number): Promise<ActivityNotification[]> {
-  const response = await request<{ notifications: ActivityNotification[] }>(`/notifications/feed/${userId}`);
+export async function getActivityNotifications(userId: number, source: 'all' | 'post' = 'all'): Promise<ActivityNotification[]> {
+  const suffix = source === 'post' ? '?source=post' : '';
+  const response = await request<{ notifications: ActivityNotification[] }>(`/notifications/feed/${userId}${suffix}`);
   return response.notifications;
 }
 
