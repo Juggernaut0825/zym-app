@@ -39,6 +39,8 @@ const RETURNING_ID_TABLES = new Set([
   'user_sessions',
   'post_comments',
   'mention_notifications',
+  'challenges',
+  'challenge_completions',
   'abuse_reports',
   'security_events',
   'knowledge_ingestion_requests',

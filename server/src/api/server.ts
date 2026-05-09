@@ -167,7 +167,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
 
   const isSecureProxy = String(req.headers['x-forwarded-proto'] || '').toLowerCase().includes('https');
   if (isProduction && (req.secure || isSecureProxy)) {

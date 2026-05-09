@@ -1045,6 +1045,7 @@ export default function AppPage() {
   const [mobileConversationListOpen, setMobileConversationListOpen] = useState(false);
   const [communityActionsOpen, setCommunityActionsOpen] = useState(false);
   const [communityComposerOpen, setCommunityComposerOpen] = useState(false);
+  const [communityCreateMode, setCommunityCreateMode] = useState<'post' | 'challenge' | null>(null);
   const [communityNotificationsOpen, setCommunityNotificationsOpen] = useState(false);
   const [coachPickerOpen, setCoachPickerOpen] = useState(false);
 
@@ -2726,9 +2727,13 @@ export default function AppPage() {
       scrollChatToBottom('auto');
       const latestMessageId = rows.length > 0 ? rows[rows.length - 1]?.id : undefined;
       if (authUserId > 0) {
-        await markMessagesRead({ userId: authUserId, topic, messageId: latestMessageId });
+        void markMessagesRead({ userId: authUserId, topic, messageId: latestMessageId }).catch((error) => {
+          console.warn('[messages] failed to mark read', error);
+        });
       }
-      await loadInbox();
+      void loadInbox().catch((error) => {
+        console.warn('[messages] failed to refresh inbox', error);
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to load messages.');
     }
@@ -2783,7 +2788,7 @@ export default function AppPage() {
       const rows = await getMentionNotifications(userId);
       setMentionNotifications(rows);
     } catch (err: any) {
-      setError(err.message || 'Failed to load mentions.');
+      console.warn('[notifications] failed to load mentions', err);
     } finally {
       setMentionsLoading(false);
     }
@@ -2797,7 +2802,7 @@ export default function AppPage() {
       const rows = await getActivityNotifications(userId);
       setActivityNotifications(rows);
     } catch (err: any) {
-      setError(err.message || 'Failed to load notifications.');
+      console.warn('[notifications] failed to load feed notifications', err);
     } finally {
       setActivityNotificationsLoading(false);
     }
@@ -3091,6 +3096,9 @@ export default function AppPage() {
         coachId: selectedCoach,
       });
       await loadChallengesData(authUserId);
+      setChallengeTitle('7-day consistency');
+      setCommunityCreateMode(null);
+      setCommunityComposerOpen(false);
       showNotice('Challenge created.');
     } catch (err: any) {
       setError(err.message || 'Failed to create challenge.');
@@ -3350,6 +3358,7 @@ export default function AppPage() {
       setPostFiles([]);
       setPostVisibility('friends');
       setPostLocation(null);
+      setCommunityCreateMode(null);
       setCommunityComposerOpen(false);
       showNotice('Post published.');
       await loadFeed();
@@ -4235,15 +4244,10 @@ export default function AppPage() {
   );
 
   const renderTodayPage = () => {
-    const record = todayData?.record;
     const plan = todayData?.trainingPlan || null;
     const exercises = plan?.exercises || [];
     const completedExercises = exercises.filter((exercise) => exercise.completed_at).length;
     const planComplete = exercises.length > 0 && completedExercises === exercises.length;
-    const mealsLogged = record?.meals?.length || 0;
-    const trainingLogged = record?.training?.length || 0;
-    const calories = Number(record?.total_intake || 0);
-    const protein = (record?.meals || []).reduce((sum, meal) => sum + Number(meal.protein_g || 0), 0);
     const todayGoal = String(todayData?.profile?.goal || profile?.fitness_goal || 'Build consistency');
     const experienceLevel = String(todayData?.profile?.experience_level || '').trim();
     const primaryCoach = selectedCoach || todayData?.selectedCoach || 'zj';
@@ -4261,11 +4265,7 @@ export default function AppPage() {
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
               <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2">
                 <span className="material-symbols-outlined" style={{ fontSize: 16 }}>task_alt</span>
-                {trainingLogged} training
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2">
-                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>restaurant</span>
-                {mealsLogged} meals
+                {completedExercises}/{Math.max(exercises.length, 1)}
               </span>
             </div>
           </div>
@@ -4279,9 +4279,6 @@ export default function AppPage() {
                 <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
                   {plan?.title || (todayLoading ? 'Loading today plan...' : 'No plan yet')}
                 </h2>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                  {plan?.summary || 'Ask your coach for a simple plan based on your goal and experience level.'}
-                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -4322,27 +4319,14 @@ export default function AppPage() {
             ) : null}
           </section>
 
-          <section className="grid gap-0 border-b border-slate-200/70 py-5 md:grid-cols-3 md:divide-x md:divide-slate-200/70">
-            <div className="py-2 md:pr-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Food</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{mealsLogged}</p>
-              <p className="text-sm text-slate-500">meal{mealsLogged === 1 ? '' : 's'} logged today</p>
-              <p className="mt-2 text-xs text-slate-400">{Math.round(calories)} kcal · {Math.round(protein)}g protein</p>
-              <button className="mt-3 text-sm font-semibold text-slate-900 underline-offset-4 hover:underline" type="button" onClick={() => void openCoachWithPrompt('I want to log a meal. I will describe it or attach a photo next.')}>
-                Log meal in Message
-              </button>
-            </div>
-            <div className="py-2 md:px-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Progress</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{todayData?.progress?.statusLabel || 'Building baseline'}</p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">{todayData?.progress?.trendNarrative || 'Log training or meals and ZYM will start showing a trend.'}</p>
-            </div>
-            <div className="py-2 md:pl-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Community</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{challenges.length}</p>
-              <p className="text-sm text-slate-500">active challenge{challenges.length === 1 ? '' : 's'}</p>
-              <button className="mt-3 text-sm font-semibold text-slate-900 underline-offset-4 hover:underline" type="button" onClick={() => setTab('community')}>
-                Open Community
+          <section className="border-b border-slate-200/70 py-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Community</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{challenges.length}</p>
+              </div>
+              <button className="btn btn-ghost" type="button" onClick={() => setTab('community')}>
+                Open
               </button>
             </div>
           </section>
@@ -4351,7 +4335,6 @@ export default function AppPage() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Ask {primaryCoach.toUpperCase()}</p>
-                <p className="mt-2 text-sm text-slate-500">Use Message for adjustments, meal photos, form checks, and record edits.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {['What should I train today?', 'Log what I just did', 'I feel tired today'].map((prompt) => (
@@ -5269,33 +5252,21 @@ export default function AppPage() {
           <section className="min-h-0 overflow-y-auto pr-1">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
               <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Accountability</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Challenges</h2>
-                    <p className="mt-1 text-sm text-slate-500">Keep the social layer focused on execution, not noise.</p>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_150px_auto]">
-                    <input
-                      className="input-shell"
-                      value={challengeTitle}
-                      onChange={(event) => setChallengeTitle(event.target.value.slice(0, 120))}
-                      placeholder="Challenge title"
-                    />
-                    <select
-                      className="input-shell"
-                      value={challengeGoalType}
-                      onChange={(event) => setChallengeGoalType(event.target.value)}
-                    >
-                      <option value="plan_completion">Plan</option>
-                      <option value="workouts">Workouts</option>
-                      <option value="meals">Meals</option>
-                      <option value="steps">Steps</option>
-                    </select>
-                    <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading} onClick={() => void handleCreateChallenge()}>
-                      Create
-                    </button>
-                  </div>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => {
+                      setCommunityComposerOpen(true);
+                      setCommunityCreateMode('challenge');
+                    }}
+                  >
+                    Create
+                  </button>
                 </div>
 
                 <div className="mt-4 divide-y divide-slate-200/70">
@@ -5303,7 +5274,7 @@ export default function AppPage() {
                     <p className="py-4 text-sm text-slate-500">Loading challenges...</p>
                   ) : null}
                   {!challengesLoading && challenges.length === 0 ? (
-                    <p className="py-4 text-sm text-slate-500">No active challenges yet. Start with one simple consistency target.</p>
+                    <p className="py-4 text-sm text-slate-500">No active challenges yet.</p>
                   ) : null}
                   {challenges.map((challenge) => {
                     const completed = challenge.today_status === 'completed';
@@ -5357,18 +5328,18 @@ export default function AppPage() {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">{hasPostDraft ? 'Continue your draft' : 'Create something small'}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {hasPostDraft
-                          ? `${postText.trim() ? `${postText.trim().length} characters` : 'Draft ready'}${postFiles.length > 0 ? ` · ${postFiles.length} file(s)` : ''}`
-                          : 'Keep the feed open until you actually want to post.'}
-                      </p>
+                      <p className="text-sm font-semibold text-slate-900">{hasPostDraft ? 'Continue draft' : 'Create'}</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white shadow-[0_14px_30px_rgba(15,23,42,0.14)] transition hover:scale-[1.02]"
-                    onClick={() => setCommunityComposerOpen((prev) => !prev)}
+                    onClick={() => {
+                      setCommunityComposerOpen((prev) => {
+                        if (prev) setCommunityCreateMode(null);
+                        return !prev;
+                      });
+                    }}
                     aria-label={communityComposerOpen ? 'Collapse composer' : 'Open composer'}
                   >
                     <span
@@ -5382,6 +5353,62 @@ export default function AppPage() {
 
                 {communityComposerOpen ? (
                   <div className="mt-4 border-t border-slate-200/55 pt-4">
+                    {communityCreateMode === null ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          className="flex items-center justify-between rounded-[20px] bg-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-800 transition hover:bg-slate-200"
+                          onClick={() => setCommunityCreateMode('post')}
+                        >
+                          Post
+                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>article</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-between rounded-[20px] bg-slate-900 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-slate-800"
+                          onClick={() => setCommunityCreateMode('challenge')}
+                        >
+                          Challenge
+                          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>flag</span>
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {communityCreateMode === 'challenge' ? (
+                      <div className="grid gap-3">
+                        <input
+                          className="input-shell"
+                          value={challengeTitle}
+                          onChange={(event) => setChallengeTitle(event.target.value.slice(0, 120))}
+                          placeholder="Challenge title"
+                        />
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                          <select
+                            className="input-shell"
+                            value={challengeGoalType}
+                            onChange={(event) => setChallengeGoalType(event.target.value)}
+                          >
+                            <option value="plan_completion">Plan</option>
+                            <option value="workouts">Workouts</option>
+                            <option value="meals">Meals</option>
+                            <option value="steps">Steps</option>
+                          </select>
+                          <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading || !challengeTitle.trim()} onClick={() => void handleCreateChallenge()}>
+                            {challengesLoading ? 'Creating...' : 'Create challenge'}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="justify-self-start text-sm font-semibold text-slate-400 transition hover:text-slate-700"
+                          onClick={() => setCommunityCreateMode(null)}
+                        >
+                          Back
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {communityCreateMode === 'post' ? (
+                      <div>
                     <textarea
                       className="min-h-[88px] w-full resize-none rounded-[20px] bg-slate-50/80 px-4 py-3 text-[14px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 sm:text-base"
                       value={postText}
@@ -5420,7 +5447,7 @@ export default function AppPage() {
                         <span className="material-symbols-outlined" style={{ fontSize: 16 }}>near_me</span>
                         {postLocation ? 'Edit location' : 'Add location'}
                       </button>
-                      <span className="text-xs text-slate-500">{postFiles.length > 0 ? `${postFiles.length} file(s) selected` : 'No files selected'}</span>
+                      {postFiles.length > 0 ? <span className="text-xs text-slate-500">{postFiles.length} file(s) selected</span> : null}
                       {postFiles.length > 0 ? (
                         <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} type="button" onClick={() => setPostFiles([])}>
                           Clear
@@ -5484,13 +5511,13 @@ export default function AppPage() {
                         </span>
                       </label>
                       <div className="flex items-center gap-2">
-                        {postVisibility !== 'public' ? (
-                          <span className="text-xs text-slate-400">Hashtags stay on public posts.</span>
-                        ) : null}
                         <button
                           type="button"
                           className="btn btn-ghost"
-                          onClick={() => setCommunityComposerOpen(false)}
+                          onClick={() => {
+                            setCommunityCreateMode(null);
+                            setCommunityComposerOpen(false);
+                          }}
                         >
                           Collapse
                         </button>
@@ -5506,6 +5533,8 @@ export default function AppPage() {
                       wrapperClassName="media-grid-preview"
                       itemClassName="media-thumb"
                     />
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </section>
@@ -5920,7 +5949,7 @@ export default function AppPage() {
     <div className="flex h-full flex-col">
       {renderAppHeader(
         'Progress',
-        'Meals, training, health sync, and coach records in one place.',
+        '',
         undefined,
         undefined,
         undefined,

@@ -135,7 +135,6 @@ struct CreatePostView: View {
 
                         Button(action: {
                             guard visibility == "public" else {
-                                composerStatusText = "Hashtags stay on public posts only."
                                 return
                             }
                             if let first = hashtagSuggestions.first {
@@ -240,11 +239,6 @@ struct CreatePostView: View {
                             .foregroundColor(Color.zymPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-
-                    Text(visibility == "public" ? "This post will be visible to everyone." : "This post will be visible to friends only. Hashtags stay off private posts.")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.zymSubtext)
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer()
                 }

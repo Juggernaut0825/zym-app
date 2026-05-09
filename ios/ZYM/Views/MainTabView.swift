@@ -197,7 +197,6 @@ private struct TodayView: View {
                     VStack(alignment: .leading, spacing: 22) {
                         headerSection
                         trainingSection
-                        foodSection
                         coachShortcutsSection
                         communitySection
                     }
@@ -248,7 +247,7 @@ private struct TodayView: View {
 
             HStack(spacing: 8) {
                 TodayPill(text: experienceText, systemImage: "figure.strengthtraining.traditional")
-                TodayPill(text: "\(completedExercises)/\(max(totalExercises, 1)) done", systemImage: "checkmark.circle")
+                TodayPill(text: "\(completedExercises)/\(totalExercises) done", systemImage: "checkmark.circle")
             }
 
             if isLoading && today == nil {
@@ -272,11 +271,6 @@ private struct TodayView: View {
                         Text(plan.title)
                             .font(.system(size: 19, weight: .bold))
                             .foregroundColor(Color.zymText)
-                        if let summary = plan.summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(summary)
-                                .font(.system(size: 13))
-                                .foregroundColor(Color.zymSubtext)
-                        }
                     }
 
                     VStack(spacing: 0) {
@@ -297,9 +291,6 @@ private struct TodayView: View {
                     Text("No plan yet")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(Color.zymText)
-                    Text("Ask your coach what to train today. The plan will appear here after it is saved.")
-                        .font(.system(size: 13))
-                        .foregroundColor(Color.zymSubtext)
                     Button("Ask for today's plan", action: openCoach)
                         .buttonStyle(ZYMPrimaryButton())
                         .padding(.top, 2)
@@ -308,20 +299,10 @@ private struct TodayView: View {
         }
     }
 
-    private var foodSection: some View {
-        TodaySection(title: "Food", actionTitle: "Send meal", action: openCoach) {
-            HStack(spacing: 12) {
-                TodayMetricTile(title: "Calories", value: caloriesText, caption: "\(today?.record.meals.count ?? 0) meals")
-                TodayMetricTile(title: "Protein", value: proteinText, caption: "logged today")
-            }
-        }
-    }
-
     private var coachShortcutsSection: some View {
         TodaySection(title: "Ask coach") {
             VStack(spacing: 10) {
                 TodayShortcutButton(title: "What should I train today?", systemImage: "figure.run", action: openCoach)
-                TodayShortcutButton(title: "Check my last meal", systemImage: "camera.viewfinder", action: openCoach)
                 TodayShortcutButton(title: "Adjust my plan", systemImage: "slider.horizontal.3", action: openCoach)
             }
         }
@@ -330,7 +311,7 @@ private struct TodayView: View {
     private var communitySection: some View {
         TodaySection(title: "Community", actionTitle: "Open", action: openCommunity) {
             if challenges.isEmpty {
-                Text("No active challenges yet. Start one with a friend from Community when you are ready.")
+                Text("No active challenges yet.")
                     .font(.system(size: 13))
                     .foregroundColor(Color.zymSubtext)
                     .fixedSize(horizontal: false, vertical: true)
@@ -372,18 +353,6 @@ private struct TodayView: View {
         let raw = today?.profile.experience_level?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if raw.isEmpty { return "Experience not set" }
         return coachExperienceLevelOptions.first(where: { $0.value == raw })?.label ?? raw.capitalized
-    }
-
-    private var caloriesText: String {
-        guard let total = today?.record.total_intake else { return "0" }
-        return "\(Int(total.rounded()))"
-    }
-
-    private var proteinText: String {
-        let protein = today?.record.meals.reduce(0.0) { partial, meal in
-            partial + (meal.protein_g ?? 0)
-        } ?? 0
-        return "\(Int(protein.rounded()))g"
     }
 
     private func loadAll() {
@@ -607,30 +576,6 @@ private struct TodayExerciseRow: View {
             parts.append("\(rest)s rest")
         }
         return parts.joined(separator: " · ")
-    }
-}
-
-private struct TodayMetricTile: View {
-    let title: String
-    let value: String
-    let caption: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color.zymSubtext)
-            Text(value)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(Color.zymText)
-            Text(caption)
-                .font(.system(size: 12))
-                .foregroundColor(Color.zymSubtext)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color.zymSurfaceSoft.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

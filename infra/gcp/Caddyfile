@@ -10,6 +10,14 @@ app.zym8.com {
 api.zym8.com {
 	encode zstd gzip
 	reverse_proxy api:3001
+	handle_errors {
+		header Access-Control-Allow-Origin "https://app.zym8.com"
+		header Access-Control-Allow-Credentials "true"
+		header Access-Control-Allow-Headers "Content-Type,Authorization,Accept,Origin,X-Requested-With"
+		header Access-Control-Allow-Methods "GET,POST,PUT,DELETE,OPTIONS"
+		header Vary "Origin"
+		respond `{"error":"API unavailable"}` {err.status_code}
+	}
 }
 
 ws.zym8.com {

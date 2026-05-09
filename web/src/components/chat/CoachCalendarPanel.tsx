@@ -349,44 +349,43 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
     {
       label: 'Intake',
       value: formatNullableMetric(selectedDayRecord?.total_intake, ' kcal'),
-      icon: 'restaurant',
     },
     {
       label: 'Steps',
       value: typeof selectedHealth?.steps === 'number' ? `${selectedHealth.steps}` : '--',
-      icon: 'directions_walk',
     },
     {
       label: 'Weight',
       value: displayWeight(selectedOrLatestWeight, preferredWeightUnit),
-      icon: 'monitor_weight',
     },
     {
       label: 'Body fat',
       value: formatNullableMetric(selectedOrLatestBodyFat, '%'),
-      icon: 'percent',
     },
   ];
 
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-200/60 bg-white px-5 py-4 md:px-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Calendar</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Progress, meals, training, and health in one place</h2>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center justify-end gap-2">
             <input
-              className="input-shell w-[180px]"
+              className="input-shell h-11 w-[180px]"
               type="date"
               value={effectiveDay}
               onChange={(event) => setSelectedDay(event.target.value)}
             />
-            <button className="btn btn-ghost" type="button" onClick={() => void loadRecords()} disabled={loadingRecords || saving}>
-              {loadingRecords ? 'Refreshing...' : 'Refresh'}
+            <button
+              className="flex size-11 items-center justify-center rounded-[16px] border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-55"
+              type="button"
+              onClick={() => void loadRecords()}
+              disabled={loadingRecords || saving}
+              aria-label="Refresh progress"
+              title="Refresh"
+            >
+              <span className={`material-symbols-outlined ${loadingRecords ? 'animate-spin' : ''}`} style={{ fontSize: 19 }}>
+                sync
+              </span>
             </button>
-          </div>
         </div>
       </div>
 
@@ -401,10 +400,7 @@ export function CoachCalendarPanel(props: CoachCalendarPanelProps) {
           <div className="space-y-6">
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {stats.map((card) => (
-                <article key={card.label} className="flex items-center gap-4 rounded-[24px] bg-white/86 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
-                  <span className="material-symbols-outlined grid h-11 w-11 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700" style={{ fontSize: 22 }}>
-                    {card.icon}
-                  </span>
+                <article key={card.label} className="rounded-[24px] bg-white/86 p-4 shadow-[0_12px_28px_rgba(15,23,42,0.04)]">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{card.label}</p>
                     <p className="mt-1 truncate text-2xl font-semibold text-slate-900">{card.value}</p>
