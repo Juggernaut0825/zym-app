@@ -453,6 +453,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       owner_user_id INTEGER NOT NULL,
       group_id INTEGER,
       title TEXT NOT NULL,
+      description TEXT,
       goal_type TEXT NOT NULL,
       target_count INTEGER NOT NULL DEFAULT 1,
       start_date TEXT NOT NULL,
@@ -588,6 +589,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   const userColumns = sqlite.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
   const sessionColumns = sqlite.prepare('PRAGMA table_info(user_sessions)').all() as Array<{ name: string }>;
   const postColumns = sqlite.prepare('PRAGMA table_info(posts)').all() as Array<{ name: string }>;
+  const challengeColumns = sqlite.prepare('PRAGMA table_info(challenges)').all() as Array<{ name: string }>;
   if (!userColumns.some((column) => column.name === 'connect_code')) {
     sqlite.exec('ALTER TABLE users ADD COLUMN connect_code TEXT');
   }
@@ -662,6 +664,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   }
   if (!postColumns.some((column) => column.name === 'location_precision')) {
     sqlite.exec('ALTER TABLE posts ADD COLUMN location_precision TEXT');
+  }
+  if (!challengeColumns.some((column) => column.name === 'description')) {
+    sqlite.exec('ALTER TABLE challenges ADD COLUMN description TEXT');
   }
 
   sqlite.exec(`

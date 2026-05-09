@@ -227,22 +227,14 @@ private struct TodayView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.zymSubtext)
-                    Text(primaryGoalText)
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundColor(Color.zymText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                if hasCompletedPlan {
-                    TodayTrophyMark()
-                        .frame(width: 54, height: 54)
-                        .transition(.scale.combined(with: .opacity))
-                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color.zymSubtext)
+                Text(primaryGoalText)
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundColor(Color.zymText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
@@ -264,13 +256,20 @@ private struct TodayView: View {
     }
 
     private var trainingSection: some View {
-        TodaySection(title: "Training", actionTitle: "Message coach", action: openCoach) {
+        TodayCardSection(title: "Training", actionTitle: "Message coach", action: openCoach) {
             if let plan = today?.trainingPlan {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 12) {
                         Text(plan.title)
-                            .font(.system(size: 19, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundColor(Color.zymText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        if hasCompletedPlan {
+                            TodayCompletionMark()
+                                .frame(width: 86, height: 58)
+                                .transition(.scale.combined(with: .opacity))
+                        }
                     }
 
                     VStack(spacing: 0) {
@@ -287,13 +286,18 @@ private struct TodayView: View {
                     }
                 }
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No plan yet")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(Color.zymText)
-                    Button("Ask for today's plan", action: openCoach)
-                        .buttonStyle(ZYMPrimaryButton())
-                        .padding(.top, 2)
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("No plan yet")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Color.zymText)
+                        Button("Ask for today's plan", action: openCoach)
+                            .buttonStyle(ZYMPrimaryButton())
+                            .padding(.top, 2)
+                    }
+                    Spacer()
+                    TodayPlanEmptyGraphic()
+                        .frame(width: 108, height: 92)
                 }
             }
         }
@@ -499,6 +503,52 @@ private struct TodaySection<Content: View>: View {
     }
 }
 
+private struct TodayCardSection<Content: View>: View {
+    let title: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+    let content: Content
+
+    init(
+        title: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.actionTitle = actionTitle
+        self.action = action
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                Spacer()
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(Color.zymPrimaryDark)
+                }
+            }
+
+            content
+        }
+        .padding(18)
+        .background(Color.zymSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.zymLine.opacity(0.75), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.035), radius: 18, x: 0, y: 10)
+    }
+}
+
 private struct TodayPill: View {
     let text: String
     let systemImage: String
@@ -552,7 +602,7 @@ private struct TodayExerciseRow: View {
                 Text(exercise.name)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(Color.zymText)
-                Text(exerciseDetailText)
+                Text(exerciseSubtitleText)
                     .font(.system(size: 12))
                     .foregroundColor(Color.zymSubtext)
                 if let cue = exercise.cue, !cue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -563,19 +613,30 @@ private struct TodayExerciseRow: View {
                 }
             }
             Spacer()
+            Text(exerciseDoseText)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.zymPrimaryDark)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.zymSurfaceSoft.opacity(0.78))
+                .clipShape(Capsule())
         }
         .padding(.vertical, 10)
     }
 
-    private var exerciseDetailText: String {
-        var parts = ["\(exercise.sets) sets", exercise.reps]
+    private var exerciseSubtitleText: String {
+        var parts: [String] = []
         if let weight = exercise.target_weight_kg, weight > 0 {
             parts.append("\(Int(weight.rounded())) kg")
         }
         if let rest = exercise.rest_seconds, rest > 0 {
             parts.append("\(rest)s rest")
         }
-        return parts.joined(separator: " · ")
+        return parts.isEmpty ? "Ready" : parts.joined(separator: " · ")
+    }
+
+    private var exerciseDoseText: String {
+        "\(exercise.sets) x \(exercise.reps)"
     }
 }
 
@@ -605,43 +666,87 @@ private struct TodayShortcutButton: View {
     }
 }
 
-private struct TodayTrophyMark: View {
+private struct TodayCompletionMark: View {
     var body: some View {
         Canvas { context, size in
             let w = size.width
             let h = size.height
-            let cupRect = CGRect(x: w * 0.28, y: h * 0.15, width: w * 0.44, height: h * 0.42)
-            var cup = Path(roundedRect: cupRect, cornerRadius: w * 0.08)
-            cup.addPath(Path(CGRect(x: w * 0.42, y: h * 0.55, width: w * 0.16, height: h * 0.18)))
-            cup.addPath(Path(roundedRect: CGRect(x: w * 0.28, y: h * 0.72, width: w * 0.44, height: h * 0.1), cornerRadius: w * 0.04))
-            context.fill(cup, with: .color(Color.zymSecondary))
+            let glow = Path(ellipseIn: CGRect(x: w * 0.12, y: h * 0.02, width: w * 0.76, height: h * 0.82))
+            context.fill(glow, with: .color(Color.zymCoachBlue.opacity(0.08)))
+
+            var base = Path()
+            base.move(to: CGPoint(x: w * 0.26, y: h * 0.86))
+            base.addLine(to: CGPoint(x: w * 0.74, y: h * 0.86))
+            context.stroke(base, with: .color(Color.zymSubtext.opacity(0.28)), lineWidth: 4)
+
+            let cupRect = CGRect(x: w * 0.36, y: h * 0.18, width: w * 0.28, height: h * 0.38)
+            context.fill(Path(roundedRect: cupRect, cornerRadius: w * 0.04), with: .color(Color.zymSurfaceSoft))
+            context.stroke(Path(roundedRect: cupRect, cornerRadius: w * 0.04), with: .color(Color.zymPrimaryDark), lineWidth: 3)
 
             var leftHandle = Path()
-            leftHandle.move(to: CGPoint(x: w * 0.28, y: h * 0.25))
+            leftHandle.move(to: CGPoint(x: w * 0.36, y: h * 0.28))
             leftHandle.addCurve(
-                to: CGPoint(x: w * 0.28, y: h * 0.48),
-                control1: CGPoint(x: w * 0.08, y: h * 0.22),
-                control2: CGPoint(x: w * 0.08, y: h * 0.48)
+                to: CGPoint(x: w * 0.36, y: h * 0.48),
+                control1: CGPoint(x: w * 0.2, y: h * 0.25),
+                control2: CGPoint(x: w * 0.2, y: h * 0.49)
             )
-            context.stroke(leftHandle, with: .color(Color.zymSecondaryDark), lineWidth: w * 0.07)
+            context.stroke(leftHandle, with: .color(Color.zymPrimaryDark), lineWidth: 3)
 
             var rightHandle = Path()
-            rightHandle.move(to: CGPoint(x: w * 0.72, y: h * 0.25))
+            rightHandle.move(to: CGPoint(x: w * 0.64, y: h * 0.28))
             rightHandle.addCurve(
-                to: CGPoint(x: w * 0.72, y: h * 0.48),
-                control1: CGPoint(x: w * 0.92, y: h * 0.22),
-                control2: CGPoint(x: w * 0.92, y: h * 0.48)
+                to: CGPoint(x: w * 0.64, y: h * 0.48),
+                control1: CGPoint(x: w * 0.8, y: h * 0.25),
+                control2: CGPoint(x: w * 0.8, y: h * 0.49)
             )
-            context.stroke(rightHandle, with: .color(Color.zymSecondaryDark), lineWidth: w * 0.07)
+            context.stroke(rightHandle, with: .color(Color.zymPrimaryDark), lineWidth: 3)
 
-            var shine = Path()
-            shine.move(to: CGPoint(x: w * 0.39, y: h * 0.25))
-            shine.addLine(to: CGPoint(x: w * 0.53, y: h * 0.25))
-            context.stroke(shine, with: .color(Color.white.opacity(0.75)), lineWidth: w * 0.05)
+            var stem = Path()
+            stem.move(to: CGPoint(x: w * 0.5, y: h * 0.57))
+            stem.addLine(to: CGPoint(x: w * 0.5, y: h * 0.74))
+            stem.move(to: CGPoint(x: w * 0.39, y: h * 0.75))
+            stem.addLine(to: CGPoint(x: w * 0.61, y: h * 0.75))
+            context.stroke(stem, with: .color(Color.zymPrimaryDark), lineWidth: 3)
+
+            var spark = Path()
+            spark.move(to: CGPoint(x: w * 0.76, y: h * 0.15))
+            spark.addLine(to: CGPoint(x: w * 0.76, y: h * 0.28))
+            spark.move(to: CGPoint(x: w * 0.7, y: h * 0.215))
+            spark.addLine(to: CGPoint(x: w * 0.82, y: h * 0.215))
+            context.stroke(spark, with: .color(Color.zymCoachBlue), lineWidth: 2.4)
         }
-        .padding(5)
-        .background(Color.zymSurfaceSoft.opacity(0.86))
-        .clipShape(Circle())
+    }
+}
+
+private struct TodayPlanEmptyGraphic: View {
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width
+            let h = size.height
+            let glow = Path(ellipseIn: CGRect(x: w * 0.1, y: h * 0.08, width: w * 0.82, height: h * 0.78))
+            context.fill(glow, with: .color(Color.zymCoachBlue.opacity(0.07)))
+
+            let board = CGRect(x: w * 0.34, y: h * 0.2, width: w * 0.42, height: h * 0.56)
+            context.fill(Path(roundedRect: board, cornerRadius: 9), with: .color(Color.zymSurface))
+            context.stroke(Path(roundedRect: board, cornerRadius: 9), with: .color(Color.zymLine), lineWidth: 1.4)
+
+            let clip = CGRect(x: w * 0.45, y: h * 0.13, width: w * 0.2, height: h * 0.12)
+            context.fill(Path(roundedRect: clip, cornerRadius: 5), with: .color(Color.zymPrimary))
+
+            for index in 0..<3 {
+                let y = h * (0.34 + Double(index) * 0.13)
+                context.fill(Path(ellipseIn: CGRect(x: w * 0.4, y: y, width: w * 0.06, height: w * 0.06)), with: .color(Color.zymSurfaceSoft))
+                var line = Path()
+                line.move(to: CGPoint(x: w * 0.5, y: y + w * 0.03))
+                line.addLine(to: CGPoint(x: w * 0.68, y: y + w * 0.03))
+                context.stroke(line, with: .color(Color.zymSubtext.opacity(0.28)), lineWidth: 3)
+            }
+
+            let weight = CGRect(x: w * 0.16, y: h * 0.6, width: w * 0.24, height: h * 0.18)
+            context.fill(Path(roundedRect: weight, cornerRadius: 10), with: .color(Color.zymPrimaryDark.opacity(0.9)))
+            context.fill(Path(ellipseIn: CGRect(x: w * 0.1, y: h * 0.72, width: w * 0.16, height: w * 0.16)), with: .color(Color.zymPrimary.opacity(0.85)))
+            context.fill(Path(ellipseIn: CGRect(x: w * 0.27, y: h * 0.72, width: w * 0.16, height: w * 0.16)), with: .color(Color.zymPrimary.opacity(0.85)))
+        }
     }
 }
 

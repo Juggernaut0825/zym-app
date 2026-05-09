@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS challenges (
   owner_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   group_id BIGINT REFERENCES groups(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
+  description TEXT,
   goal_type TEXT NOT NULL,
   target_count INTEGER NOT NULL DEFAULT 1,
   start_date DATE NOT NULL,
@@ -259,6 +260,8 @@ CREATE TABLE IF NOT EXISTS challenges (
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE challenges ADD COLUMN IF NOT EXISTS description TEXT;
 
 CREATE TABLE IF NOT EXISTS challenge_members (
   challenge_id BIGINT NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,

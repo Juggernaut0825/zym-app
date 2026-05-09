@@ -26,8 +26,9 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, Math.floor(numeric)));
 }
 
-const ACCESS_TOKEN_TTL_SECONDS = clampNumber(process.env.ACCESS_TOKEN_TTL_SECONDS, 300, 24 * 60 * 60, 12 * 60 * 60);
-const SESSION_TTL_SECONDS = clampNumber(process.env.SESSION_TTL_SECONDS, 24 * 60 * 60, 365 * 24 * 60 * 60, 90 * 24 * 60 * 60);
+const WEEKLY_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const ACCESS_TOKEN_TTL_SECONDS = clampNumber(process.env.ACCESS_TOKEN_TTL_SECONDS, 300, WEEKLY_SESSION_TTL_SECONDS, WEEKLY_SESSION_TTL_SECONDS);
+const SESSION_TTL_SECONDS = clampNumber(process.env.SESSION_TTL_SECONDS, 24 * 60 * 60, 365 * 24 * 60 * 60, WEEKLY_SESSION_TTL_SECONDS);
 const MAX_ACTIVE_SESSIONS_PER_USER = clampNumber(process.env.MAX_ACTIVE_SESSIONS_PER_USER, 1, 24, 8);
 const SESSION_CLEANUP_INTERVAL_SECONDS = clampNumber(process.env.SESSION_CLEANUP_INTERVAL_SECONDS, 60, 24 * 60 * 60, 15 * 60);
 const REVOKED_SESSION_RETENTION_DAYS = clampNumber(process.env.REVOKED_SESSION_RETENTION_DAYS, 1, 365, 30);

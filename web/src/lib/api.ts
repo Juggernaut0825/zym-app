@@ -114,7 +114,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+export async function refreshAccessToken(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   if (refreshInFlight) return refreshInFlight;
 
@@ -850,6 +850,7 @@ export async function getChallenges(userId: number): Promise<ChallengesResponse>
 export async function createChallenge(payload: {
   userId: number;
   title: string;
+  description?: string;
   goalType?: string;
   targetCount?: number;
   startDate?: string;

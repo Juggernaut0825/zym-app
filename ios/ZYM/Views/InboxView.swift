@@ -154,7 +154,13 @@ struct InboxView: View {
             case .authSuccess:
                 loadInbox()
             case .authFailed:
-                appState.logout()
+                appState.refreshAccessToken { success in
+                    if success {
+                        connectRealtime()
+                    } else {
+                        appState.logout()
+                    }
+                }
             case .inboxUpdated, .friendsUpdated:
                 loadInbox()
             default:

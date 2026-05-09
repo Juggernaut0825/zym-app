@@ -1151,6 +1151,7 @@ export default function AppPage() {
   const [challengesLoading, setChallengesLoading] = useState(false);
   const [challengePendingId, setChallengePendingId] = useState<number | null>(null);
   const [challengeTitle, setChallengeTitle] = useState('7-day consistency');
+  const [challengeDescription, setChallengeDescription] = useState('');
   const [challengeGoalType, setChallengeGoalType] = useState('plan_completion');
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -1285,7 +1286,27 @@ export default function AppPage() {
     [activityNotifications],
   );
 
-  const unreadCommunityNotificationCount = unreadMentionCount + unreadActivityNotificationCount;
+  const communityActivityNotifications = useMemo(
+    () => activityNotifications.filter((item) => item.source_type === 'post_comment' || item.source_type === 'post_reaction'),
+    [activityNotifications],
+  );
+
+  const communityMentionNotifications = useMemo(
+    () => mentionNotifications.filter((item) => item.source_type === 'post_comment'),
+    [mentionNotifications],
+  );
+
+  const unreadCommunityActivityNotificationCount = useMemo(
+    () => communityActivityNotifications.filter((item) => !item.is_read).length,
+    [communityActivityNotifications],
+  );
+
+  const unreadCommunityMentionCount = useMemo(
+    () => communityMentionNotifications.filter((item) => !item.is_read).length,
+    [communityMentionNotifications],
+  );
+
+  const unreadCommunityNotificationCount = unreadCommunityMentionCount + unreadCommunityActivityNotificationCount;
   const selectedMessageBubbleTheme = useMemo(
     () => resolveMessageBubbleTheme(messageBubbleThemeId),
     [messageBubbleThemeId],
@@ -1293,7 +1314,7 @@ export default function AppPage() {
 
   const prioritizedCommunityNotifications = useMemo<CommunityNotificationEntry[]>(
     () => [
-      ...activityNotifications.map((item) => ({
+      ...communityActivityNotifications.map((item) => ({
         key: `activity:${item.id}`,
         kind: 'activity' as const,
         title: activityNotificationTitle(item),
@@ -1307,7 +1328,7 @@ export default function AppPage() {
         created_at: item.created_at,
         activity: item,
       })),
-      ...mentionNotifications.map((item) => ({
+      ...communityMentionNotifications.map((item) => ({
         key: `mention:${item.id}`,
         kind: 'mention' as const,
         title: mentionNotificationTitle(item),
@@ -1323,7 +1344,7 @@ export default function AppPage() {
       }
       return Date.parse(right.created_at || '') - Date.parse(left.created_at || '');
     }),
-    [activityNotifications, mentionNotifications],
+    [communityActivityNotifications, communityMentionNotifications],
   );
 
   const trendingHashtags = useMemo(() => {
@@ -3085,6 +3106,7 @@ export default function AppPage() {
       await createChallenge({
         userId: authUserId,
         title: challengeTitle.trim(),
+        description: challengeDescription.trim() || undefined,
         goalType: challengeGoalType,
         targetCount: 1,
         startDate: start,
@@ -3097,6 +3119,7 @@ export default function AppPage() {
       });
       await loadChallengesData(authUserId);
       setChallengeTitle('7-day consistency');
+      setChallengeDescription('');
       setCommunityCreateMode(null);
       setCommunityComposerOpen(false);
       showNotice('Challenge created.');
@@ -3665,15 +3688,21 @@ export default function AppPage() {
   async function handleMarkAllCommunityNotificationsRead() {
     try {
       const tasks: Promise<void>[] = [];
-      if (unreadActivityNotificationCount > 0) {
-        tasks.push(markActivityNotificationsRead({ userId: authUserId }));
+      const unreadActivityIds = communityActivityNotifications.filter((item) => !item.is_read).map((item) => item.id);
+      const unreadMentionIds = communityMentionNotifications.filter((item) => !item.is_read).map((item) => item.id);
+      if (unreadActivityIds.length > 0) {
+        tasks.push(markActivityNotificationsRead({ userId: authUserId, ids: unreadActivityIds }));
       }
-      if (unreadMentionCount > 0) {
-        tasks.push(markMentionNotificationsRead({ userId: authUserId }));
+      if (unreadMentionIds.length > 0) {
+        tasks.push(markMentionNotificationsRead({ userId: authUserId, ids: unreadMentionIds }));
       }
       await Promise.all(tasks);
-      setActivityNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
-      setMentionNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })));
+      setActivityNotifications((prev) => prev.map((item) => (
+        unreadActivityIds.includes(item.id) ? { ...item, is_read: true } : item
+      )));
+      setMentionNotifications((prev) => prev.map((item) => (
+        unreadMentionIds.includes(item.id) ? { ...item, is_read: true } : item
+      )));
     } catch (err: any) {
       setError(err.message || 'Failed to mark notifications as read.');
     }
@@ -4235,12 +4264,18 @@ export default function AppPage() {
     </header>
   );
 
-  const renderMiniTrophy = () => (
-    <svg className="today-trophy" viewBox="0 0 64 64" aria-hidden="true">
-      <path d="M22 12h20v9c0 8-4.3 14-10 14S22 29 22 21v-9Z" fill="none" stroke="currentColor" strokeWidth="4" strokeLinejoin="round" />
-      <path d="M22 17h-8v4c0 6 4 10 10 10M42 17h8v4c0 6-4 10-10 10" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M32 35v9M23 52h18M27 44h10l3 8H24l3-8Z" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+  const renderCompletionGraphic = () => (
+    <div className="today-complete-graphic" aria-label="Plan complete">
+      <svg viewBox="0 0 180 120" aria-hidden="true">
+        <path className="today-complete-glow" d="M32 82c10-38 42-58 78-52 26 4 45 21 50 48 3 17-7 28-25 28H54c-17 0-27-9-22-24Z" />
+        <path className="today-complete-shadow" d="M46 100h88" />
+        <path className="today-complete-cup" d="M70 34h40v19c0 17-8 28-20 28S70 70 70 53V34Z" />
+        <path className="today-complete-handle" d="M70 42H55v9c0 12 8 20 21 20M110 42h15v9c0 12-8 20-21 20" />
+        <path className="today-complete-stem" d="M90 81v13M72 98h36M79 94h22" />
+        <path className="today-complete-spark" d="M128 24v12M122 30h12M52 31v10M47 36h10" />
+      </svg>
+      <span>Done</span>
+    </div>
   );
 
   const renderTodayPage = () => {
@@ -4271,8 +4306,8 @@ export default function AppPage() {
           </div>
         </header>
 
-        <div className="flex flex-1 flex-col gap-0 px-4 py-2 sm:px-5 md:px-8">
-          <section className="border-b border-slate-200/70 py-5">
+        <div className="flex flex-1 flex-col gap-3 px-4 py-3 sm:px-5 md:px-8">
+          <section className="rounded-[28px] border border-slate-200/70 bg-white/76 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.045)] sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Training</p>
@@ -4280,7 +4315,7 @@ export default function AppPage() {
                   {plan?.title || (todayLoading ? 'Loading today plan...' : 'No plan yet')}
                 </h2>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-start gap-2">
                 <button
                   className={selectedCoachButtonClass}
                   type="button"
@@ -4288,7 +4323,7 @@ export default function AppPage() {
                 >
                   {plan ? 'Modify plan' : 'Ask coach'}
                 </button>
-                {planComplete ? <span className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white">{renderMiniTrophy()} Done</span> : null}
+                {planComplete ? renderCompletionGraphic() : null}
               </div>
             </div>
 
@@ -5170,7 +5205,7 @@ export default function AppPage() {
                       <p className="text-sm text-slate-500">Loading notifications...</p>
                     ) : null}
                     {!activityNotificationsLoading && !mentionsLoading && prioritizedCommunityNotifications.length === 0 ? (
-                      <p className="text-sm leading-6 text-slate-500">No notifications yet. Mentions, messages, likes, and comments will land here.</p>
+                      <p className="text-sm leading-6 text-slate-500">No post likes or comments yet.</p>
                     ) : null}
                     {prioritizedCommunityNotifications.slice(0, 10).map((notification) => (
                       <button
@@ -5282,6 +5317,9 @@ export default function AppPage() {
                       <div key={challenge.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-900">{challenge.title}</p>
+                          {challenge.description ? (
+                            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{challenge.description}</p>
+                          ) : null}
                           <p className="mt-1 text-xs text-slate-500">
                             {challenge.goal_type.replace(/_/g, ' ')} · {challenge.member_count} member{challenge.member_count === 1 ? '' : 's'} · {challenge.start_date} to {challenge.end_date}
                           </p>
@@ -5328,7 +5366,9 @@ export default function AppPage() {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">{hasPostDraft ? 'Continue draft' : 'Create'}</p>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {communityCreateMode === 'challenge' ? 'Challenge' : communityCreateMode === 'post' ? 'Post' : hasPostDraft ? 'Continue draft' : 'Create'}
+                      </p>
                     </div>
                   </div>
                   <button
@@ -5375,24 +5415,39 @@ export default function AppPage() {
                     ) : null}
 
                     {communityCreateMode === 'challenge' ? (
-                      <div className="grid gap-3">
-                        <input
-                          className="input-shell"
-                          value={challengeTitle}
-                          onChange={(event) => setChallengeTitle(event.target.value.slice(0, 120))}
-                          placeholder="Challenge title"
-                        />
-                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                          <select
+                      <div className="grid gap-4">
+                        <label className="grid gap-1.5">
+                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Title</span>
+                          <input
                             className="input-shell"
-                            value={challengeGoalType}
-                            onChange={(event) => setChallengeGoalType(event.target.value)}
-                          >
-                            <option value="plan_completion">Plan</option>
-                            <option value="workouts">Workouts</option>
-                            <option value="meals">Meals</option>
-                            <option value="steps">Steps</option>
-                          </select>
+                            value={challengeTitle}
+                            onChange={(event) => setChallengeTitle(event.target.value.slice(0, 120))}
+                            placeholder="7-day consistency"
+                          />
+                        </label>
+                        <label className="grid gap-1.5">
+                          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Description</span>
+                          <textarea
+                            className="input-shell min-h-[96px] resize-none"
+                            value={challengeDescription}
+                            onChange={(event) => setChallengeDescription(event.target.value.slice(0, 280))}
+                            placeholder="What does finishing this challenge mean?"
+                          />
+                        </label>
+                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                          <label className="grid gap-1.5">
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Type</span>
+                            <select
+                              className="input-shell"
+                              value={challengeGoalType}
+                              onChange={(event) => setChallengeGoalType(event.target.value)}
+                            >
+                              <option value="plan_completion">Plan completion</option>
+                              <option value="workouts">Workouts</option>
+                              <option value="meals">Meals</option>
+                              <option value="steps">Steps</option>
+                            </select>
+                          </label>
                           <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading || !challengeTitle.trim()} onClick={() => void handleCreateChallenge()}>
                             {challengesLoading ? 'Creating...' : 'Create challenge'}
                           </button>

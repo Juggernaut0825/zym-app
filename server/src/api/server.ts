@@ -3273,6 +3273,7 @@ app.post('/challenges',
   APIGateway.validateSchema({
     userId: { required: true, type: 'number', integer: true, min: 1 },
     title: { required: true, type: 'string', minLength: 2, maxLength: 120 },
+    description: { type: 'string', maxLength: 280 },
     goalType: { type: 'string', maxLength: 40 },
     targetCount: { type: 'number', integer: true, min: 1, max: 30 },
     startDate: { type: 'string', pattern: COACH_DAY_PATTERN },
@@ -3284,6 +3285,7 @@ app.post('/challenges',
     try {
       const userId = toUserId(req.body.userId);
       const title = sanitizePlainText(req.body.title, 120);
+      const description = sanitizePlainText(req.body.description, 280) || null;
       const goalTypeRaw = sanitizePlainText(req.body.goalType || 'plan_completion', 40).toLowerCase();
       const allowedGoalTypes = new Set(['workouts', 'meals', 'steps', 'plan_completion']);
       const goalType = allowedGoalTypes.has(goalTypeRaw) ? goalTypeRaw : 'plan_completion';
@@ -3296,9 +3298,9 @@ app.post('/challenges',
       const coachId = normalizeCoachId(req.body.coachId) || resolveSelectedCoachForUser(userId) || 'zj';
 
       const result = getDB().prepare(`
-        INSERT INTO challenges (owner_user_id, group_id, title, goal_type, target_count, start_date, end_date, coach_id, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-      `).run(userId, groupId, title, goalType, targetCount, startDate, endDate, coachId);
+        INSERT INTO challenges (owner_user_id, group_id, title, description, goal_type, target_count, start_date, end_date, coach_id, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `).run(userId, groupId, title, description, goalType, targetCount, startDate, endDate, coachId);
       const challengeId = Number(result.lastInsertRowid || 0);
       getDB().prepare(`
         INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
@@ -3338,6 +3340,7 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) 
         owner_user_id: Number(row.owner_user_id),
         group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
         title: sanitizePlainText(row.title, 120),
+        description: sanitizePlainText(row.description, 280) || null,
         goal_type: sanitizePlainText(row.goal_type, 40),
         target_count: Number(row.target_count || 1),
         start_date: sanitizePlainText(row.start_date, 20),

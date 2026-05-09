@@ -22,9 +22,42 @@ private func feedVisibilityLabel(_ visibility: String?) -> String {
     }
 }
 
+private enum CommunityComposerDestination: Identifiable {
+    case post
+    case challenge
+
+    var id: String {
+        switch self {
+        case .post: return "post"
+        case .challenge: return "challenge"
+        }
+    }
+}
+
+private struct CommunityComposerChoice: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundColor(Color.zymText)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(Color.white.opacity(0.96))
+        .clipShape(Capsule())
+        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+    }
+}
+
 struct FeedView: View {
     @State private var posts: [Post] = []
-    @State private var showCreatePost = false
+    @State private var composerDestination: CommunityComposerDestination?
+    @State private var composerMenuOpen = false
     @State private var selectedPost: Post?
     @State private var reactingIds = Set<Int>()
     @State private var activityNotifications: [FeedActivityNotification] = []
@@ -59,13 +92,21 @@ struct FeedView: View {
             .map { $0 }
     }
 
+    private var postActivityNotifications: [FeedActivityNotification] {
+        activityNotifications.filter { $0.source_type == "post_comment" || $0.source_type == "post_reaction" }
+    }
+
+    private var postMentionNotifications: [MentionNotificationPayload] {
+        mentionNotifications.filter { $0.source_type == "post_comment" }
+    }
+
     private var unreadNotificationCount: Int {
-        activityNotifications.filter { !$0.is_read }.count + mentionNotifications.filter { !$0.is_read }.count
+        postActivityNotifications.filter { !$0.is_read }.count + postMentionNotifications.filter { !$0.is_read }.count
     }
 
     private var prioritizedNotifications: [FeedUnifiedNotification] {
-        let merged = activityNotifications.map { FeedUnifiedNotification(activity: $0) }
-            + mentionNotifications.map { FeedUnifiedNotification(mention: $0) }
+        let merged = postActivityNotifications.map { FeedUnifiedNotification(activity: $0) }
+            + postMentionNotifications.map { FeedUnifiedNotification(mention: $0) }
 
         return merged.sorted { lhs, rhs in
             if lhs.is_read != rhs.is_read {
@@ -168,7 +209,29 @@ struct FeedView: View {
                                     }
                                 }
 
-                                Button(action: { showCreatePost = true }) {
+                                if composerMenuOpen {
+                                    VStack(alignment: .trailing, spacing: 8) {
+                                        Button(action: {
+                                            composerDestination = .post
+                                            composerMenuOpen = false
+                                        }) {
+                                            CommunityComposerChoice(title: "Post", systemImage: "square.and.pencil")
+                                        }
+                                        Button(action: {
+                                            composerDestination = .challenge
+                                            composerMenuOpen = false
+                                        }) {
+                                            CommunityComposerChoice(title: "Challenge", systemImage: "flag")
+                                        }
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                                }
+
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                        composerMenuOpen.toggle()
+                                    }
+                                }) {
                                     Image(systemName: "plus")
                                         .font(.system(size: 18, weight: .bold))
                                         .foregroundColor(.white)
@@ -178,7 +241,7 @@ struct FeedView: View {
                                         )
                                         .clipShape(Circle())
                                         .shadow(color: Color.black.opacity(0.18), radius: 10, x: 0, y: 5)
-                                        .scaleEffect(showCreatePost ? 0.95 : 1)
+                                        .rotationEffect(.degrees(composerMenuOpen ? 45 : 0))
                                 }
                             }
                         }
@@ -202,8 +265,22 @@ struct FeedView: View {
                 }
                 wsManager.connect(token: token)
             }
-            .sheet(isPresented: $showCreatePost) {
-                CreatePostView(onPost: loadFeed)
+            .sheet(item: $composerDestination) { destination in
+                switch destination {
+                case .post:
+                    CreatePostView(onPost: loadFeed)
+                case .challenge:
+                    CreateChallengeView {
+                        composerDestination = nil
+                        notificationHint = "Challenge created."
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                notificationHint = ""
+                            }
+                        }
+                    }
+                    .environmentObject(appState)
+                }
             }
             .sheet(item: $selectedPost) { post in
                 FeedPostDetailSheet(
@@ -536,7 +613,13 @@ struct FeedView: View {
             case .authSuccess:
                 loadNotifications()
             case .authFailed:
-                appState.logout()
+                appState.refreshAccessToken { success in
+                    if success {
+                        connectRealtime()
+                    } else {
+                        appState.logout()
+                    }
+                }
             case .inboxUpdated:
                 loadNotifications()
             default:
@@ -598,24 +681,31 @@ struct FeedView: View {
     }
 
     func markAllNotificationsRead() {
-        if !activityNotifications.isEmpty {
-            markNotificationsRead {
+        let activityIds = postActivityNotifications.filter { !$0.is_read }.map { $0.id }
+        let mentionIds = postMentionNotifications.filter { !$0.is_read }.map { $0.id }
+
+        if !activityIds.isEmpty {
+            markNotificationsRead(ids: activityIds) {
                 withAnimation(.zymSoft) {
                     activityNotifications = activityNotifications.map { notification in
                         var updated = notification
-                        updated.is_read = true
+                        if activityIds.contains(notification.id) {
+                            updated.is_read = true
+                        }
                         return updated
                     }
                 }
             }
         }
 
-        if !mentionNotifications.isEmpty {
-            markMentionNotificationsRead {
+        if !mentionIds.isEmpty {
+            markMentionNotificationsRead(ids: mentionIds) {
                 withAnimation(.zymSoft) {
                     mentionNotifications = mentionNotifications.map { notification in
                         var updated = notification
-                        updated.is_read = true
+                        if mentionIds.contains(notification.id) {
+                            updated.is_read = true
+                        }
                         return updated
                     }
                 }
@@ -725,6 +815,133 @@ struct FeedView: View {
                 selectedPost = posts[index]
             }
         }
+    }
+}
+
+struct CreateChallengeView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
+    @State private var title = "7-day consistency"
+    @State private var descriptionText = ""
+    @State private var goalType = "plan_completion"
+    @State private var isCreating = false
+    @State private var errorText = ""
+    let onCreated: () -> Void
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                ZYMBackgroundLayer().ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        challengeField(label: "Title") {
+                            TextField("7-day consistency", text: $title)
+                                .foregroundColor(Color.zymText)
+                                .zymFieldStyle()
+                        }
+
+                        challengeField(label: "Description") {
+                            TextField("What does finishing this challenge mean?", text: $descriptionText, axis: .vertical)
+                                .foregroundColor(Color.zymText)
+                                .lineLimit(4...7)
+                                .zymFieldStyle()
+                        }
+
+                        challengeField(label: "Type") {
+                            Picker("Type", selection: $goalType) {
+                                Text("Plan completion").tag("plan_completion")
+                                Text("Workouts").tag("workouts")
+                                Text("Meals").tag("meals")
+                                Text("Steps").tag("steps")
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(Color.zymSurfaceSoft.opacity(0.76))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+
+                        if !errorText.isEmpty {
+                            Text(errorText)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.red)
+                        }
+
+                        Button(isCreating ? "Creating..." : "Create challenge", action: createChallenge)
+                            .buttonStyle(ZYMPrimaryButton())
+                            .disabled(isCreating || title.trimmingCharacters(in: .whitespacesAndNewlines).count < 2)
+                            .padding(.top, 4)
+                    }
+                    .padding(18)
+                }
+            }
+            .navigationTitle("Challenge")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(Color.zymSubtext)
+                }
+            }
+        }
+    }
+
+    private func challengeField<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label)
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.2)
+                .foregroundColor(Color.zymSubtext)
+            content()
+        }
+    }
+
+    private func createChallenge() {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges") else { return }
+        if isCreating { return }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedTitle.count >= 2 else { return }
+
+        isCreating = true
+        errorText = ""
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let start = formatter.string(from: Date())
+        var components = DateComponents()
+        components.day = 6
+        let end = Calendar(identifier: .gregorian).date(byAdding: components, to: Date()) ?? Date()
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "title": trimmedTitle,
+            "description": descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
+            "goalType": goalType,
+            "targetCount": 1,
+            "startDate": start,
+            "endDate": formatter.string(from: end),
+            "coachId": appState.selectedCoach ?? "zj",
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, error in
+            DispatchQueue.main.async {
+                isCreating = false
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard error == nil, statusCode >= 200 && statusCode < 300 else {
+                    errorText = parseAPIErrorMessage(from: data) ?? "Could not create this challenge."
+                    return
+                }
+                onCreated()
+                dismiss()
+            }
+        }.resume()
     }
 }
 
@@ -860,7 +1077,7 @@ private struct FeedNotificationFlyout: View {
                     Text("Notifications")
                         .font(.custom("Syne", size: 20))
                         .foregroundColor(Color.zymText)
-                    Text("Latest unread likes, comments, and messages.")
+                    Text("Post likes and comments.")
                         .font(.system(size: 12))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -879,7 +1096,7 @@ private struct FeedNotificationFlyout: View {
                     .font(.system(size: 13))
                     .foregroundColor(Color.zymSubtext)
             } else if notifications.isEmpty {
-                Text("Nothing new yet. When people message you or engage with your posts, it will show up here.")
+                Text("No post likes or comments yet.")
                     .font(.system(size: 13))
                     .foregroundColor(Color.zymSubtext)
                     .fixedSize(horizontal: false, vertical: true)

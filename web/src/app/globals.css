@@ -190,6 +190,64 @@ select {
   animation: today-trophy-pop 720ms var(--ease-spring) both;
 }
 
+.today-complete-graphic {
+  display: inline-grid;
+  grid-template-columns: 74px auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--ink-900);
+  animation: today-trophy-pop 720ms var(--ease-spring) both;
+}
+
+.today-complete-graphic svg {
+  width: 74px;
+  height: 50px;
+  overflow: visible;
+}
+
+.today-complete-graphic span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-700);
+}
+
+.today-complete-glow {
+  fill: rgba(108, 124, 246, 0.08);
+}
+
+.today-complete-shadow,
+.today-complete-handle,
+.today-complete-stem,
+.today-complete-spark {
+  fill: none;
+  stroke: #344054;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.today-complete-shadow {
+  stroke: rgba(148, 163, 184, 0.34);
+  stroke-width: 5;
+}
+
+.today-complete-cup {
+  fill: #eef3ff;
+  stroke: #344054;
+  stroke-width: 5;
+  stroke-linejoin: round;
+}
+
+.today-complete-handle,
+.today-complete-stem {
+  stroke-width: 5;
+}
+
+.today-complete-spark {
+  stroke: #6c7cf6;
+  stroke-width: 4;
+}
+
 @keyframes today-trophy-pop {
   0% {
     opacity: 0;

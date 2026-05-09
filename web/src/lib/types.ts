@@ -510,6 +510,7 @@ export interface ChallengeSummary {
   owner_user_id: number;
   group_id: number | null;
   title: string;
+  description: string | null;
   goal_type: string;
   target_count: number;
   start_date: string;

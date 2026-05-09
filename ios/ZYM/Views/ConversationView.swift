@@ -490,8 +490,15 @@ struct ConversationView: View {
             case .authSuccess:
                 wsManager.subscribe(topic: conversation.id)
             case .authFailed:
-                infoNotice = "Session expired. Please sign in again."
-                appState.logout()
+                appState.refreshAccessToken { success in
+                    if success, let token = appState.token, !token.isEmpty {
+                        wsManager.connect(token: token)
+                        wsManager.subscribe(topic: conversation.id)
+                    } else {
+                        infoNotice = "Session expired. Please sign in again."
+                        appState.logout()
+                    }
+                }
             case .messageCreated(let topic, let incomingMessage):
                 guard topic == conversation.id else { return }
 

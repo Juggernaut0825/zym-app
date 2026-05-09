@@ -1,6 +1,7 @@
 import { WS_URL } from './config';
 import { AppSocketEvent } from './types';
-import { clearAuth } from './auth-storage';
+import { clearAuth, getAuth } from './auth-storage';
+import { refreshAccessToken } from './api';
 
 type EventHandler = (event: AppSocketEvent | { type: string; [key: string]: unknown }) => void;
 
@@ -10,6 +11,7 @@ export class RealtimeClient {
   private authToken = '';
   private handlers = new Set<EventHandler>();
   private topics = new Set<string>();
+  private refreshingAuth = false;
 
   connect(token: string) {
     this.authToken = token;
@@ -31,13 +33,8 @@ export class RealtimeClient {
             this.send({ type: 'subscribe', topic });
           }
         } else if (payload.type === 'auth_failed') {
-          this.connected = false;
-          this.authToken = '';
-          clearAuth();
-          this.socket?.close();
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('zym-auth-expired', { detail: { path: '/ws' } }));
-          }
+          void this.handleAuthFailed();
+          return;
         }
         this.handlers.forEach(handler => handler(payload));
       } catch {
@@ -101,5 +98,32 @@ export class RealtimeClient {
   private send(payload: Record<string, unknown>) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(payload));
+  }
+
+  private async handleAuthFailed() {
+    if (this.refreshingAuth) return;
+    this.refreshingAuth = true;
+    this.connected = false;
+    const failedSocket = this.socket;
+    failedSocket?.close();
+
+    try {
+      const refreshed = await refreshAccessToken();
+      const auth = getAuth();
+      if (refreshed && auth?.token) {
+        this.refreshingAuth = false;
+        this.connect(auth.token);
+        return;
+      }
+    } catch {
+      // Fall through to the explicit reauth path.
+    }
+
+    this.refreshingAuth = false;
+    this.authToken = '';
+    clearAuth();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zym-auth-expired', { detail: { path: '/ws' } }));
+    }
   }
 }
