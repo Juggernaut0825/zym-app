@@ -1514,9 +1514,16 @@ private struct ConversationCoachProfileEditorView: View {
                 ProgressView()
             }
 
-            coachOptionPicker("Goal", selection: $draft.goal, options: coachGoalOptions, placeholder: "Goal not set")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Goal")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                TextField("eg. bulk, add muscle and strength", text: $draft.goal)
+                    .zymFieldStyle()
+            }
             coachOptionPicker("Training days", selection: $draft.trainingDays, options: coachTrainingDayOptions, placeholder: "Training days not set")
-            coachOptionPicker("Experience level", selection: $draft.experienceLevel, options: coachExperienceLevelOptions, placeholder: "Experience not set")
+            CoachExperienceLevelCards(selection: $draft.experienceLevel)
             coachOptionPicker("Activity level", selection: $draft.activityLevel, options: coachActivityLevelOptions, placeholder: "Activity not set")
 
             VStack(alignment: .leading, spacing: 6) {
@@ -1556,7 +1563,7 @@ private struct ConversationCoachProfileEditorView: View {
     }
 
     private var profileSummary: String {
-        let goal = coachGoalOptions.first(where: { $0.value == draft.goal })?.label ?? "Goal missing"
+        let goal = draft.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Goal missing" : draft.goal
         let days = coachTrainingDayOptions.first(where: { $0.value == draft.trainingDays })?.label ?? "Days missing"
         let experience = coachExperienceLevelOptions.first(where: { $0.value == draft.experienceLevel })?.label ?? "Experience missing"
         return "\(goal) · \(days) · \(experience)"
@@ -1609,7 +1616,7 @@ private struct ConversationCoachProfileEditorView: View {
         guard let userId = appState.userId,
               let url = apiURL("/coach/records/profile/update") else { return }
 
-        guard !draft.goal.isEmpty, !draft.trainingDays.isEmpty, !draft.experienceLevel.isEmpty else {
+        guard !draft.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !draft.trainingDays.isEmpty, !draft.experienceLevel.isEmpty else {
             statusText = "Set goal, training days, and experience level first."
             return
         }
@@ -1624,7 +1631,7 @@ private struct ConversationCoachProfileEditorView: View {
 
         var body: [String: Any] = [
             "userId": userId,
-            "goal": draft.goal,
+            "goal": String(draft.goal.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180)),
             "training_days": Int(draft.trainingDays) ?? 0,
             "experience_level": draft.experienceLevel,
             "timezone": draft.timezone,

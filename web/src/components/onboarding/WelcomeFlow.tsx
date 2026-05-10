@@ -355,6 +355,30 @@ function profileSelectField(
   );
 }
 
+function experienceLevelCards(value: string, onChange: (value: string) => void) {
+  return (
+    <div className="coach-profile-field">
+      <span className="coach-profile-label">Experience level</span>
+      <div className="grid gap-2">
+        {experienceLevelOptions.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`rounded-[16px] border px-4 py-3 text-left transition ${selected ? 'border-slate-900 bg-white text-slate-950 shadow-sm' : 'border-slate-200/80 bg-white/58 text-slate-700 hover:border-slate-300'}`}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="block text-sm font-semibold">{option.label}</span>
+              {option.description ? <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function WelcomeFlow(props: WelcomeFlowProps) {
   const { userId, initialCoach, onComplete } = props;
   const [step, setStep] = useState(0);
@@ -399,7 +423,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
     return () => window.clearTimeout(timer);
   }, [step, loadingExisting]);
 
-  const requiredProfileMissing = !state.goal || !state.trainingDays || !state.experienceLevel;
+  const requiredProfileMissing = !state.goal.trim() || !state.trainingDays || !state.experienceLevel;
   const canContinue = step === 0
     ? introComplete && Boolean(state.coach)
     : step === 1
@@ -431,7 +455,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
         training_days: state.trainingDays.trim() ? Number(state.trainingDays.trim()) : undefined,
         gender: state.gender || undefined,
         activity_level: state.activityLevel || undefined,
-        goal: state.goal || undefined,
+        goal: state.goal.trim() || undefined,
         experience_level: state.experienceLevel,
         notes: state.notes.trim() || undefined,
         timezone: detectLocalTimezone(),
@@ -580,7 +604,9 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
               {profileSelectField('Body fat range', state.bodyFatRange, (bodyFatRange) => setState((prev) => ({ ...prev, bodyFatRange })), bodyFatRangeOptions)}
               {profileSelectField('Training days / week', state.trainingDays, (trainingDays) => setState((prev) => ({ ...prev, trainingDays })), trainingDayOptions)}
               {profileSelectField('Activity level', state.activityLevel, (activityLevel) => setState((prev) => ({ ...prev, activityLevel })), activityLevelOptions)}
-              {profileSelectField('Experience level', state.experienceLevel, (experienceLevel) => setState((prev) => ({ ...prev, experienceLevel })), experienceLevelOptions)}
+            </div>
+            <div className="mt-4">
+              {experienceLevelCards(state.experienceLevel, (experienceLevel) => setState((prev) => ({ ...prev, experienceLevel })))}
             </div>
             <p className="mt-2 px-1 text-xs text-slate-500">Required: goal, training days, and experience level. Experience level controls how detailed your coach should be.</p>
 
@@ -589,7 +615,7 @@ export function WelcomeFlow(props: WelcomeFlowProps) {
                 label: 'Goal',
                 value: state.goal,
                 onChange: (goal) => setState((prev) => ({ ...prev, goal: goal.slice(0, 180) })),
-                placeholder: 'Maintain strength while leaning out',
+                placeholder: 'eg. bulk, add muscle and strength',
                 maxLength: 180,
               })}
             </div>

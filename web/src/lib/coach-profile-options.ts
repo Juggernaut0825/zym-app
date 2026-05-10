@@ -28,9 +28,11 @@ export const goalOptions: SelectOption[] = [
 ];
 
 export const experienceLevelOptions: SelectOption[] = [
-  { value: 'beginner', label: 'Beginner', description: 'New to structured training' },
-  { value: 'intermediate', label: 'Intermediate', description: 'Has trained consistently before' },
-  { value: 'advanced', label: 'Advanced', description: 'Comfortable with programming and progression' },
+  { value: 'first_day', label: 'First day', description: 'Today is my first workout. I want very clear, step-by-step coaching.' },
+  { value: 'early_beginner', label: 'Getting started', description: 'I have worked out a few times, but I still feel confused about form, weights, and routine.' },
+  { value: 'beginner', label: 'Beginner', description: 'I know a few basic exercises and need simple structure, cues, and confidence.' },
+  { value: 'intermediate', label: 'Intermediate', description: 'I train regularly and want progression, volume, recovery, and plan adjustments.' },
+  { value: 'advanced', label: 'Advanced', description: 'I am comfortable programming and want concise coaching, tradeoffs, and fine tuning.' },
 ];
 
 export const trainingDayOptions: SelectOption[] = [
@@ -113,6 +115,8 @@ export function normalizeGoalValue(value: unknown): string {
 export function normalizeExperienceLevelValue(value: unknown): string {
   const text = normalizeOptionText(value);
   if (!text) return '';
+  if (text === 'first_day' || text.includes('first_day') || text.includes('first_workout') || text.includes('zero_knowledge')) return 'first_day';
+  if (text === 'early_beginner' || text.includes('getting_started') || text.includes('few_times') || text.includes('several_times') || text.includes('confused')) return 'early_beginner';
   if (text.includes('beginner')) return 'beginner';
   if (text.includes('intermediate')) return 'intermediate';
   if (text.includes('advanced')) return 'advanced';

@@ -400,7 +400,7 @@ export interface CoachTrainingRecord {
   name?: string;
   sets?: number;
   reps?: string;
-  weight_kg?: number;
+  weight_kg?: number | null;
   volume_kg?: number;
   notes?: string;
   source_plan_id?: string;
@@ -517,6 +517,7 @@ export interface ChallengeSummary {
   end_date: string;
   coach_id: 'zj' | 'lc';
   status: string;
+  visibility: 'friends' | 'public';
   role: string;
   member_count: number;
   today_status: string | null;

@@ -1041,6 +1041,11 @@ function normalizePostVisibility(raw: unknown, fallback: 'private' | 'friends' |
   return fallback;
 }
 
+function normalizeChallengeVisibility(raw: unknown, fallback: 'friends' | 'public' = 'friends'): 'friends' | 'public' {
+  const value = String(raw || '').trim().toLowerCase();
+  return value === 'public' ? 'public' : fallback;
+}
+
 function mediaUrlForClient(req: Request, mediaUrl: unknown): string | null {
   const value = String(mediaUrl || '').trim();
   if (!value) return null;
@@ -1143,6 +1148,13 @@ function isFriend(userA: number, userB: number): boolean {
   `).get(userA, userB, userB, userA);
 
   return Boolean(row);
+}
+
+function canAccessChallenge(userId: number, challenge: { owner_user_id?: unknown; visibility?: unknown } | undefined | null): boolean {
+  if (!challenge) return false;
+  const ownerId = Number(challenge.owner_user_id || 0);
+  const visibility = normalizeChallengeVisibility(challenge.visibility, 'friends');
+  return ownerId === userId || visibility === 'public' || (visibility === 'friends' && isFriend(userId, ownerId));
 }
 
 function isGroupMember(groupId: number, userId: number): boolean {
@@ -3279,6 +3291,7 @@ app.post('/challenges',
     targetCount: { type: 'number', integer: true, min: 1, max: 30 },
     startDate: { type: 'string', pattern: COACH_DAY_PATTERN },
     endDate: { type: 'string', pattern: COACH_DAY_PATTERN },
+    visibility: { type: 'string', minLength: 1, maxLength: 20 },
     groupId: { type: 'number', integer: true, min: 1 },
     coachId: { type: 'string', maxLength: 10 },
   }),
@@ -3297,18 +3310,19 @@ app.post('/challenges',
       const endDate = isValidDayKey(String(req.body.endDate || '')) ? String(req.body.endDate) : startDate;
       const groupId = Number.isInteger(Number(req.body.groupId)) ? Number(req.body.groupId) : null;
       const coachId = normalizeCoachId(req.body.coachId) || resolveSelectedCoachForUser(userId) || 'zj';
+      const visibility = normalizeChallengeVisibility(req.body.visibility, 'friends');
 
       const result = getDB().prepare(`
-        INSERT INTO challenges (owner_user_id, group_id, title, description, goal_type, target_count, start_date, end_date, coach_id, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-      `).run(userId, groupId, title, description, goalType, targetCount, startDate, endDate, coachId);
+        INSERT INTO challenges (owner_user_id, group_id, title, description, goal_type, target_count, start_date, end_date, coach_id, visibility, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+      `).run(userId, groupId, title, description, goalType, targetCount, startDate, endDate, coachId, visibility);
       const challengeId = Number(result.lastInsertRowid || 0);
       getDB().prepare(`
         INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
         VALUES (?, ?, 'owner')
       `).run(challengeId, userId);
 
-      res.json({ success: true, challengeId });
+      res.json({ success: true, challengeId, visibility });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to create challenge' });
     }
@@ -3319,20 +3333,38 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) 
     const userId = toUserId(req.params.userId);
     const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
     const timezone = isValidTimeZone(String(userRow?.timezone || '')) ? String(userRow?.timezone) : 'UTC';
-    const today = localDayForTimezone(new Date(), timezone);
+    const today = isValidDayKey(String(req.query.day || '')) ? String(req.query.day) : localDayForTimezone(new Date(), timezone);
     const rows = getDB().prepare(`
       SELECT
         c.*,
-        cm.role,
+        COALESCE(cm.role, 'viewer') AS role,
         (SELECT COUNT(*) FROM challenge_members m WHERE m.challenge_id = c.id) AS member_count,
         (SELECT status FROM challenge_completions cc WHERE cc.challenge_id = c.id AND cc.user_id = ? AND cc.local_day = ? LIMIT 1) AS today_status
       FROM challenges c
-      JOIN challenge_members cm ON cm.challenge_id = c.id
-      WHERE cm.user_id = ?
-        AND c.status = 'active'
+      LEFT JOIN challenge_members cm ON cm.challenge_id = c.id AND cm.user_id = ?
+      WHERE c.status = 'active'
+        AND c.start_date <= ?
+        AND c.end_date >= ?
+        AND (
+          cm.user_id IS NOT NULL
+          OR c.owner_user_id = ?
+          OR c.visibility = 'public'
+          OR (
+            c.visibility = 'friends'
+            AND EXISTS (
+              SELECT 1 FROM friendships f
+              WHERE f.status = 'accepted'
+                AND (
+                  (f.user_id = ? AND f.friend_id = c.owner_user_id)
+                  OR (f.user_id = c.owner_user_id AND f.friend_id = ?)
+                )
+              LIMIT 1
+            )
+          )
+        )
       ORDER BY c.created_at DESC
       LIMIT 20
-    `).all(userId, today, userId) as Array<Record<string, unknown>>;
+    `).all(userId, today, userId, today, today, userId, userId, userId) as Array<Record<string, unknown>>;
 
     res.json({
       day: today,
@@ -3348,6 +3380,7 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) 
         end_date: sanitizePlainText(row.end_date, 20),
         coach_id: normalizeCoachId(row.coach_id) || 'zj',
         status: sanitizePlainText(row.status, 20),
+        visibility: normalizeChallengeVisibility(row.visibility, 'friends'),
         role: sanitizePlainText(row.role, 20),
         member_count: Number(row.member_count || 0),
         today_status: sanitizePlainText(row.today_status, 30) || null,
@@ -3369,8 +3402,9 @@ app.post('/challenges/:challengeId/join',
       if (!Number.isInteger(challengeId) || challengeId <= 0) {
         return res.status(400).json({ error: 'Invalid challengeId' });
       }
-      const challenge = getDB().prepare('SELECT id FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active');
+      const challenge = getDB().prepare('SELECT id, owner_user_id, visibility FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active') as { id: number; owner_user_id: number; visibility?: string } | undefined;
       if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+      if (!canAccessChallenge(userId, challenge)) return res.status(403).json({ error: 'Challenge is not visible to this user' });
       getDB().prepare(`
         INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
         VALUES (?, ?, 'member')
@@ -3402,7 +3436,14 @@ app.post('/challenges/:challengeId/completion',
       const membership = getDB().prepare(`
         SELECT 1 FROM challenge_members WHERE challenge_id = ? AND user_id = ? LIMIT 1
       `).get(challengeId, userId);
-      if (!membership) return res.status(403).json({ error: 'Join the challenge before completing it' });
+      if (!membership) {
+        const challenge = getDB().prepare('SELECT id, owner_user_id, visibility FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active') as { id: number; owner_user_id: number; visibility?: string } | undefined;
+        if (!canAccessChallenge(userId, challenge)) return res.status(403).json({ error: 'Challenge is not visible to this user' });
+        getDB().prepare(`
+          INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
+          VALUES (?, ?, 'member')
+        `).run(challengeId, userId);
+      }
       const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
       const timezone = isValidTimeZone(String(userRow?.timezone || '')) ? String(userRow?.timezone) : 'UTC';
       const localDay = isValidDayKey(String(req.body.localDay || '')) ? String(req.body.localDay) : localDayForTimezone(new Date(), timezone);

@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 struct ConversationBubbleThemePreset: Identifiable, Equatable {
     let id: String
@@ -192,6 +193,143 @@ extension View {
 
     func zymAppear(delay: Double = 0) -> some View {
         modifier(ZYMAppearModifier(delay: delay))
+    }
+}
+
+struct CoachExperienceLevelCards: View {
+    @Binding var selection: String
+    var title: String = "Experience level"
+    var options: [CoachOption] = coachExperienceLevelOptions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.1)
+                .foregroundColor(Color.zymSubtext)
+
+            VStack(spacing: 8) {
+                ForEach(options, id: \.value) { option in
+                    Button {
+                        withAnimation(.zymSpring) {
+                            selection = option.value
+                        }
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .stroke(selection == option.value ? Color.zymPrimaryDark : Color.zymLine, lineWidth: 1.5)
+                                    .frame(width: 22, height: 22)
+                                if selection == option.value {
+                                    Circle()
+                                        .fill(Color.zymPrimaryDark)
+                                        .frame(width: 10, height: 10)
+                                }
+                            }
+                            .padding(.top, 2)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color.zymText)
+                                if let description = option.description, !description.isEmpty {
+                                    Text(description)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .background(selection == option.value ? Color.zymSurfaceSoft.opacity(0.92) : Color.white.opacity(0.74))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(selection == option.value ? Color.zymPrimaryDark.opacity(0.22) : Color.zymLine.opacity(0.72), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+struct ZYMCelebratingCheckButton: View {
+    let isDone: Bool
+    let isPending: Bool
+    var size: CGFloat = 28
+    let action: () -> Void
+
+    @State private var burst = false
+    @State private var checkFlash = false
+
+    private let colors: [Color] = [
+        .zymSecondary,
+        .zymPrimaryDark,
+        .zymCoachBlue,
+        Color(red: 0.36, green: 0.74, blue: 0.47),
+    ]
+
+    var body: some View {
+        Button {
+            fire()
+            action()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill((isDone || checkFlash) ? Color.zymSecondary.opacity(0.16) : Color.clear)
+                    .frame(width: size, height: size)
+                Circle()
+                    .stroke((isDone || checkFlash) ? Color.zymSecondary : Color.zymLine, lineWidth: 2)
+                    .frame(width: size, height: size)
+
+                if isPending {
+                    ProgressView()
+                        .scaleEffect(0.58)
+                } else if isDone || checkFlash {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: max(11, size * 0.42), weight: .bold))
+                        .foregroundColor(Color.zymSecondaryDark)
+                }
+
+                ForEach(0..<10, id: \.self) { index in
+                    Circle()
+                        .fill(colors[index % colors.count])
+                        .frame(width: index.isMultiple(of: 2) ? 4 : 3, height: index.isMultiple(of: 2) ? 4 : 3)
+                        .offset(burst ? burstOffset(index) : .zero)
+                        .opacity(burst ? 0 : 1)
+                        .scaleEffect(burst ? 0.7 : 1)
+                        .animation(.easeOut(duration: 0.68), value: burst)
+                }
+            }
+            .frame(width: size + 18, height: size + 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isPending)
+    }
+
+    private func fire() {
+        checkFlash = true
+        burst = false
+        DispatchQueue.main.async {
+            burst = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) {
+            burst = false
+            if !isDone {
+                checkFlash = false
+            }
+        }
+    }
+
+    private func burstOffset(_ index: Int) -> CGSize {
+        let angle = (Double(index) / 10.0) * Double.pi * 2.0
+        let radius = Double(size) * (0.78 + Double(index % 3) * 0.12)
+        return CGSize(width: CGFloat(cos(angle) * radius), height: CGFloat(sin(angle) * radius))
     }
 }
 

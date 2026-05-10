@@ -6,11 +6,9 @@ import {
   activityLevelOptions,
   experienceLevelOptions,
   genderOptions,
-  goalOptions,
   normalizeActivityLevelValue,
   normalizeExperienceLevelValue,
   normalizeGenderValue,
-  normalizeGoalValue,
   normalizeTrainingDaysValue,
   optionLabelForValue,
   trainingDayOptions,
@@ -76,7 +74,7 @@ function buildDraft(profile: CoachProfileData | null | undefined): CoachProfileD
     training_days: normalizeTrainingDaysValue(profile?.training_days ?? profile?.trainingDays),
     gender: normalizeGenderValue(profile?.gender ?? profile?.sex),
     activity_level: normalizeActivityLevelValue(profile?.activity_level ?? profile?.activityLevel),
-    goal: normalizeGoalValue(profile?.goal ?? profile?.fitness_goal ?? profile?.fitnessGoal),
+    goal: toText(profile?.goal ?? profile?.fitness_goal ?? profile?.fitnessGoal).slice(0, 180),
     experience_level: normalizeExperienceLevelValue(profile?.experience_level ?? profile?.experienceLevel),
     notes: toText(profile?.notes).slice(0, 1200),
   };
@@ -125,6 +123,30 @@ function textField(
   );
 }
 
+function experienceLevelCards(value: string, onChange: (value: string) => void) {
+  return (
+    <div className="grid gap-2">
+      <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Experience level</span>
+      <div className="grid gap-2">
+        {experienceLevelOptions.map((option) => {
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`grid gap-1 rounded-[16px] border px-4 py-3 text-left transition ${selected ? 'border-slate-900 bg-slate-50 text-slate-950' : 'border-slate-200 bg-white/80 text-slate-700 hover:border-slate-300'}`}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="text-sm font-semibold">{option.label}</span>
+              {option.description ? <span className="text-xs leading-5 text-slate-500">{option.description}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function CoachProfileEditor(props: CoachProfileEditorProps) {
   const { userId, active, onNotice, onError } = props;
   const [loading, setLoading] = useState(false);
@@ -151,7 +173,7 @@ export function CoachProfileEditor(props: CoachProfileEditorProps) {
   }, [active, userId]);
 
   async function saveProfile() {
-    if (!draft.goal || !draft.training_days || !draft.experience_level) {
+    if (!draft.goal.trim() || !draft.training_days || !draft.experience_level) {
       onError('Set goal, training days, and experience level before saving.');
       return;
     }
@@ -167,7 +189,7 @@ export function CoachProfileEditor(props: CoachProfileEditorProps) {
         training_days: toInt(draft.training_days),
         gender: draft.gender || undefined,
         activity_level: draft.activity_level || undefined,
-        goal: draft.goal,
+        goal: draft.goal.trim(),
         experience_level: draft.experience_level,
         notes: draft.notes.trim() || undefined,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -182,7 +204,7 @@ export function CoachProfileEditor(props: CoachProfileEditorProps) {
   }
 
   const summary = [
-    draft.goal ? optionLabelForValue(goalOptions, draft.goal) : 'Goal missing',
+    draft.goal ? draft.goal : 'Goal missing',
     draft.training_days ? optionLabelForValue(trainingDayOptions, draft.training_days) : 'Days missing',
     draft.experience_level ? optionLabelForValue(experienceLevelOptions, draft.experience_level) : 'Experience missing',
   ].join(' · ');
@@ -201,15 +223,18 @@ export function CoachProfileEditor(props: CoachProfileEditorProps) {
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {selectField('Goal', draft.goal, (goal) => setDraft((prev) => ({ ...prev, goal })), goalOptions, 'Choose goal')}
+        {textField('Goal', draft.goal, (goal) => setDraft((prev) => ({ ...prev, goal })), 'eg. bulk, add muscle and strength', 180)}
         {selectField('Training days', draft.training_days, (training_days) => setDraft((prev) => ({ ...prev, training_days })), trainingDayOptions, 'Choose days')}
-        {selectField('Experience level', draft.experience_level, (experience_level) => setDraft((prev) => ({ ...prev, experience_level })), experienceLevelOptions, 'Choose level')}
         {selectField('Activity level', draft.activity_level, (activity_level) => setDraft((prev) => ({ ...prev, activity_level })), activityLevelOptions, 'Choose activity')}
         {selectField('Gender', draft.gender, (gender) => setDraft((prev) => ({ ...prev, gender })), genderOptions, 'Not set')}
         {textField('Age', draft.age, (age) => setDraft((prev) => ({ ...prev, age })), 'Age', 3, 'numeric')}
         {textField('Height', draft.height, (height) => setDraft((prev) => ({ ...prev, height })), 'Height', 40, 'decimal')}
         {textField('Weight', draft.weight, (weight) => setDraft((prev) => ({ ...prev, weight })), 'Weight', 40, 'decimal')}
         {textField('Body fat %', draft.body_fat_pct, (body_fat_pct) => setDraft((prev) => ({ ...prev, body_fat_pct })), 'Optional', 5, 'decimal')}
+      </div>
+
+      <div className="mt-3">
+        {experienceLevelCards(draft.experience_level, (experience_level) => setDraft((prev) => ({ ...prev, experience_level })))}
       </div>
 
       <label className="mt-3 grid gap-1.5">

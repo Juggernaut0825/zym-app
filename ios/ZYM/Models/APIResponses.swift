@@ -140,9 +140,11 @@ let coachGoalOptions: [CoachOption] = [
 ]
 
 let coachExperienceLevelOptions: [CoachOption] = [
-    CoachOption(value: "beginner", label: "Beginner", description: "New to structured training"),
-    CoachOption(value: "intermediate", label: "Intermediate", description: "Has trained consistently before"),
-    CoachOption(value: "advanced", label: "Advanced", description: "Comfortable with programming and progression"),
+    CoachOption(value: "first_day", label: "First day", description: "Today is my first workout. I want very clear, step-by-step coaching."),
+    CoachOption(value: "early_beginner", label: "Getting started", description: "I have worked out a few times, but I still feel confused about form, weights, and routine."),
+    CoachOption(value: "beginner", label: "Beginner", description: "I know a few basic exercises and need simple structure, cues, and confidence."),
+    CoachOption(value: "intermediate", label: "Intermediate", description: "I train regularly and want progression, volume, recovery, and plan adjustments."),
+    CoachOption(value: "advanced", label: "Advanced", description: "I am comfortable programming and want concise coaching, tradeoffs, and fine tuning."),
 ]
 
 let coachTrainingDayOptions: [CoachOption] = [
@@ -398,6 +400,7 @@ struct ChallengeSummary: Codable, Identifiable {
     let end_date: String
     let coach_id: String?
     let status: String
+    let visibility: String?
     let role: String
     let member_count: Int
     let today_status: String?

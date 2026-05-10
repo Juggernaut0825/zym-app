@@ -216,11 +216,15 @@ function inferHeightUnitFromProfile(profile: Record<string, unknown>): 'ft/in' |
 async function buildMeasurementPrompt(userId: string): Promise<string> {
   let weightUnit: 'lb' | 'kg' = 'kg';
   let heightUnit: 'ft/in' | 'cm' = 'cm';
+  let goalText = '';
+  let experienceLevel = '';
 
   try {
     const profile = await coachTypedToolsService.getProfile(userId);
     weightUnit = inferWeightUnitFromProfile(profile);
     heightUnit = inferHeightUnitFromProfile(profile);
+    goalText = String(profile.goal || '').trim();
+    experienceLevel = String(profile.experience_level || profile.experienceLevel || '').trim();
   } catch (error) {
     logger.warn(`[coach] failed to load measurement preferences for user=${userId}`, error);
   }
@@ -230,7 +234,12 @@ async function buildMeasurementPrompt(userId: string): Promise<string> {
 - The user's preferred height unit is ${heightUnit}.
 - Match these units in replies, summaries, and recommendations unless the user explicitly asks for another unit.
 - Tool schemas store weight as kilograms and height as centimeters. Convert internally for tool calls, then speak back in the user's preferred units.
-- Treat height inputs like 5'11", 5'11, and 5 11 as 5 ft 11 in when the user is using ft/in.`;
+- Treat height inputs like 5'11", 5'11, and 5 11 as 5 ft 11 in when the user is using ft/in.
+- Current freeform goal text: ${goalText || 'not set'}.
+- Current experience level: ${experienceLevel || 'not set'}.
+- When creating a training plan, match exercise selection, coaching detail, progression, and load targets to the experience level.
+- Include target_weight_kg for externally loaded exercises whenever a conservative load can be chosen. If the user prefers lb/lbs, convert the load to kg for the tool and mention the range in lb/lbs in notes or prose.
+- For bodyweight-only exercises, do not invent a fake external load; use cues and notes instead of 0 kg as a meaningful target.`;
 }
 
 interface KnowledgeCitationLink {

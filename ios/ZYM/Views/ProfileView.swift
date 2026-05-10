@@ -26,6 +26,7 @@ struct ProfileView: View {
     @State private var notificationStatusText = ""
     @State private var mediaPresentation: RemoteMediaPresentation?
     @State private var showPreferences = false
+    @State private var showCoachRecordsSheet = false
     @State private var sharedLocation: StoredUserLocationPayload?
     @State private var locationPending = false
     @State private var locationStatusText = ""
@@ -137,6 +138,40 @@ struct ProfileView: View {
                         .buttonStyle(.plain)
                         .zymAppear(delay: 0.18)
 
+                        Button {
+                            showCoachRecordsSheet = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "figure.strengthtraining.traditional")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(Color.zymPrimaryDark)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.zymSurfaceSoft)
+                                    .clipShape(Circle())
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Coach profile")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(Color.zymText)
+                                    Text("Goal, training days, experience level")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .lineLimit(2)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+                            .padding(14)
+                            .background(Color.white.opacity(0.78))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .zymAppear(delay: 0.2)
+
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
                                 .frame(maxWidth: .infinity)
@@ -202,17 +237,31 @@ struct ProfileView: View {
             .environmentObject(appState)
             .environmentObject(notificationManager)
         }
+        .sheet(isPresented: $showCoachRecordsSheet) {
+            CoachRecordsDetailsSheet()
+                .environmentObject(appState)
+        }
         .onAppear {
             loadProfile()
             loadNotificationPreferences()
             loadStoredLocation()
             notificationManager.refreshAuthorizationStatus()
+            openRequestedCoachProfileIfNeeded()
+        }
+        .onChange(of: appState.requestedCoachProfileEditor) { _, _ in
+            openRequestedCoachProfileIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 notificationManager.refreshAuthorizationStatus()
             }
         }
+    }
+
+    private func openRequestedCoachProfileIfNeeded() {
+        guard appState.requestedCoachProfileEditor else { return }
+        appState.requestedCoachProfileEditor = false
+        showCoachRecordsSheet = true
     }
 
     private func presentProfileMedia(startingWith originalValue: String?) {
@@ -1190,21 +1239,9 @@ private struct CoachRecordsDetailsSheet: View {
                             }
                             .pickerStyle(.menu)
 
-                            Picker("Goal", selection: $profileDraft.goal) {
-                                Text("Goal not set").tag("")
-                                Text("Cut").tag("cut")
-                                Text("Maintain").tag("maintain")
-                                Text("Bulk").tag("bulk")
-                            }
-                            .pickerStyle(.menu)
+                            coachInputField("Goal", text: binding(for: \.goal, max: 180), keyboard: .default, hint: "eg. bulk, add muscle and strength")
 
-                            Picker("Experience level", selection: $profileDraft.experienceLevel) {
-                                Text("Experience not set").tag("")
-                                ForEach(coachExperienceLevelOptions, id: \.value) { option in
-                                    Text(option.label).tag(option.value)
-                                }
-                            }
-                            .pickerStyle(.menu)
+                            CoachExperienceLevelCards(selection: $profileDraft.experienceLevel)
 
                             Button(action: saveProfileDraft) {
                                 Text(saving ? "Saving..." : "Save profile record")
@@ -1559,6 +1596,12 @@ private struct CoachRecordsDetailsSheet: View {
 
     private func saveProfileDraft() {
         guard let userId = appState.userId, userId > 0 else { return }
+        guard !coachTrim(profileDraft.goal, limit: 180).isEmpty,
+              coachInt(profileDraft.trainingDays) != nil,
+              !coachTrim(profileDraft.experienceLevel, limit: 40).isEmpty else {
+            errorText = "Set goal, training days, and experience level first."
+            return
+        }
         var body: [String: Any] = ["userId": userId]
 
         if let value = coachDouble(profileDraft.heightCm) { body["height_cm"] = value }
@@ -1571,9 +1614,9 @@ private struct CoachRecordsDetailsSheet: View {
         if !gender.isEmpty { body["gender"] = gender }
         let activity = coachTrim(profileDraft.activityLevel, limit: 20)
         if !activity.isEmpty { body["activity_level"] = activity }
-        let goal = coachTrim(profileDraft.goal, limit: 20)
+        let goal = coachTrim(profileDraft.goal, limit: 180)
         if !goal.isEmpty { body["goal"] = goal }
-        let experience = coachTrim(profileDraft.experienceLevel, limit: 24)
+        let experience = coachTrim(profileDraft.experienceLevel, limit: 40)
         if !experience.isEmpty { body["experience_level"] = experience }
         let timezone = coachTrim(profileDraft.timezone, limit: 80)
         if !timezone.isEmpty { body["timezone"] = timezone }

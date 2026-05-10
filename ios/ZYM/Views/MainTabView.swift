@@ -175,6 +175,8 @@ private struct TodayView: View {
     @State private var isLoading = true
     @State private var errorText = ""
     @State private var completingExerciseId: String?
+    @State private var completingChallengeId: Int?
+    @State private var trainingExpanded = true
 
     private var completedExercises: Int {
         today?.trainingPlan?.exercises.filter { $0.completed_at != nil }.count ?? 0
@@ -230,7 +232,7 @@ private struct TodayView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Today")
-                        .font(.system(size: 48, weight: .regular))
+                        .font(.custom("Syne", size: 36))
                         .foregroundColor(Color.zymText)
                     Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
                         .font(.system(size: 15, weight: .medium))
@@ -241,14 +243,15 @@ private struct TodayView: View {
                     .padding(.top, 10)
             }
 
-            Text(primaryGoalText)
-                .font(.system(size: 34, weight: .bold))
-                .foregroundColor(Color.zymText)
-                .fixedSize(horizontal: false, vertical: true)
-
             HStack(spacing: 8) {
-                TodayPill(text: experienceText, systemImage: "figure.strengthtraining.traditional")
-                TodayPill(text: hasCompletedPlan ? "Complete" : "On track", systemImage: "target")
+                if experienceMissing {
+                    Button(action: openCoachProfile) {
+                        TodayPill(text: experienceText, systemImage: "figure.strengthtraining.traditional")
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    TodayPill(text: experienceText, systemImage: "figure.strengthtraining.traditional")
+                }
             }
 
             if isLoading && today == nil {
@@ -282,7 +285,7 @@ private struct TodayView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(Color.zymText)
                                 .fixedSize(horizontal: false, vertical: true)
-                            if let summary = plan.summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if trainingExpanded, let summary = plan.summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Text(summary)
                                     .font(.system(size: 12))
                                     .foregroundColor(Color.zymSubtext)
@@ -290,58 +293,56 @@ private struct TodayView: View {
                             }
                         }
                         Spacer(minLength: 8)
-                        Button(action: openCoach) {
-                            Image(systemName: "slider.horizontal.3")
+                        Button {
+                            withAnimation(.zymSpring) {
+                                trainingExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(Color.zymPrimaryDark)
                                 .frame(width: 38, height: 38)
                                 .background(Color.zymSurfaceSoft.opacity(0.82))
                                 .clipShape(Circle())
+                                .rotationEffect(.degrees(trainingExpanded ? 0 : -90))
                         }
                         .buttonStyle(.plain)
                     }
 
-                    if hasCompletedPlan {
-                        HStack(spacing: 14) {
-                            TodayPlanCompleteGraphic()
-                                .frame(width: 116, height: 86)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Plan complete")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(Color.zymText)
-                                Text("You finished every exercise today.")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(Color.zymSubtext)
+                    if trainingExpanded {
+                        if hasCompletedPlan {
+                            HStack(spacing: 14) {
+                                TodayPlanCompleteGraphic()
+                                    .frame(width: 116, height: 86)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Plan complete")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(Color.zymText)
+                                    Text("You finished every exercise today.")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Color.zymSubtext)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.zymSurfaceSoft.opacity(0.54))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                        }
+
+                        VStack(spacing: 0) {
+                            ForEach(plan.exercises) { exercise in
+                                TodayExerciseRow(
+                                    exercise: exercise,
+                                    weightUnit: preferredWeightUnit,
+                                    isPending: completingExerciseId == exercise.id,
+                                    onToggle: { completeExercise(exercise) }
+                                )
+                                if exercise.id != plan.exercises.last?.id {
+                                    Divider().background(Color.zymLine)
+                                }
                             }
                         }
-                        .padding(12)
-                        .background(Color.zymSurfaceSoft.opacity(0.54))
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     }
-
-                    VStack(spacing: 0) {
-                        ForEach(plan.exercises) { exercise in
-                            TodayExerciseRow(
-                                exercise: exercise,
-                                isPending: completingExerciseId == exercise.id,
-                                onToggle: { completeExercise(exercise) }
-                            )
-                            if exercise.id != plan.exercises.last?.id {
-                                Divider().background(Color.zymLine)
-                            }
-                        }
-                    }
-
-                    Button(action: openCoach) {
-                        HStack {
-                            Text(hasCompletedPlan ? "Adjust tomorrow" : "Modify plan")
-                            Spacer()
-                            Image(systemName: "arrow.right")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(ZYMPrimaryButton())
                 }
             } else {
                 HStack(alignment: .center, spacing: 16) {
@@ -364,14 +365,14 @@ private struct TodayView: View {
     private var coachShortcutsSection: some View {
         TodaySection(title: "Ask coach") {
             VStack(spacing: 10) {
-                TodayShortcutButton(title: "What should I train today?", systemImage: "figure.run", action: openCoach)
+                TodayShortcutButton(title: "I don’t know this exercise", systemImage: "questionmark.circle", action: openCoach)
                 TodayShortcutButton(title: "Adjust my plan", systemImage: "slider.horizontal.3", action: openCoach)
             }
         }
     }
 
     private var communitySection: some View {
-        TodaySection(title: "Community", actionTitle: "Open", action: openCommunity) {
+        TodaySection(title: "Challenge") {
             if challenges.isEmpty {
                 Text("No active challenges yet.")
                     .font(.system(size: 13))
@@ -380,20 +381,11 @@ private struct TodayView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(challenges.prefix(3)) { challenge in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(challenge.title)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(Color.zymText)
-                                Text("\(challenge.member_count) members · \(challenge.today_status == "completed" ? "done today" : "open today")")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(Color.zymSubtext)
-                            }
-                            Spacer()
-                            Image(systemName: challenge.today_status == "completed" ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(challenge.today_status == "completed" ? Color.zymSecondary : Color.zymSubtext)
-                        }
-                        .padding(.vertical, 9)
+                        TodayChallengeRow(
+                            challenge: challenge,
+                            isPending: completingChallengeId == challenge.id,
+                            onToggle: { completeChallenge(challenge) }
+                        )
                         if challenge.id != challenges.prefix(3).last?.id {
                             Divider().background(Color.zymLine)
                         }
@@ -415,6 +407,15 @@ private struct TodayView: View {
         let raw = today?.profile.experience_level?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if raw.isEmpty { return "Experience not set" }
         return coachExperienceLevelOptions.first(where: { $0.value == raw })?.label ?? raw.capitalized
+    }
+
+    private var experienceMissing: Bool {
+        (today?.profile.experience_level?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
+    }
+
+    private var preferredWeightUnit: String {
+        let raw = today?.profile.weight?.lowercased() ?? ""
+        return raw.contains("lb") || raw.contains("pound") ? "lb" : "kg"
     }
 
     private func loadAll() {
@@ -506,6 +507,34 @@ private struct TodayView: View {
         }.resume()
     }
 
+    private func completeChallenge(_ challenge: ChallengeSummary) {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/\(challenge.id)/completion") else { return }
+        completingChallengeId = challenge.id
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "localDay": today?.day ?? todayLocalDay(),
+            "status": challenge.today_status == "completed" ? "partial" : "completed",
+            "sourceType": "today",
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                completingChallengeId = nil
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    errorText = parseAPIError(data) ?? "Could not update challenge."
+                    return
+                }
+                loadChallenges()
+            }
+        }.resume()
+    }
+
     private func openCoach() {
         guard let userId = appState.userId else { return }
         let coach = today?.selectedCoach ?? appState.selectedCoach ?? "zj"
@@ -515,6 +544,11 @@ private struct TodayView: View {
 
     private func openCommunity() {
         appState.requestedTabIndex = 2
+    }
+
+    private func openCoachProfile() {
+        appState.requestedCoachProfileEditor = true
+        appState.requestedTabIndex = 4
     }
 }
 
@@ -629,6 +663,7 @@ private struct TodayPill: View {
 
 private struct TodayExerciseRow: View {
     let exercise: TrainingPlanExercise
+    let weightUnit: String
     let isPending: Bool
     let onToggle: () -> Void
 
@@ -638,23 +673,12 @@ private struct TodayExerciseRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: onToggle) {
-                ZStack {
-                    Circle()
-                        .stroke(isDone ? Color.zymSecondary : Color.zymLine, lineWidth: 2)
-                        .frame(width: 26, height: 26)
-                    if isDone {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(Color.zymSecondaryDark)
-                    } else if isPending {
-                        ProgressView()
-                            .scaleEffect(0.62)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(isPending)
+            ZYMCelebratingCheckButton(
+                isDone: isDone,
+                isPending: isPending,
+                size: 26,
+                action: onToggle
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(exercise.name)
@@ -685,7 +709,11 @@ private struct TodayExerciseRow: View {
     private var exerciseSubtitleText: String {
         var parts: [String] = []
         if let weight = exercise.target_weight_kg, weight > 0 {
-            parts.append("\(Int(weight.rounded())) kg")
+            if weightUnit == "lb" {
+                parts.append("\(Int((weight * 2.20462).rounded())) lb")
+            } else {
+                parts.append("\(Int(weight.rounded())) kg")
+            }
         }
         if let rest = exercise.rest_seconds, rest > 0 {
             parts.append("\(rest)s rest")
@@ -695,6 +723,39 @@ private struct TodayExerciseRow: View {
 
     private var exerciseDoseText: String {
         "\(exercise.sets) x \(exercise.reps)"
+    }
+}
+
+private struct TodayChallengeRow: View {
+    let challenge: ChallengeSummary
+    let isPending: Bool
+    let onToggle: () -> Void
+
+    private var isDone: Bool {
+        challenge.today_status == "completed"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZYMCelebratingCheckButton(
+                isDone: isDone,
+                isPending: isPending,
+                size: 26,
+                action: onToggle
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(challenge.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                Text("\(challenge.member_count) members · \(isDone ? "done today" : "open today")")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.zymSubtext)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
     }
 }
 

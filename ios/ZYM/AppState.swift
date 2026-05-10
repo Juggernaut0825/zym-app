@@ -592,6 +592,7 @@ class AppState: ObservableObject {
 
     @Published var requestedTabIndex: Int?
     @Published var requestedConversationTopic: String?
+    @Published var requestedCoachProfileEditor = false
     @Published var defaultConversationBubbleThemeId: String = conversationBubbleThemePresets[0].id {
         didSet { persistDefaultConversationBubbleThemeIfNeeded() }
     }

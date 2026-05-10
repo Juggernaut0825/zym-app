@@ -65,8 +65,70 @@ private struct CommunityComposerChoice: View {
     }
 }
 
+private struct FeedChallengeSection: View {
+    let challenges: [ChallengeSummary]
+    let loading: Bool
+    let pendingId: Int?
+    let onToggle: (ChallengeSummary) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Challenges")
+                    .font(.custom("Syne", size: 18))
+                    .foregroundColor(Color.zymText)
+                Spacer()
+                if loading {
+                    ProgressView()
+                        .scaleEffect(0.72)
+                }
+            }
+
+            if challenges.isEmpty {
+                Text("No active challenges yet.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.zymSubtext)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(challenges) { challenge in
+                        HStack(spacing: 12) {
+                            ZYMCelebratingCheckButton(
+                                isDone: challenge.today_status == "completed",
+                                isPending: pendingId == challenge.id,
+                                size: 26,
+                                action: { onToggle(challenge) }
+                            )
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(challenge.title)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(Color.zymText)
+                                Text("\(challenge.member_count) members · \(challenge.today_status == "completed" ? "done today" : "open today") · \(challenge.visibility == "public" ? "public" : "friends")")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(Color.zymSubtext)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+
+                        if challenge.id != challenges.last?.id {
+                            Divider().background(Color.zymLine)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.74))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
 struct FeedView: View {
     @State private var posts: [Post] = []
+    @State private var challenges: [ChallengeSummary] = []
     @State private var composerDestination: CommunityComposerDestination?
     @State private var composerMenuOpen = false
     @State private var selectedPost: Post?
@@ -82,6 +144,8 @@ struct FeedView: View {
     @State private var profileLoading = false
     @State private var profileReportPending = false
     @State private var profileActionPending = false
+    @State private var challengesLoading = false
+    @State private var challengePendingId: Int?
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
 
@@ -139,6 +203,16 @@ struct FeedView: View {
                         )
                         .zymAppear(delay: 0.01)
 
+                        if challengesLoading || !challenges.isEmpty {
+                            FeedChallengeSection(
+                                challenges: Array(challenges.prefix(5)),
+                                loading: challengesLoading,
+                                pendingId: challengePendingId,
+                                onToggle: completeChallenge
+                            )
+                            .zymAppear(delay: 0.02)
+                        }
+
                         ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
                             PostCard(
                                 post: post,
@@ -157,6 +231,7 @@ struct FeedView: View {
                 }
                 .refreshable {
                     loadFeed()
+                    loadChallenges()
                     loadNotifications()
                 }
 
@@ -263,6 +338,7 @@ struct FeedView: View {
             .navigationTitle("Community")
             .onAppear {
                 loadFeed()
+                loadChallenges()
                 loadNotifications()
                 connectRealtime()
             }
@@ -283,6 +359,7 @@ struct FeedView: View {
                 case .challenge:
                     CreateChallengeView {
                         composerDestination = nil
+                        loadChallenges()
                         notificationHint = "Challenge created."
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
                             withAnimation(.easeOut(duration: 0.2)) {
@@ -350,6 +427,53 @@ struct FeedView: View {
                     selectedPost = matchingPost
                     self.pendingOpenPostId = nil
                 }
+            }
+        }.resume()
+    }
+
+    func loadChallenges() {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/\(userId)") else { return }
+        challengesLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async {
+                challengesLoading = false
+            }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ChallengesResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                withAnimation(.zymSoft) {
+                    challenges = response.challenges
+                }
+            }
+        }.resume()
+    }
+
+    func completeChallenge(_ challenge: ChallengeSummary) {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/\(challenge.id)/completion") else { return }
+        challengePendingId = challenge.id
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "status": challenge.today_status == "completed" ? "partial" : "completed",
+            "sourceType": "community",
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                challengePendingId = nil
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    notificationHint = parseAPIError(data) ?? "Failed to update challenge."
+                    return
+                }
+                loadChallenges()
             }
         }.resume()
     }
@@ -832,6 +956,7 @@ struct CreateChallengeView: View {
     @State private var title = "7-day consistency"
     @State private var descriptionText = ""
     @State private var goalType = "plan_completion"
+    @State private var visibility = "friends"
     @State private var isCreating = false
     @State private var errorText = ""
     let onCreated: () -> Void
@@ -859,27 +984,31 @@ struct CreateChallengeView: View {
                             Text("Publish challenge")
                                 .font(.custom("Syne", size: 24))
                                 .foregroundColor(Color.zymText)
-                            Text("Make the goal clear enough that every member knows what counts today.")
-                                .font(.system(size: 13))
-                                .foregroundColor(Color.zymSubtext)
-                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .zymCard()
 
-                        challengeField(label: "Title", hint: "Shown on the challenge card.") {
+                        challengeField(label: "Title") {
                             TextField("7-day consistency", text: $title)
                                 .foregroundColor(Color.zymText)
                                 .zymFieldStyle()
                         }
 
-                        challengeField(label: "Description", hint: "What members should do and why it matters.") {
+                        challengeField(label: "Description") {
                             TextField("What does finishing this challenge mean?", text: $descriptionText, axis: .vertical)
                                 .foregroundColor(Color.zymText)
                                 .lineLimit(4...7)
                                 .zymFieldStyle()
                         }
 
-                        challengeField(label: "Daily completion", hint: "This is how the app labels the action for each day.") {
+                        challengeField(label: "Visibility") {
+                            Picker("Visibility", selection: $visibility) {
+                                Text("Friends only").tag("friends")
+                                Text("Public").tag("public")
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        challengeField(label: "Daily completion") {
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                                 ForEach(goalOptions, id: \.value) { option in
                                     Button {
@@ -941,17 +1070,13 @@ struct CreateChallengeView: View {
         }
     }
 
-    private func challengeField<Content: View>(label: String, hint: String, @ViewBuilder content: () -> Content) -> some View {
+    private func challengeField<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(label)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.2)
                 .foregroundColor(Color.zymSubtext)
             content()
-            Text(hint)
-                .font(.system(size: 11))
-                .foregroundColor(Color.zymSubtext)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .background(Color.white.opacity(0.7))
@@ -988,6 +1113,7 @@ struct CreateChallengeView: View {
             "targetCount": 1,
             "startDate": start,
             "endDate": formatter.string(from: end),
+            "visibility": visibility,
             "coachId": appState.selectedCoach ?? "zj",
         ])
 

@@ -856,9 +856,10 @@ export async function createChallenge(payload: {
   targetCount?: number;
   startDate?: string;
   endDate?: string;
+  visibility?: 'friends' | 'public';
   groupId?: number;
   coachId?: 'zj' | 'lc';
-}): Promise<{ success: boolean; challengeId: number }> {
+}): Promise<{ success: boolean; challengeId: number; visibility?: 'friends' | 'public' }> {
   return request('/challenges', {
     method: 'POST',
     body: JSON.stringify(payload),

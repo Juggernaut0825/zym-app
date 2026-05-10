@@ -1154,6 +1154,7 @@ export default function AppPage() {
   const [challengeTitle, setChallengeTitle] = useState('7-day consistency');
   const [challengeDescription, setChallengeDescription] = useState('');
   const [challengeGoalType, setChallengeGoalType] = useState('plan_completion');
+  const [challengeVisibility, setChallengeVisibility] = useState<'public' | 'friends'>('friends');
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDraft, setProfileDraft] = useState({ display_name: '', bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
@@ -3112,11 +3113,13 @@ export default function AppPage() {
           date.setUTCDate(date.getUTCDate() + 6);
           return date.toISOString().slice(0, 10);
         })() : undefined,
+        visibility: challengeVisibility,
         coachId: selectedCoach,
       });
       await loadChallengesData(authUserId);
       setChallengeTitle('7-day consistency');
       setChallengeDescription('');
+      setChallengeVisibility('friends');
       setCommunityCreateMode(null);
       setCommunityComposerOpen(false);
       showNotice('Challenge created.');
@@ -4288,6 +4291,12 @@ export default function AppPage() {
     const planComplete = exercises.length > 0 && completedExercises === exercises.length;
     const todayGoal = String(todayData?.profile?.goal || profile?.fitness_goal || 'Build consistency');
     const experienceLevel = String(todayData?.profile?.experience_level || '').trim();
+    const todayWeightUnit = /\b(lb|lbs|pound|pounds)\b/i.test(String(todayData?.profile?.weight || '')) ? 'lb' : 'kg';
+    const formatTargetWeight = (weightKg?: number | null) => {
+      const numeric = Number(weightKg);
+      if (!Number.isFinite(numeric) || numeric <= 0) return '';
+      return todayWeightUnit === 'lb' ? `${Math.round(numeric * 2.20462)}lb` : `${Math.round(numeric)}kg`;
+    };
     const primaryCoach = selectedCoach || todayData?.selectedCoach || 'zj';
     const displayDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
       todayData?.day ? new Date(`${todayData.day}T00:00:00`) : new Date(),
@@ -4347,8 +4356,14 @@ export default function AppPage() {
                 </span>
                 <div>
                   <p className="text-base font-semibold text-slate-900">{todayGoal}</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{experienceLevel ? `${experienceLevel} plan rhythm.` : 'Small steps, big results.'}</p>
-                  <span className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{progressStatus}</span>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">{experienceLevel ? `${experienceLevel} plan rhythm.` : 'Experience level not set.'}</p>
+                  {experienceLevel ? (
+                    <span className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{progressStatus}</span>
+                  ) : (
+                    <button className="btn btn-ghost mt-3 px-3 py-1.5 text-xs" type="button" onClick={() => setTab('profile')}>
+                      Set experience level
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -4408,7 +4423,7 @@ export default function AppPage() {
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-950">{exercise.name}</p>
                           <p className="mt-0.5 truncate text-xs text-slate-500">
-                            {exercise.sets} sets · {exercise.reps} reps{exercise.target_weight_kg ? ` · ${exercise.target_weight_kg}kg` : ''}{exercise.cue ? ` · ${exercise.cue}` : ''}
+                            {exercise.sets} sets · {exercise.reps} reps{formatTargetWeight(exercise.target_weight_kg) ? ` · ${formatTargetWeight(exercise.target_weight_kg)}` : ''}{exercise.cue ? ` · ${exercise.cue}` : ''}
                           </p>
                         </div>
                         <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 sm:inline-flex">{exercise.sets} x {exercise.reps}</span>
@@ -5564,6 +5579,17 @@ export default function AppPage() {
                               <option value="workouts">Workouts</option>
                               <option value="meals">Meals</option>
                               <option value="steps">Steps</option>
+                            </select>
+                          </label>
+                          <label className="grid gap-1.5">
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Visibility</span>
+                            <select
+                              className="input-shell"
+                              value={challengeVisibility}
+                              onChange={(event) => setChallengeVisibility(event.target.value === 'public' ? 'public' : 'friends')}
+                            >
+                              <option value="friends">Friends only</option>
+                              <option value="public">Public</option>
                             </select>
                           </label>
                           <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading || !challengeTitle.trim()} onClick={() => void handleCreateChallenge()}>

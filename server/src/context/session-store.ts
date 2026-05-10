@@ -98,6 +98,7 @@ function buildPinnedFacts(profile: Record<string, unknown>, daily: Record<string
   const weight = profile.weight ?? profile.weight_kg;
   const age = profile.age;
   const goal = profile.goal;
+  const experienceLevel = profile.experience_level ?? profile.experienceLevel;
   const dailyTarget = profile.daily_target;
 
   if (height && weight) {
@@ -114,6 +115,10 @@ function buildPinnedFacts(profile: Record<string, unknown>, daily: Record<string
 
   if (goal) {
     facts.push(`Current goal: ${goal}`);
+  }
+
+  if (experienceLevel) {
+    facts.push(`Experience level: ${experienceLevel}`);
   }
 
   if (dailyTarget) {

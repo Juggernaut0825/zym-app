@@ -42,7 +42,7 @@ export class SetTrainingPlanTool implements Tool {
               sets: { type: 'number', description: 'Number of working sets.', minimum: 1, maximum: 20 },
               reps: { type: 'string', description: 'Rep target such as 8-10 or 30 sec.', minLength: 1, maxLength: 30 },
               rest_seconds: { type: 'number', description: 'Suggested rest time in seconds.', minimum: 15, maximum: 600 },
-              target_weight_kg: { type: 'number', description: 'Optional target load in kilograms.', minimum: 0, maximum: 500 },
+              target_weight_kg: { type: 'number', description: 'Optional external target load in kilograms. Choose a conservative working-load target when reasonable; for bodyweight-only movements omit this and use notes/cue instead of fake 0 kg.', minimum: 0, maximum: 500 },
               cue: { type: 'string', description: 'One short form or intent cue.', maxLength: 220 },
               notes: { type: 'string', description: 'Optional exercise-specific notes.', maxLength: 500 },
             },

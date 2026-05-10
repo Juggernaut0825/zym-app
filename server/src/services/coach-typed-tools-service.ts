@@ -501,9 +501,11 @@ function inferGoal(value: unknown): 'cut' | 'bulk' | 'maintain' | null {
   return null;
 }
 
-function inferExperienceLevel(value: unknown): 'beginner' | 'intermediate' | 'advanced' | null {
+function inferExperienceLevel(value: unknown): 'first_day' | 'early_beginner' | 'beginner' | 'intermediate' | 'advanced' | null {
   const text = normalizeFreeformProfileText(value, 40).toLowerCase();
   if (!text) return null;
+  if (text.includes('first_day') || text.includes('first day') || text.includes('first workout') || text.includes('zero knowledge')) return 'first_day';
+  if (text.includes('early_beginner') || text.includes('getting started') || text.includes('few times') || text.includes('several times') || text.includes('confused')) return 'early_beginner';
   if (text.includes('beginner')) return 'beginner';
   if (text.includes('intermediate')) return 'intermediate';
   if (text.includes('advanced')) return 'advanced';
@@ -678,7 +680,7 @@ export class CoachTypedToolsService {
     if (trainingDays !== null) out.training_days = trainingDays;
     if (gender) out.gender = inferGender(gender) || gender;
     if (activity) out.activity_level = inferActivityLevel(activity) || activity;
-    if (goal) out.goal = inferGoal(goal) || goal;
+    if (goal) out.goal = goal;
     if (experience) out.experience_level = inferExperienceLevel(experience) || experience;
     if (timezone && isValidTimeZone(timezone)) out.timezone = timezone;
     if (latestCheckInAtRaw) {
@@ -1189,6 +1191,7 @@ export class CoachTypedToolsService {
       safeString(entry.source_plan_id, 120) === plan.id
       && safeString(entry.source_exercise_id, 120) === exercise.id
     ));
+    const targetWeightKg = toNumber(exercise.target_weight_kg, 0, 500);
 
     if (shouldComplete) {
       exercise.completed_at = nowIso();
@@ -1201,7 +1204,7 @@ export class CoachTypedToolsService {
           name: exercise.name,
           sets: exercise.sets,
           reps: exercise.reps,
-          weight_kg: Number.isFinite(Number(exercise.target_weight_kg)) ? Number(exercise.target_weight_kg) : 0,
+          ...(targetWeightKg !== null && targetWeightKg > 0 ? { weight_kg: targetWeightKg } : {}),
           notes: exercise.notes || exercise.cue || '',
           source_plan_id: plan.id,
           source_exercise_id: exercise.id,
@@ -1414,7 +1417,10 @@ export class CoachTypedToolsService {
             name: safeString(entry?.name, 120),
             sets: clampInt(entry?.sets, 0, 60, 0),
             reps: safeString(entry?.reps, 20),
-            weight_kg: toNumber(entry?.weight_kg, 0, 500) ?? 0,
+            weight_kg: (() => {
+              const weightKg = toNumber(entry?.weight_kg, 0, 500);
+              return weightKg !== null && weightKg > 0 ? weightKg : null;
+            })(),
             notes: safeString(entry?.notes, 500),
           });
         }

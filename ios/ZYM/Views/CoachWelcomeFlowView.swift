@@ -539,10 +539,11 @@ struct CoachWelcomeFlowView: View {
                 })
                 welcomeMenu("Training days / week", selection: $state.trainingDays, options: coachTrainingDayOptions)
                 welcomeMenu("Activity level", selection: $state.activityLevel, options: coachActivityLevelOptions)
-                welcomeMenu("Experience level", selection: $state.experienceLevel, options: coachExperienceLevelOptions)
             }
 
-            welcomeInputField("Goal", text: $state.goal, keyboard: .default, placeholder: "Maintain strength while leaning out")
+            CoachExperienceLevelCards(selection: $state.experienceLevel)
+
+            welcomeInputField("Goal", text: $state.goal, keyboard: .default, placeholder: "eg. bulk, add muscle and strength")
 
             Text(requiredContextMessage)
                 .font(.system(size: 12, weight: .medium))

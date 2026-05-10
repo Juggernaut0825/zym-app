@@ -459,6 +459,7 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       start_date TEXT NOT NULL,
       end_date TEXT NOT NULL,
       coach_id TEXT NOT NULL DEFAULT 'zj',
+      visibility TEXT NOT NULL DEFAULT 'friends',
       status TEXT NOT NULL DEFAULT 'active',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -667,6 +668,9 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   }
   if (!challengeColumns.some((column) => column.name === 'description')) {
     sqlite.exec('ALTER TABLE challenges ADD COLUMN description TEXT');
+  }
+  if (!challengeColumns.some((column) => column.name === 'visibility')) {
+    sqlite.exec("ALTER TABLE challenges ADD COLUMN visibility TEXT NOT NULL DEFAULT 'friends'");
   }
 
   sqlite.exec(`
