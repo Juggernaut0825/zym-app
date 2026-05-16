@@ -3328,7 +3328,53 @@ app.post('/challenges',
     }
   });
 
-app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+const CHALLENGE_STEP_TARGET = 4000;
+
+async function computeChallengeTodayStatus(
+  userId: number,
+  goalType: string,
+  today: string,
+  cache: { daily?: CoachDailyRecords | null; trainingPlan?: any },
+): Promise<string | null> {
+  const type = String(goalType || '').toLowerCase();
+  try {
+    if (type === 'plan' || type === 'plan_completion') {
+      if (cache.trainingPlan === undefined) {
+        const result = await coachTypedToolsService.getTrainingPlan(String(userId), { day: today });
+        cache.trainingPlan = (result as any)?.plan || null;
+      }
+      const plan = cache.trainingPlan;
+      const exercises = Array.isArray(plan?.exercises) ? plan.exercises : [];
+      if (exercises.length === 0) return null;
+      const allDone = exercises.every((ex: any) => Boolean(ex?.completed_at));
+      return allDone ? 'completed' : null;
+    }
+    if (type === 'workouts' || type === 'meals') {
+      if (cache.daily === undefined) {
+        const { daily } = await loadCoachDailyRecords(userId);
+        cache.daily = daily;
+      }
+      const bucket = cache.daily?.[today];
+      if (!bucket) return null;
+      if (type === 'workouts') {
+        return Array.isArray(bucket.training) && bucket.training.length > 0 ? 'completed' : null;
+      }
+      return Array.isArray(bucket.meals) && bucket.meals.length > 0 ? 'completed' : null;
+    }
+    if (type === 'steps') {
+      const row = getDB().prepare(`
+        SELECT steps FROM health_data WHERE user_id = ? AND date = ? LIMIT 1
+      `).get(userId, today) as { steps?: number | null } | undefined;
+      const steps = Number(row?.steps || 0);
+      return steps >= CHALLENGE_STEP_TARGET ? 'completed' : null;
+    }
+  } catch (error) {
+    logger.warn(`[challenges] auto today_status failed for user=${userId} type=${type}`, error);
+  }
+  return null;
+}
+
+app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   try {
     const userId = toUserId(req.params.userId);
     const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
@@ -3338,8 +3384,7 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) 
       SELECT
         c.*,
         COALESCE(cm.role, 'viewer') AS role,
-        (SELECT COUNT(*) FROM challenge_members m WHERE m.challenge_id = c.id) AS member_count,
-        (SELECT status FROM challenge_completions cc WHERE cc.challenge_id = c.id AND cc.user_id = ? AND cc.local_day = ? LIMIT 1) AS today_status
+        (SELECT COUNT(*) FROM challenge_members m WHERE m.challenge_id = c.id) AS member_count
       FROM challenges c
       LEFT JOIN challenge_members cm ON cm.challenge_id = c.id AND cm.user_id = ?
       WHERE c.status = 'active'
@@ -3364,29 +3409,29 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), (req, res) 
         )
       ORDER BY c.created_at DESC
       LIMIT 20
-    `).all(userId, today, userId, today, today, userId, userId, userId) as Array<Record<string, unknown>>;
+    `).all(userId, today, today, userId, userId, userId) as Array<Record<string, unknown>>;
 
-    res.json({
-      day: today,
-      challenges: rows.map((row) => ({
-        id: Number(row.id),
-        owner_user_id: Number(row.owner_user_id),
-        group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
-        title: sanitizePlainText(row.title, 120),
-        description: sanitizePlainText(row.description, 280) || null,
-        goal_type: sanitizePlainText(row.goal_type, 40),
-        target_count: Number(row.target_count || 1),
-        start_date: sanitizePlainText(row.start_date, 20),
-        end_date: sanitizePlainText(row.end_date, 20),
-        coach_id: normalizeCoachId(row.coach_id) || 'zj',
-        status: sanitizePlainText(row.status, 20),
-        visibility: normalizeChallengeVisibility(row.visibility, 'friends'),
-        role: sanitizePlainText(row.role, 20),
-        member_count: Number(row.member_count || 0),
-        today_status: sanitizePlainText(row.today_status, 30) || null,
-        created_at: sanitizePlainText(row.created_at, 80),
-      })),
-    });
+    const sourceCache: { daily?: CoachDailyRecords | null; trainingPlan?: any } = {};
+    const challenges = await Promise.all(rows.map(async (row) => ({
+      id: Number(row.id),
+      owner_user_id: Number(row.owner_user_id),
+      group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
+      title: sanitizePlainText(row.title, 120),
+      description: sanitizePlainText(row.description, 280) || null,
+      goal_type: sanitizePlainText(row.goal_type, 40),
+      target_count: Number(row.target_count || 1),
+      start_date: sanitizePlainText(row.start_date, 20),
+      end_date: sanitizePlainText(row.end_date, 20),
+      coach_id: normalizeCoachId(row.coach_id) || 'zj',
+      status: sanitizePlainText(row.status, 20),
+      visibility: normalizeChallengeVisibility(row.visibility, 'friends'),
+      role: sanitizePlainText(row.role, 20),
+      member_count: Number(row.member_count || 0),
+      today_status: await computeChallengeTodayStatus(userId, String(row.goal_type || ''), today, sourceCache),
+      created_at: sanitizePlainText(row.created_at, 80),
+    })));
+
+    res.json({ day: today, challenges });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Failed to load challenges' });
   }
@@ -3462,6 +3507,60 @@ app.post('/challenges/:challengeId/completion',
       res.json({ success: true, challengeId, localDay, status });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to complete challenge' });
+    }
+  });
+
+app.post('/challenges/:challengeId/visibility',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(40, 10 * 60_000, 'challenge-visibility'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    visibility: { required: true, type: 'string', minLength: 1, maxLength: 20 },
+  }),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const challengeId = Number(req.params.challengeId);
+      if (!Number.isInteger(challengeId) || challengeId <= 0) {
+        return res.status(400).json({ error: 'Invalid challengeId' });
+      }
+      const nextVisibility = normalizeChallengeVisibility(req.body.visibility, 'friends');
+      const challenge = getDB().prepare('SELECT id, owner_user_id FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active') as { id: number; owner_user_id: number } | undefined;
+      if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+      if (Number(challenge.owner_user_id) !== userId) {
+        return res.status(403).json({ error: 'Only the owner can change challenge visibility' });
+      }
+      getDB().prepare('UPDATE challenges SET visibility = ? WHERE id = ?').run(nextVisibility, challengeId);
+      res.json({ success: true, challengeId, visibility: nextVisibility });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update challenge visibility' });
+    }
+  });
+
+app.post('/challenges/:challengeId/delete',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(40, 10 * 60_000, 'challenge-delete'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+  }),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const challengeId = Number(req.params.challengeId);
+      if (!Number.isInteger(challengeId) || challengeId <= 0) {
+        return res.status(400).json({ error: 'Invalid challengeId' });
+      }
+      const challenge = getDB().prepare('SELECT id, owner_user_id FROM challenges WHERE id = ?').get(challengeId) as { id: number; owner_user_id: number } | undefined;
+      if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+      if (Number(challenge.owner_user_id) !== userId) {
+        return res.status(403).json({ error: 'Only the owner can delete this challenge' });
+      }
+      getDB().prepare('DELETE FROM challenge_completions WHERE challenge_id = ?').run(challengeId);
+      getDB().prepare('DELETE FROM challenge_members WHERE challenge_id = ?').run(challengeId);
+      getDB().prepare('DELETE FROM challenges WHERE id = ?').run(challengeId);
+      res.json({ success: true, challengeId });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to delete challenge' });
     }
   });
 

@@ -6018,9 +6018,7 @@ export default function AppPage() {
 
           <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
             <section className="rounded-[24px] bg-white/58 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Trending</p>
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">Public tags</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Only hashtags from public posts show up here.</p>
+              <h3 className="text-lg font-semibold text-slate-900">Trending</h3>
               <div className="mt-4 flex flex-wrap gap-2">
                 {trendingHashtags.length > 0 ? trendingHashtags.map((item) => (
                   <button
@@ -6029,7 +6027,7 @@ export default function AppPage() {
                     className="rounded-full bg-slate-100 px-3 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-200"
                     onClick={() => setCommunityQuery(`#${item.tag}`)}
                   >
-                    #{item.tag} <span className="ml-1 text-slate-400">{item.count}</span>
+                    #{item.tag}
                   </button>
                 )) : (
                   <p className="text-sm text-slate-500">No hashtags have been posted yet.</p>

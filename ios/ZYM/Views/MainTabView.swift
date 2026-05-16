@@ -382,8 +382,14 @@ private struct TodayView: View {
                     ForEach(challenges.prefix(3)) { challenge in
                         TodayChallengeRow(
                             challenge: challenge,
+                            isOwner: challenge.owner_user_id == appState.userId,
                             isPending: completingChallengeId == challenge.id,
-                            onToggle: { completeChallenge(challenge) }
+                            onUpdateVisibility: { newVisibility in
+                                updateChallengeVisibility(challenge, visibility: newVisibility)
+                            },
+                            onDelete: {
+                                deleteChallenge(challenge)
+                            }
                         )
                         if challenge.id != challenges.prefix(3).last?.id {
                             Divider().background(Color.zymLine)
@@ -506,9 +512,9 @@ private struct TodayView: View {
         }.resume()
     }
 
-    private func completeChallenge(_ challenge: ChallengeSummary) {
+    private func updateChallengeVisibility(_ challenge: ChallengeSummary, visibility: String) {
         guard let userId = appState.userId,
-              let url = apiURL("/challenges/\(challenge.id)/completion") else { return }
+              let url = apiURL("/challenges/\(challenge.id)/visibility") else { return }
         completingChallengeId = challenge.id
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -516,9 +522,7 @@ private struct TodayView: View {
         applyAuthorizationHeader(&request, token: appState.token)
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "userId": userId,
-            "localDay": today?.day ?? todayLocalDay(),
-            "status": challenge.today_status == "completed" ? "partial" : "completed",
-            "sourceType": "today",
+            "visibility": visibility,
         ])
 
         authorizedDataTask(appState: appState, request: request) { data, response, _ in
@@ -526,7 +530,32 @@ private struct TodayView: View {
                 completingChallengeId = nil
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard statusCode >= 200 && statusCode < 300 else {
-                    errorText = parseAPIError(data) ?? "Could not update challenge."
+                    errorText = parseAPIError(data) ?? "Could not update challenge visibility."
+                    return
+                }
+                loadChallenges()
+            }
+        }.resume()
+    }
+
+    private func deleteChallenge(_ challenge: ChallengeSummary) {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/\(challenge.id)/delete") else { return }
+        completingChallengeId = challenge.id
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, response, _ in
+            DispatchQueue.main.async {
+                completingChallengeId = nil
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard statusCode >= 200 && statusCode < 300 else {
+                    errorText = parseAPIError(data) ?? "Could not delete challenge."
                     return
                 }
                 loadChallenges()
@@ -727,8 +756,14 @@ private struct TodayExerciseRow: View {
 
 private struct TodayChallengeRow: View {
     let challenge: ChallengeSummary
+    let isOwner: Bool
     let isPending: Bool
-    let onToggle: () -> Void
+    let onUpdateVisibility: (String) -> Void
+    let onDelete: () -> Void
+
+    @State private var showDeleteConfirm = false
+    @State private var showVisibilityConfirm = false
+    @State private var pendingVisibility: String?
 
     private var isDone: Bool {
         challenge.today_status == "completed"
@@ -736,12 +771,21 @@ private struct TodayChallengeRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZYMCelebratingCheckButton(
-                isDone: isDone,
-                isPending: isPending,
-                size: 26,
-                action: onToggle
-            )
+            ZStack {
+                Circle()
+                    .fill(isDone ? Color.zymSecondary.opacity(0.16) : Color.clear)
+                    .frame(width: 26, height: 26)
+                Circle()
+                    .stroke(isDone ? Color.zymSecondary : Color.zymLine, lineWidth: 2)
+                    .frame(width: 26, height: 26)
+                if isPending {
+                    ProgressView().scaleEffect(0.58)
+                } else if isDone {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color.zymSecondaryDark)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(challenge.title)
@@ -753,8 +797,58 @@ private struct TodayChallengeRow: View {
             }
 
             Spacer()
+
+            if isOwner {
+                Menu {
+                    let currentVisibility = challenge.visibility ?? "friends"
+                    let nextVisibility = currentVisibility == "public" ? "friends" : "public"
+                    Button {
+                        pendingVisibility = nextVisibility
+                        showVisibilityConfirm = true
+                    } label: {
+                        Label(
+                            nextVisibility == "public" ? "Make Public" : "Make Friends Only",
+                            systemImage: nextVisibility == "public" ? "globe" : "person.2.fill"
+                        )
+                    }
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete Challenge", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color.zymSubtext)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 10)
+        .alert("Delete this challenge?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { onDelete() }
+        } message: {
+            Text("This will permanently remove the challenge and its progress.")
+        }
+        .alert(
+            pendingVisibility == "public" ? "Make challenge public?" : "Make challenge friends only?",
+            isPresented: $showVisibilityConfirm
+        ) {
+            Button("Cancel", role: .cancel) { pendingVisibility = nil }
+            Button("Confirm") {
+                if let next = pendingVisibility {
+                    onUpdateVisibility(next)
+                }
+                pendingVisibility = nil
+            }
+        } message: {
+            Text(pendingVisibility == "public"
+                 ? "Anyone on ZYM will be able to see this challenge."
+                 : "Only your friends will see this challenge.")
+        }
     }
 }
 

@@ -392,6 +392,7 @@ struct TodayResponse: Decodable {
 
 struct ChallengeSummary: Codable, Identifiable {
     let id: Int
+    let owner_user_id: Int?
     let title: String
     let description: String?
     let goal_type: String

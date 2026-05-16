@@ -52,33 +52,42 @@ private func stripCreatePostHashtags(_ content: String) -> String {
 private struct CreatePostToolCircle: View {
     let systemImage: String?
     let text: String?
+    let caption: String
 
-    init(systemImage: String) {
+    init(systemImage: String, caption: String) {
         self.systemImage = systemImage
         self.text = nil
+        self.caption = caption
     }
 
-    init(text: String) {
+    init(text: String, caption: String) {
         self.systemImage = nil
         self.text = text
+        self.caption = caption
     }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.zymSurfaceSoft.opacity(0.86))
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(Color.zymSurfaceSoft.opacity(0.86))
 
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(Color.zymText)
-            } else {
-                Text(text ?? "")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(Color.zymText)
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                } else {
+                    Text(text ?? "")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(Color.zymText)
+                }
             }
+            .frame(width: 52, height: 52)
+
+            Text(caption)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color.zymSubtext)
         }
-        .frame(width: 52, height: 52)
     }
 }
 
@@ -123,9 +132,9 @@ struct CreatePostView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .lineLimit(5...10)
 
-                    HStack(spacing: 8) {
+                    HStack(alignment: .top, spacing: 12) {
                         PhotosPicker(selection: $selectedMedia, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
-                            CreatePostToolCircle(systemImage: "photo.on.rectangle.angled")
+                            CreatePostToolCircle(systemImage: "photo.on.rectangle.angled", caption: "Media")
                         }
                         .buttonStyle(.plain)
                         .onChange(of: selectedMedia) { _, _ in
@@ -141,7 +150,7 @@ struct CreatePostView: View {
                                 content = appendCreatePostHashtag(content, hashtag: first)
                             }
                         }) {
-                            CreatePostToolCircle(text: "#")
+                            CreatePostToolCircle(text: "#", caption: "Hashtag")
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Add hashtag")
@@ -149,7 +158,10 @@ struct CreatePostView: View {
                         Button(action: {
                             showLocationSheet = true
                         }) {
-                            CreatePostToolCircle(systemImage: "location.north.line")
+                            CreatePostToolCircle(
+                                systemImage: "location.north.line",
+                                caption: selectedLocation == nil ? "Location" : "Edit"
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(selectedLocation == nil ? "Add location" : "Edit location")
@@ -163,7 +175,10 @@ struct CreatePostView: View {
                                 visibility = "public"
                             }
                         } label: {
-                            CreatePostToolCircle(systemImage: visibility == "public" ? "globe" : "person.2.fill")
+                            CreatePostToolCircle(
+                                systemImage: visibility == "public" ? "globe" : "person.2.fill",
+                                caption: visibility == "public" ? "Public" : "Friends"
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(visibility == "public" ? "Post visibility public" : "Post visibility friends")

@@ -383,6 +383,9 @@ struct FeedView: View {
                             }
                         }
                     },
+                    onDelete: { postId, completion in
+                        deletePost(postId: postId, completion: completion)
+                    },
                     onOpenProfile: { userId, username, avatarURL in
                         openPublicProfile(userId: userId, username: username, avatarURL: avatarURL)
                     }
@@ -948,6 +951,36 @@ struct FeedView: View {
             }
         }
     }
+
+    func deletePost(postId: Int, completion: @escaping (Bool) -> Void) {
+        guard let userId = appState.userId,
+              let url = apiURL("/community/post/delete") else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "postId": postId,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { _, response, _ in
+            DispatchQueue.main.async {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let success = (200...299).contains(statusCode)
+                if success {
+                    posts.removeAll { $0.id == postId }
+                    if selectedPost?.id == postId {
+                        selectedPost = nil
+                    }
+                }
+                completion(success)
+            }
+        }.resume()
+    }
 }
 
 struct CreateChallengeView: View {
@@ -964,7 +997,7 @@ struct CreateChallengeView: View {
         ("plan_completion", "Plan", "Finish today’s workout", "checklist"),
         ("workouts", "Workouts", "Log a training day", "figure.strengthtraining.traditional"),
         ("meals", "Meals", "Hit a nutrition action", "fork.knife"),
-        ("steps", "Steps", "Move enough today", "figure.walk"),
+        ("steps", "Steps", "Move 4k+ steps today", "figure.walk"),
     ]
 
     var body: some View {
@@ -1350,17 +1383,9 @@ private struct TrendingStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Trending")
-                        .font(.custom("Syne", size: 18))
-                        .foregroundColor(Color.zymText)
-                    Text("Real tags people are using.")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.zymSubtext)
-                }
-                Spacer()
-            }
+            Text("Trending")
+                .font(.custom("Syne", size: 18))
+                .foregroundColor(Color.zymText)
 
             if items.isEmpty {
                 Text("No post tags yet.")
@@ -1370,17 +1395,12 @@ private struct TrendingStrip: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(Array(items.enumerated()), id: \.offset) { entry in
-                            let item = entry.element
-                            HStack(spacing: 5) {
-                                Text("#\(item.tag)")
-                                Text("\(item.count)")
-                                    .foregroundColor(Color.zymSubtext)
-                            }
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.zymSurfaceSoft.opacity(0.92))
-                            .clipShape(Capsule())
+                            Text("#\(entry.element.tag)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.zymSurfaceSoft.opacity(0.92))
+                                .clipShape(Capsule())
                         }
                     }
                 }
@@ -1395,6 +1415,7 @@ struct FeedPostDetailSheet: View {
     let isReacting: Bool
     let onReact: () -> Void
     let onVisibilitySaved: (Int, String) -> Void
+    let onDelete: (Int, @escaping (Bool) -> Void) -> Void
     let onOpenProfile: ((Int, String, String?) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
@@ -1405,18 +1426,22 @@ struct FeedPostDetailSheet: View {
     @State private var visibility: String
     @State private var visibilityPending = false
     @State private var statusText = ""
+    @State private var showDeleteConfirm = false
+    @State private var deletePending = false
 
     init(
         post: Post,
         isReacting: Bool,
         onReact: @escaping () -> Void,
         onVisibilitySaved: @escaping (Int, String) -> Void,
+        onDelete: @escaping (Int, @escaping (Bool) -> Void) -> Void,
         onOpenProfile: ((Int, String, String?) -> Void)?
     ) {
         self.post = post
         self.isReacting = isReacting
         self.onReact = onReact
         self.onVisibilitySaved = onVisibilitySaved
+        self.onDelete = onDelete
         self.onOpenProfile = onOpenProfile
         _visibility = State(initialValue: post.visibility ?? "friends")
     }
@@ -1530,6 +1555,20 @@ struct FeedPostDetailSheet: View {
                                     .clipShape(Capsule())
                                 }
                                 .disabled(visibilityPending)
+
+                                Button {
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Image(systemName: deletePending ? "hourglass" : "trash")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(Color.red)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 9)
+                                        .background(Color.red.opacity(0.08))
+                                        .clipShape(Capsule())
+                                }
+                                .disabled(deletePending)
+                                .accessibilityLabel("Delete post")
                             }
                         }
 
@@ -1637,6 +1676,22 @@ struct FeedPostDetailSheet: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Delete this post?", isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    deletePending = true
+                    onDelete(post.id) { success in
+                        deletePending = false
+                        if success {
+                            dismiss()
+                        } else {
+                            statusText = "Failed to delete post."
+                        }
+                    }
+                }
+            } message: {
+                Text("This post will be removed permanently. This cannot be undone.")
             }
         }
     }
