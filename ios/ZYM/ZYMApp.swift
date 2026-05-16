@@ -165,26 +165,19 @@ private extension View {
 private struct ZYMLaunchSplashView: View {
     @State private var animate = false
 
-    private static let splashBackground = LinearGradient(
-        colors: [
-            Color.black,
-            Color(red: 0.067, green: 0.030, blue: 0.157),
-            Color(red: 0.165, green: 0.094, blue: 0.318),
-        ],
-        startPoint: .topTrailing,
-        endPoint: .bottomLeading
-    )
-
     var body: some View {
         ZStack {
-            Self.splashBackground
+            Color.white.opacity(0.88)
+                .background(.ultraThinMaterial)
                 .ignoresSafeArea()
 
             Image("BrandLogo")
                 .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 320, maxHeight: 320)
-                .opacity(animate ? 1 : 0.35)
+                .scaledToFill()
+                .frame(width: 132, height: 132)
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .shadow(color: Color.black.opacity(0.18), radius: 22, x: 0, y: 12)
+                .opacity(animate ? 1 : 0.4)
                 .scaleEffect(animate ? 1 : 0.94)
         }
         .onAppear {

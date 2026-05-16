@@ -15,64 +15,14 @@ struct InboxView: View {
 
     var body: some View {
         NavigationView {
-            ZStack {
+            ZStack(alignment: .top) {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .top) {
-                            InboxHeaderIconButton(symbol: "magnifyingglass") {
-                                showAddMenu = false
-                                showConnectionsSheet = true
-                            }
-
-                            Spacer(minLength: 16)
-
-                            ZStack(alignment: .topTrailing) {
-                                InboxHeaderIconButton(
-                                    symbol: "plus",
-                                    rotation: showAddMenu ? 45 : 0,
-                                    badgeCount: pendingRequestCount
-                                ) {
-                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                        showAddMenu.toggle()
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        if showAddMenu {
-                            HStack {
-                                Spacer()
-                                QuickActionMenu(pendingRequestCount: pendingRequestCount) {
-                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                        showAddMenu = false
-                                    }
-                                    showAddFriend = true
-                                } onCreateGroup: {
-                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                        showAddMenu = false
-                                    }
-                                    showCreateGroup = true
-                                } onAddCoach: {
-                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                        showAddMenu = false
-                                    }
-                                    showAddCoach = true
-                                }
-                            }
-                            .transition(
-                                .opacity
-                                    .combined(with: .move(edge: .top))
-                                    .combined(with: .scale(scale: 0.96, anchor: .topTrailing))
-                            )
-                        }
-
                         Text("Message")
                             .font(.system(size: 34, weight: .bold))
                             .foregroundColor(Color.zymText)
-                            .padding(.top, showAddMenu ? 2 : 0)
 
                         VStack(spacing: 10) {
                             ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conv in
@@ -85,9 +35,59 @@ struct InboxView: View {
                         }
                     }
                     .padding(.horizontal, 14)
-                    .padding(.top, 8)
+                    .padding(.top, 76)
                     .padding(.bottom, 20)
                 }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top) {
+                        InboxHeaderIconButton(symbol: "magnifyingglass") {
+                            showAddMenu = false
+                            showConnectionsSheet = true
+                        }
+
+                        Spacer(minLength: 16)
+
+                        InboxHeaderIconButton(
+                            symbol: "plus",
+                            rotation: showAddMenu ? 45 : 0,
+                            badgeCount: pendingRequestCount
+                        ) {
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                showAddMenu.toggle()
+                            }
+                        }
+                    }
+
+                    if showAddMenu {
+                        HStack {
+                            Spacer()
+                            QuickActionMenu(pendingRequestCount: pendingRequestCount) {
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                    showAddMenu = false
+                                }
+                                showAddFriend = true
+                            } onCreateGroup: {
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                    showAddMenu = false
+                                }
+                                showCreateGroup = true
+                            } onAddCoach: {
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                    showAddMenu = false
+                                }
+                                showAddCoach = true
+                            }
+                        }
+                        .transition(
+                            .opacity
+                                .combined(with: .move(edge: .top))
+                                .combined(with: .scale(scale: 0.96, anchor: .topTrailing))
+                        )
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
             }
             .navigationBarHidden(true)
             .background(

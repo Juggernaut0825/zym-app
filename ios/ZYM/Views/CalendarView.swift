@@ -831,17 +831,17 @@ private struct CalendarTrendLineChart: View {
                                 .position(item.point)
                         }
 
-                        ForEach(axisLabels(from: chartPoints, chartWidth: plotSize.width), id: \.index) { item in
+                        ForEach(xAxisTicks(chartWidth: plotSize.width, originX: plotOrigin.x), id: \.pointIndex) { item in
                             Path { path in
-                                path.move(to: CGPoint(x: item.point.x, y: axisY - 4))
-                                path.addLine(to: CGPoint(x: item.point.x, y: axisY + 4))
+                                path.move(to: CGPoint(x: item.x, y: axisY - 4))
+                                path.addLine(to: CGPoint(x: item.x, y: axisY + 4))
                             }
                             .stroke(Color.zymSubtext.opacity(0.55), lineWidth: 1)
 
                             Text(calendarShortAxisLabel(item.day))
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundColor(Color.zymSubtext)
-                                .position(x: item.point.x, y: axisY + 15)
+                                .position(x: item.x, y: axisY + 15)
                         }
                     }
                 }
@@ -897,24 +897,22 @@ private struct CalendarTrendLineChart: View {
         }
     }
 
-    private func axisLabels(from chartPoints: [(index: Int, day: String, point: CGPoint)], chartWidth: CGFloat) -> [(index: Int, day: String, point: CGPoint)] {
-        guard chartPoints.count > 1 else { return chartPoints }
-        let minSpacing: CGFloat = 48
-        let maxLabels = max(2, Int(chartWidth / minSpacing))
-        let totalPoints = chartPoints.count
-        if totalPoints <= maxLabels { return chartPoints }
-        let step = max(1, (totalPoints - 1) / (maxLabels - 1))
-        let lastIndex = totalPoints - 1
-        var selected: [Int] = [0]
-        var next = step
-        while next < lastIndex {
-            selected.append(next)
-            next += step
+    private func xAxisTicks(chartWidth: CGFloat, originX: CGFloat) -> [(pointIndex: Int, x: CGFloat, day: String)] {
+        guard points.count >= 2 else { return [] }
+        let maxIndex = points.count - 1
+        let horizontalInset: CGFloat = 18
+        let drawableWidth = max(1, chartWidth - horizontalInset * 2)
+        let minSpacing: CGFloat = 64
+        let maxLabels = max(2, min(points.count, Int(drawableWidth / minSpacing)))
+        let denom = max(1, maxLabels - 1)
+        var indices: Set<Int> = []
+        for i in 0..<maxLabels {
+            let pointIndex = Int(round(Double(i) * Double(maxIndex) / Double(denom)))
+            indices.insert(min(max(pointIndex, 0), maxIndex))
         }
-        selected.append(lastIndex)
-        let wanted = Set(selected)
-        return chartPoints.enumerated().compactMap { offset, item in
-            wanted.contains(offset) ? item : nil
+        return indices.sorted().map { idx in
+            let x = originX + horizontalInset + (CGFloat(idx) / CGFloat(maxIndex) * drawableWidth)
+            return (pointIndex: idx, x: x, day: points[idx].day)
         }
     }
 }

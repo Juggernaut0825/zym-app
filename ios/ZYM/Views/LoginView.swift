@@ -47,9 +47,10 @@ struct LoginView: View {
 
                     Image("BrandLogo")
                         .resizable()
-                        .scaledToFit()
-                        .frame(width: 116, height: 116)
-                        .shadow(color: Color.zymSecondary.opacity(0.22), radius: 18, x: 0, y: 10)
+                        .scaledToFill()
+                        .frame(width: 96, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
                     Text("AI coach + community")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color.zymSubtext)
