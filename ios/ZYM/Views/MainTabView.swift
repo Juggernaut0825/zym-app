@@ -181,6 +181,8 @@ private struct TodayView: View {
     @State private var completingExerciseId: String?
     @State private var completingChallengeId: Int?
     @State private var trainingExpanded = true
+    @State private var showWorkoutShareSheet = false
+    @State private var previewExercise: TrainingPlanExercise?
 
     private var completedExercises: Int {
         today?.trainingPlan?.exercises.filter { $0.completed_at != nil }.count ?? 0
@@ -227,6 +229,19 @@ private struct TodayView: View {
             .onAppear(perform: loadAll)
             .onChange(of: appState.userId) { _, _ in
                 loadAll()
+            }
+            .sheet(isPresented: $showWorkoutShareSheet) {
+                if let plan = today?.trainingPlan {
+                    WorkoutShareSheet(
+                        plan: plan,
+                        day: today?.day ?? todayLocalDay(),
+                        userDisplayName: appState.username
+                    )
+                    .environmentObject(appState)
+                }
+            }
+            .sheet(item: $previewExercise) { exercise in
+                ExercisePreviewSheet(exercise: exercise)
             }
         }
     }
@@ -310,19 +325,35 @@ private struct TodayView: View {
 
                     if trainingExpanded {
                         if hasCompletedPlan {
-                            HStack(spacing: 14) {
-                                TodayPlanCompleteGraphic()
-                                    .frame(width: 116, height: 86)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Plan complete")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundColor(Color.zymText)
-                                    Text("You finished every exercise today.")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 14) {
+                                    TodayPlanCompleteGraphic()
+                                        .frame(width: 76, height: 76)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Plan complete")
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundColor(Color.zymText)
+                                        Text("You finished every exercise today.")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.zymSubtext)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
+
+                                Button(action: { showWorkoutShareSheet = true }) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 13, weight: .semibold))
+                                        Text("Share workout card")
+                                            .font(.system(size: 14, weight: .semibold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(ZYMPrimaryButton())
                             }
                             .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.zymSurfaceSoft.opacity(0.54))
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                             .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -334,7 +365,8 @@ private struct TodayView: View {
                                     exercise: exercise,
                                     weightUnit: preferredWeightUnit,
                                     isPending: completingExerciseId == exercise.id,
-                                    onToggle: { completeExercise(exercise) }
+                                    onToggle: { completeExercise(exercise) },
+                                    onPreview: { previewExercise = exercise }
                                 )
                                 if exercise.id != plan.exercises.last?.id {
                                     Divider().background(Color.zymLine)
@@ -694,9 +726,19 @@ private struct TodayExerciseRow: View {
     let weightUnit: String
     let isPending: Bool
     let onToggle: () -> Void
+    let onPreview: () -> Void
 
     private var isDone: Bool {
         exercise.completed_at != nil
+    }
+
+    private var previewURL: URL? {
+        let candidate = exercise.demo_thumbnail
+            ?? exercise.demo_url
+            ?? exercise.demo_image_urls?.first
+            ?? exercise.demo_video_url
+        guard let candidate, !candidate.isEmpty else { return nil }
+        return URL(string: candidate)
     }
 
     var body: some View {
@@ -708,21 +750,28 @@ private struct TodayExerciseRow: View {
                 action: onToggle
             )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(exercise.name)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Color.zymText)
-                Text(exerciseSubtitleText)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color.zymSubtext)
-                if let cue = exercise.cue, !cue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(cue)
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.zymSubtext.opacity(0.86))
-                        .lineLimit(2)
-                }
+            Button(action: onPreview) {
+                exerciseThumbnail
             }
-            Spacer()
+            .buttonStyle(.plain)
+
+            Button(action: onPreview) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(exercise.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                        .lineLimit(2)
+                    if let weightLabel = exerciseWeightLabel {
+                        Text(weightLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             Text(exerciseDoseText)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(Color.zymPrimaryDark)
@@ -734,19 +783,42 @@ private struct TodayExerciseRow: View {
         .padding(.vertical, 10)
     }
 
-    private var exerciseSubtitleText: String {
-        var parts: [String] = []
-        if let weight = exercise.target_weight_kg, weight > 0 {
-            if weightUnit == "lb" {
-                parts.append("\(Int((weight * 2.20462).rounded())) lb")
+    @ViewBuilder
+    private var exerciseThumbnail: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.zymSurfaceSoft.opacity(0.7))
+            if let url = previewURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Image(systemName: "figure.strengthtraining.traditional")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color.zymPrimary.opacity(0.7))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
-                parts.append("\(Int(weight.rounded())) kg")
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(Color.zymPrimary.opacity(0.7))
             }
         }
-        if let rest = exercise.rest_seconds, rest > 0 {
-            parts.append("\(rest)s rest")
+        .frame(width: 52, height: 52)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.zymLine.opacity(0.6), lineWidth: 1)
+        )
+    }
+
+    private var exerciseWeightLabel: String? {
+        guard let weight = exercise.target_weight_kg, weight > 0 else { return nil }
+        if weightUnit == "lb" {
+            return "\(Int((weight * 2.20462).rounded())) lb"
         }
-        return parts.isEmpty ? "Ready" : parts.joined(separator: " · ")
+        return "\(Int(weight.rounded())) kg"
     }
 
     private var exerciseDoseText: String {
@@ -880,42 +952,48 @@ private struct TodayShortcutButton: View {
 
 private struct TodayPlanCompleteGraphic: View {
     var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-            var base = Path()
-            base.move(to: CGPoint(x: w * 0.15, y: h * 0.88))
-            base.addLine(to: CGPoint(x: w * 0.85, y: h * 0.88))
-            context.stroke(base, with: .color(Color.zymSubtext.opacity(0.22)), lineWidth: 5)
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.36, green: 0.74, blue: 0.47).opacity(0.20),
+                            Color.zymSecondary.opacity(0.10),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 76, height: 76)
 
-            let board = CGRect(x: w * 0.34, y: h * 0.16, width: w * 0.42, height: h * 0.64)
-            context.fill(Path(roundedRect: board, cornerRadius: 10), with: .color(Color.zymSurface))
-            context.stroke(Path(roundedRect: board, cornerRadius: 10), with: .color(Color.zymLine), lineWidth: 1.4)
-
-            let clip = CGRect(x: w * 0.45, y: h * 0.08, width: w * 0.2, height: h * 0.15)
-            context.fill(Path(roundedRect: clip, cornerRadius: 6), with: .color(Color.zymPrimaryDark))
-
-            for index in 0..<3 {
-                let y = h * (0.33 + Double(index) * 0.16)
-                let checkStart = CGPoint(x: w * 0.41, y: y + h * 0.04)
-                var check = Path()
-                check.move(to: checkStart)
-                check.addLine(to: CGPoint(x: w * 0.45, y: y + h * 0.08))
-                check.addLine(to: CGPoint(x: w * 0.53, y: y - h * 0.02))
-                context.stroke(check, with: .color(Color.green.opacity(0.82)), lineWidth: 3)
-
-                var line = Path()
-                line.move(to: CGPoint(x: w * 0.58, y: y + h * 0.03))
-                line.addLine(to: CGPoint(x: w * 0.69, y: y + h * 0.03))
-                context.stroke(line, with: .color(Color.zymSubtext.opacity(0.24)), lineWidth: 3)
-            }
-
-            let weight = CGRect(x: w * 0.14, y: h * 0.62, width: w * 0.25, height: h * 0.17)
-            context.fill(Path(roundedRect: weight, cornerRadius: 10), with: .color(Color.zymPrimaryDark.opacity(0.9)))
-            context.fill(Path(ellipseIn: CGRect(x: w * 0.08, y: h * 0.74, width: w * 0.15, height: w * 0.15)), with: .color(Color.zymPrimary.opacity(0.85)))
-            context.fill(Path(ellipseIn: CGRect(x: w * 0.29, y: h * 0.74, width: w * 0.15, height: w * 0.15)), with: .color(Color.zymPrimary.opacity(0.85)))
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 38, weight: .semibold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.36, green: 0.74, blue: 0.47),
+                            Color.zymPrimaryDark,
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
         }
     }
+}
+
+#Preview("Plan empty") {
+    TodayPlanEmptyGraphic()
+        .frame(width: 92, height: 92)
+        .padding(40)
+        .background(Color.white)
+}
+
+#Preview("Plan complete") {
+    TodayPlanCompleteGraphic()
+        .frame(width: 76, height: 76)
+        .padding(40)
+        .background(Color.white)
 }
 
 private struct TodayPlanEmptyGraphic: View {

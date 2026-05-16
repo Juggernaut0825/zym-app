@@ -355,7 +355,29 @@ struct FeedView: View {
             .sheet(item: $composerDestination) { destination in
                 switch destination {
                 case .post:
-                    CreatePostView(onPost: loadFeed)
+                    let initialAttachment: PostDraftAttachment? = appState.pendingPostAttachmentPNG.map { data in
+                        PostDraftAttachment(
+                            data: data,
+                            kind: .image,
+                            filename: "workout-share.png",
+                            contentType: "image/png",
+                            previewURL: nil
+                        )
+                    }
+                    let initialContent = appState.pendingPostInitialContent ?? ""
+                    let initialVisibility = initialAttachment != nil ? "public" : "friends"
+                    CreatePostView(
+                        onPost: {
+                            loadFeed()
+                        },
+                        initialContent: initialContent,
+                        initialAttachment: initialAttachment,
+                        initialVisibility: initialVisibility
+                    )
+                    .onAppear {
+                        appState.pendingPostAttachmentPNG = nil
+                        appState.pendingPostInitialContent = nil
+                    }
                 case .challenge:
                     CreateChallengeView {
                         composerDestination = nil
@@ -368,6 +390,16 @@ struct FeedView: View {
                         }
                     }
                     .environmentObject(appState)
+                }
+            }
+            .onChange(of: appState.pendingPostAttachmentPNG) { _, newValue in
+                if newValue != nil {
+                    composerDestination = .post
+                }
+            }
+            .onAppear {
+                if appState.pendingPostAttachmentPNG != nil {
+                    composerDestination = .post
                 }
             }
             .sheet(item: $selectedPost) { post in

@@ -103,17 +103,29 @@ struct PostDraftAttachment: Identifiable {
 struct CreatePostView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var appState: AppState
-    @State private var content = ""
+    @State private var content: String
     @State private var selectedMedia: [PhotosPickerItem] = []
-    @State private var draftAttachments: [PostDraftAttachment] = []
+    @State private var draftAttachments: [PostDraftAttachment]
     @State private var isPosting = false
-    @State private var visibility = defaultCommunityPostVisibility
+    @State private var visibility: String
     @State private var selectedLocation: SharedLocationSelectionPayload?
     @State private var showLocationSheet = false
     @State private var shareLocationWithNearby = true
     @State private var composerStatusText = ""
     @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     let onPost: () -> Void
+
+    init(
+        onPost: @escaping () -> Void,
+        initialContent: String = "",
+        initialAttachment: PostDraftAttachment? = nil,
+        initialVisibility: String = defaultCommunityPostVisibility
+    ) {
+        self.onPost = onPost
+        _content = State(initialValue: initialContent)
+        _draftAttachments = State(initialValue: initialAttachment.map { [$0] } ?? [])
+        _visibility = State(initialValue: initialVisibility)
+    }
 
     private var hashtagSuggestions: [String] {
         createPostHashtagSuggestions(from: content)

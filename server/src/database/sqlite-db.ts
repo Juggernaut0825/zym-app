@@ -585,6 +585,28 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (media_asset_id, entity_type, entity_id, entity_key)
     );
+
+    CREATE TABLE IF NOT EXISTS exercise_library_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      external_id TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      body_part TEXT,
+      target_muscle TEXT,
+      equipment TEXT,
+      secondary_muscles TEXT,
+      instructions TEXT,
+      gif_url TEXT,
+      video_url TEXT,
+      image_urls TEXT,
+      embedding TEXT,
+      search_text TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_external_id ON exercise_library_v2(external_id);
+    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_body_part ON exercise_library_v2(body_part);
+    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_equipment ON exercise_library_v2(equipment);
   `);
 
   const userColumns = sqlite.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;

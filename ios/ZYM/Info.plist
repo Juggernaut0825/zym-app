@@ -28,6 +28,17 @@
 	<string>ZYM uses your location to attach places to posts and help you discover nearby members when you choose to share it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ZYM lets you choose photos and videos to attach to messages.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>ZYM saves workout share cards to your photo library so you can repost them anywhere.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram-stories</string>
+		<string>instagram</string>
+		<string>twitter</string>
+		<string>fb</string>
+		<string>fbauth2</string>
+		<string>whatsapp</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

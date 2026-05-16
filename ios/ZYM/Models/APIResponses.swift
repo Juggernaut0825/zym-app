@@ -359,6 +359,7 @@ struct CoachRecordsResponse: Decodable {
 
 struct TrainingPlanExercise: Codable, Identifiable {
     let id: String
+    let exercise_key: String?
     let order: Int?
     let name: String
     let sets: Int
@@ -367,6 +368,14 @@ struct TrainingPlanExercise: Codable, Identifiable {
     let target_weight_kg: Double?
     let cue: String?
     let notes: String?
+    let demo_url: String?
+    let demo_thumbnail: String?
+    let demo_video_url: String?
+    let demo_image_urls: [String]?
+    let body_part: String?
+    let target_muscle: String?
+    let equipment: String?
+    let instructions: [String]?
     let completed_at: String?
 }
 

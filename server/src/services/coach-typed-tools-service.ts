@@ -14,6 +14,7 @@ import {
   resolveExerciseLibraryEntry,
   searchExerciseLibrary as searchExerciseLibraryEntries,
 } from './exercise-library-service.js';
+import { ExerciseSearchService } from './exercise-search-service.js';
 import { getDB } from '../database/runtime-db.js';
 import { resolveUserDataDir, resolveUserScopedPath } from '../utils/path-resolver.js';
 import { logger } from '../utils/logger.js';
@@ -60,6 +61,12 @@ interface TrainingPlanExercise {
   notes?: string;
   demo_url?: string;
   demo_thumbnail?: string;
+  demo_video_url?: string;
+  demo_image_urls?: string[];
+  body_part?: string | null;
+  target_muscle?: string | null;
+  equipment?: string | null;
+  instructions?: string[];
   completed_at?: string | null;
 }
 
@@ -924,6 +931,34 @@ export class CoachTypedToolsService {
   }
 
   private async hydrateTrainingExerciseDemo(input: TrainingPlanExercise): Promise<TrainingPlanExercise> {
+    // Prefer the new exercise_library_v2 entry (sourced from ExerciseDB) when available.
+    const v2Entry = input.exercise_key
+      ? ExerciseSearchService.getByExternalId(input.exercise_key)
+      : ExerciseSearchService.getByName(input.name);
+
+    if (v2Entry) {
+      const base: TrainingPlanExercise = {
+        ...input,
+        exercise_key: v2Entry.externalId,
+        name: v2Entry.name,
+        body_part: v2Entry.bodyPart ?? input.body_part ?? null,
+        target_muscle: v2Entry.targetMuscle ?? input.target_muscle ?? null,
+        equipment: v2Entry.equipment ?? input.equipment ?? null,
+        instructions: v2Entry.instructions.length > 0 ? v2Entry.instructions : input.instructions,
+        demo_url: input.demo_url || v2Entry.gifUrl || v2Entry.imageUrls[0] || undefined,
+        demo_video_url: input.demo_video_url || v2Entry.videoUrl || v2Entry.gifUrl || undefined,
+        demo_image_urls: input.demo_image_urls && input.demo_image_urls.length > 0
+          ? input.demo_image_urls
+          : (v2Entry.imageUrls.length > 0 ? v2Entry.imageUrls : (v2Entry.gifUrl ? [v2Entry.gifUrl] : [])),
+        demo_thumbnail: input.demo_thumbnail || v2Entry.imageUrls[0] || v2Entry.gifUrl || undefined,
+      };
+      if (base.demo_url) {
+        base.demo_thumbnail = buildDemoThumbnailUrl(base.demo_url, base.demo_thumbnail);
+      }
+      return base;
+    }
+
+    // Fall back to legacy hardcoded library.
     const keyedEntry = input.exercise_key ? getExerciseLibraryEntry(input.exercise_key) : null;
     const matchedEntry = keyedEntry || resolveExerciseLibraryEntry(input.name);
     const base: TrainingPlanExercise = matchedEntry
@@ -933,6 +968,9 @@ export class CoachTypedToolsService {
           name: matchedEntry.name,
           demo_url: input.demo_url || matchedEntry.demoUrl,
           demo_thumbnail: input.demo_thumbnail || matchedEntry.thumbnailUrl,
+          demo_image_urls: input.demo_image_urls && input.demo_image_urls.length > 0
+            ? input.demo_image_urls
+            : matchedEntry.imageUrls,
         }
       : input;
 

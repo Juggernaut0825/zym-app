@@ -10,6 +10,7 @@ import { ListRecentRecordsTool } from './list-recent-records-tool.js';
 import { LogCheckInTool } from './log-check-in-tool.js';
 import { LogMealTool } from './log-meal-tool.js';
 import { LogTrainingTool } from './log-training-tool.js';
+import { SearchExerciseTool } from './search-exercise-tool.js';
 import { SearchKnowledgeTool } from './search-knowledge-tool.js';
 import { SearchMessageHistoryTool } from './search-message-history-tool.js';
 import { SetProfileTool } from './set-profile-tool.js';
@@ -34,6 +35,7 @@ export function createDefaultTypedTools(): Tool[] {
     new UpdateTrainingRecordTool(),
     new DeleteRecordTool(),
     new SearchKnowledgeTool(),
+    new SearchExerciseTool(),
     new SearchMessageHistoryTool(),
     new GetMediaAnalysesTool(),
   ];
