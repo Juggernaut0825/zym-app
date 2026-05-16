@@ -3122,6 +3122,7 @@ struct ConversationPublicProfileResponse: Codable {
 
 struct ConversationPublicProfile: Codable {
     let id: Int
+    let public_uuid: String?
     let username: String
     let display_name: String?
     let avatar_url: String?
@@ -3275,9 +3276,11 @@ struct ConversationProfileSheet: View {
                                     Text(profile.profile.username)
                                         .font(.custom("Syne", size: 26))
                                         .foregroundColor(Color.zymText)
-                                    Text("User ID: \(profile.profile.id)")
+                                    Text("ID \(profile.profile.public_uuid ?? String(profile.profile.id))")
                                         .font(.system(size: 12))
                                         .foregroundColor(Color.zymSubtext)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
                                 Spacer()
                             }

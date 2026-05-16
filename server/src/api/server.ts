@@ -2092,13 +2092,16 @@ app.get('/users/search', (req, res) => {
     return res.json({ users: [] });
   }
 
+  const pattern = `%${q.toLowerCase()}%`;
   const users = getDB().prepare(`
     SELECT id, public_uuid, ${displayNameSql()} AS username, username AS account_username, ${displayNameSql()} AS display_name, avatar_url
     FROM users
-    WHERE username LIKE ? OR display_name LIKE ?
+    WHERE LOWER(username) LIKE ?
+       OR LOWER(COALESCE(display_name, '')) LIKE ?
+       OR LOWER(COALESCE(email, '')) LIKE ?
     ORDER BY display_name ASC, username ASC
     LIMIT 12
-  `).all(`%${q}%`, `%${q}%`).map((row: any) => ({
+  `).all(pattern, pattern, pattern).map((row: any) => ({
     id: Number(row.id),
     public_uuid: String(row.public_uuid || '').trim() || null,
     username: String(row.username || ''),
@@ -3621,6 +3624,7 @@ app.get('/profile/public/:userId', async (req, res) => {
       friendship_status: friendshipStatus,
       profile: {
         id: user.id,
+        public_uuid: String(user.public_uuid || '').trim() || null,
         username: user.display_name || user.username,
         account_username: user.username,
         display_name: user.display_name || user.username,
