@@ -27,8 +27,7 @@ final class ZYMAppDelegate: NSObject, UIApplicationDelegate {
 
     private func configurePlaybackAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-            try AVAudioSession.sharedInstance().setActive(true)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
         } catch {
             // Video playback still works without this; the category only allows sound while the mute switch is on.
         }
@@ -63,7 +62,9 @@ struct ZYMApp: App {
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
+            .preferredColorScheme(.light)
             .onAppear {
+                applyLightModeToAllWindows()
                 notificationManager.refreshAuthorizationStatus()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
                     withAnimation(.zymSoft) {
@@ -73,11 +74,21 @@ struct ZYMApp: App {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
-                    try? AVAudioSession.sharedInstance().setActive(true)
+                    applyLightModeToAllWindows()
                     notificationManager.refreshAuthorizationStatus()
                 }
             }
             .zymInstallKeyboardDismissal()
+        }
+    }
+}
+
+private func applyLightModeToAllWindows() {
+    for scene in UIApplication.shared.connectedScenes {
+        if let windowScene = scene as? UIWindowScene {
+            for window in windowScene.windows {
+                window.overrideUserInterfaceStyle = .light
+            }
         }
     }
 }
@@ -154,32 +165,31 @@ private extension View {
 private struct ZYMLaunchSplashView: View {
     @State private var animate = false
 
+    private static let splashBackground = LinearGradient(
+        colors: [
+            Color(red: 0.085, green: 0.067, blue: 0.165),
+            Color(red: 0.157, green: 0.115, blue: 0.255),
+            Color(red: 0.067, green: 0.055, blue: 0.137),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     var body: some View {
         ZStack {
-            ZYMBackgroundLayer()
+            Self.splashBackground
                 .ignoresSafeArea()
 
-            VStack(spacing: 12) {
-                Image("BrandLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 96, height: 96)
-                    .shadow(color: Color.zymSecondary.opacity(0.24), radius: 18, x: 0, y: 10)
-                    .scaleEffect(animate ? 1 : 0.92)
-
-                Text("ZYM")
-                    .font(.custom("Syne", size: 30))
-                    .foregroundColor(Color.zymText)
-
-                Text("Community + AI Coach")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color.zymSubtext)
-            }
-            .opacity(animate ? 1 : 0.3)
-            .offset(y: animate ? 0 : 12)
+            Text("ZYM")
+                .font(.custom("Syne", size: 72))
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .tracking(4)
+                .opacity(animate ? 1 : 0.25)
+                .scaleEffect(animate ? 1 : 0.94)
         }
         .onAppear {
-            withAnimation(.zymSpring) {
+            withAnimation(.easeOut(duration: 0.55)) {
                 animate = true
             }
         }

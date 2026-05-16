@@ -213,7 +213,7 @@ export class MessageService {
           FROM users
           WHERE id = ?
         `).get(otherUserId) as any;
-        const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(item.topic) as any;
+        const preview = db.prepare('SELECT content, media_urls FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(item.topic) as any;
         const unreadRow = unreadCountStmt.get(item.topic, currentUserId, item.topic, currentUserId) as { count?: number } | undefined;
         const mentionRow = unreadMentionStmt.get(currentUserId, item.topic) as { count?: number } | undefined;
 
@@ -224,7 +224,7 @@ export class MessageService {
           display_name: user?.display_name || user?.username || `User ${otherUserId}`,
           avatar_url: user?.avatar_url || null,
           last_message_at: normalizeTimestamp(item.last_message_at),
-          last_message_preview: preview?.content || '',
+          last_message_preview: preview?.content || (preview?.media_urls ? '📷 Photo' : ''),
           unread_count: Number(unreadRow?.count || 0),
           mention_count: Number(mentionRow?.count || 0),
         };
@@ -241,7 +241,7 @@ export class MessageService {
       ORDER BY last_message_at DESC
     `).all(currentUserId).map((group: any) => {
       const topic = `grp_${group.id}`;
-      const preview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(topic) as any;
+      const preview = db.prepare('SELECT content, media_urls FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(topic) as any;
       const unreadRow = unreadCountStmt.get(topic, currentUserId, topic, currentUserId) as { count?: number } | undefined;
       const mentionRow = unreadMentionStmt.get(currentUserId, topic) as { count?: number } | undefined;
       return {
@@ -250,7 +250,7 @@ export class MessageService {
         name: group.name,
         coach_enabled: group.coach_enabled,
         last_message_at: normalizeTimestamp(group.last_message_at) || null,
-        last_message_preview: preview?.content || '',
+        last_message_preview: preview?.content || (preview?.media_urls ? '📷 Photo' : ''),
         unread_count: Number(unreadRow?.count || 0),
         mention_count: Number(mentionRow?.count || 0),
       };
@@ -259,7 +259,7 @@ export class MessageService {
     const coaches = enabledCoaches.map((coachId) => {
       const coachTopic = buildCoachTopic(currentUserId, coachId);
       const coachLast = db.prepare('SELECT MAX(created_at) as last_message_at FROM messages WHERE topic = ?').get(coachTopic) as any;
-      const coachPreview = db.prepare('SELECT content FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
+      const coachPreview = db.prepare('SELECT content, media_urls FROM messages WHERE topic = ? ORDER BY created_at DESC LIMIT 1').get(coachTopic) as any;
       const coachUnread = unreadCountStmt.get(coachTopic, currentUserId, coachTopic, currentUserId) as { count?: number } | undefined;
       const coachMentions = unreadMentionStmt.get(currentUserId, coachTopic) as { count?: number } | undefined;
 
@@ -268,7 +268,7 @@ export class MessageService {
         coach_name: coachDisplayName(coachId),
         topic: coachTopic,
         last_message_at: normalizeTimestamp(coachLast?.last_message_at) || null,
-        last_message_preview: coachPreview?.content || '',
+        last_message_preview: coachPreview?.content || (coachPreview?.media_urls ? '📷 Photo' : ''),
         unread_count: Number(coachUnread?.count || 0),
         mention_count: Number(coachMentions?.count || 0),
       };

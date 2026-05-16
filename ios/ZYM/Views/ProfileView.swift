@@ -138,40 +138,6 @@ struct ProfileView: View {
                         .buttonStyle(.plain)
                         .zymAppear(delay: 0.18)
 
-                        Button {
-                            showCoachRecordsSheet = true
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "figure.strengthtraining.traditional")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(Color.zymPrimaryDark)
-                                    .frame(width: 36, height: 36)
-                                    .background(Color.zymSurfaceSoft)
-                                    .clipShape(Circle())
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Coach profile")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(Color.zymText)
-                                    Text("Goal, training days, experience level")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.zymSubtext)
-                                        .lineLimit(2)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(Color.zymSubtext)
-                            }
-                            .padding(14)
-                            .background(Color.white.opacity(0.78))
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .zymAppear(delay: 0.2)
-
                         Button(action: performLogout) {
                             Text(logoutPending ? "Logging out..." : "Logout")
                                 .frame(maxWidth: .infinity)

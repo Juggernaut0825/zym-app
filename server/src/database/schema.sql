@@ -257,11 +257,13 @@ CREATE TABLE IF NOT EXISTS challenges (
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   coach_id TEXT NOT NULL DEFAULT 'zj',
+  visibility TEXT NOT NULL DEFAULT 'friends',
   status TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE challenges ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE challenges ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'friends';
 
 CREATE TABLE IF NOT EXISTS challenge_members (
   challenge_id BIGINT NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,

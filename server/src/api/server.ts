@@ -3762,9 +3762,11 @@ app.get('/today/:userId', requireSameUserIdFromParam('userId'), async (req, res)
   try {
     const userId = toUserId(req.params.userId);
     const profile = await coachTypedToolsService.getProfile(String(userId));
-    const timezone = isValidTimeZone(String((profile as any)?.timezone || ''))
-      ? String((profile as any).timezone)
-      : 'UTC';
+    const profileTimezone = String((profile as any)?.timezone || '').trim();
+    const requestTimezone = String(req.query.timezone || '').trim();
+    const timezone = isValidTimeZone(profileTimezone)
+      ? profileTimezone
+      : (isValidTimeZone(requestTimezone) ? requestTimezone : 'UTC');
     const today = localDayForTimezone(new Date(), timezone);
     const { daily, changed } = await loadCoachDailyRecords(userId);
     const progressSummary = computeCoachProgressSummary(daily, (profile as any)?.goal);

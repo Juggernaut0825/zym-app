@@ -9,6 +9,7 @@ struct InboxView: View {
     @State private var showCreateGroup = false
     @State private var showAddCoach = false
     @State private var showConnectionsSheet = false
+    @State private var pendingRequestCount = 0
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
 
@@ -27,42 +28,46 @@ struct InboxView: View {
 
                             Spacer(minLength: 16)
 
-                            VStack(alignment: .trailing, spacing: 8) {
+                            ZStack(alignment: .topTrailing) {
                                 InboxHeaderIconButton(
                                     symbol: "plus",
-                                    rotation: showAddMenu ? 45 : 0
+                                    rotation: showAddMenu ? 45 : 0,
+                                    badgeCount: pendingRequestCount
                                 ) {
                                     withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
                                         showAddMenu.toggle()
                                     }
                                 }
-
-                                if showAddMenu {
-                                    QuickActionMenu {
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                            showAddMenu = false
-                                        }
-                                        showAddFriend = true
-                                    } onCreateGroup: {
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                            showAddMenu = false
-                                        }
-                                        showCreateGroup = true
-                                    } onAddCoach: {
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                            showAddMenu = false
-                                        }
-                                        showAddCoach = true
-                                    }
-                                    .transition(
-                                        .opacity
-                                            .combined(with: .move(edge: .top))
-                                            .combined(with: .scale(scale: 0.96, anchor: .topTrailing))
-                                    )
-                                }
                             }
                         }
                         .frame(maxWidth: .infinity)
+
+                        if showAddMenu {
+                            HStack {
+                                Spacer()
+                                QuickActionMenu(pendingRequestCount: pendingRequestCount) {
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        showAddMenu = false
+                                    }
+                                    showAddFriend = true
+                                } onCreateGroup: {
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        showAddMenu = false
+                                    }
+                                    showCreateGroup = true
+                                } onAddCoach: {
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        showAddMenu = false
+                                    }
+                                    showAddCoach = true
+                                }
+                            }
+                            .transition(
+                                .opacity
+                                    .combined(with: .move(edge: .top))
+                                    .combined(with: .scale(scale: 0.96, anchor: .topTrailing))
+                            )
+                        }
 
                         Text("Message")
                             .font(.system(size: 34, weight: .bold))
@@ -176,10 +181,12 @@ struct InboxView: View {
 
         guard let inboxURL = apiURL("/messages/inbox/\(userId)") else { return }
         let friendsURL = apiURL("/friends/\(userId)")
+        let requestsURL = apiURL("/friends/requests/\(userId)")
 
         let group = DispatchGroup()
         var inboxResponse: InboxResponse?
         var friendsResponse: FriendsResponse?
+        var requestsCount = 0
 
         group.enter()
         var inboxRequest = URLRequest(url: inboxURL)
@@ -203,7 +210,20 @@ struct InboxView: View {
             }.resume()
         }
 
+        if let requestsURL {
+            group.enter()
+            var reqRequest = URLRequest(url: requestsURL)
+            applyAuthorizationHeader(&reqRequest, token: appState.token)
+            authorizedDataTask(appState: appState, request: reqRequest) { data, _, _ in
+                defer { group.leave() }
+                guard let data = data,
+                      let response = try? JSONDecoder().decode(RequestsResponse.self, from: data) else { return }
+                requestsCount = response.requests.count
+            }.resume()
+        }
+
         group.notify(queue: .main) {
+            pendingRequestCount = requestsCount
             var convs: [Conversation] = (inboxResponse?.coaches ?? []).map { coach in
                 Conversation(
                     id: coach.topic,
@@ -226,27 +246,6 @@ struct InboxView: View {
             let groups = inboxResponse?.groups ?? []
             let dmTopics = Set(dms.map(\.topic))
 
-            for dm in dms {
-                let preview = dm.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                    ? (dm.last_message_preview ?? "")
-                    : "Start chatting"
-                convs.append(
-                    Conversation(
-                        id: dm.topic,
-                        name: dm.username ?? "User \(dm.other_user_id)",
-                        isGroup: false,
-                        isCoach: false,
-                        coachId: nil,
-                        coachEnabled: nil,
-                        avatarUrl: dm.avatar_url,
-                        otherUserId: Int(dm.other_user_id),
-                        previewText: preview,
-                        unreadCount: dm.unread_count ?? 0,
-                        mentionCount: dm.mention_count ?? 0
-                    )
-                )
-            }
-
             for friend in friendsResponse?.friends ?? [] {
                 let topic = buildP2PTopic(userId, friend.id)
                 if dmTopics.contains(topic) {
@@ -265,6 +264,27 @@ struct InboxView: View {
                         previewText: "Start chatting",
                         unreadCount: 0,
                         mentionCount: 0
+                    )
+                )
+            }
+
+            for dm in dms {
+                let preview = dm.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? (dm.last_message_preview ?? "")
+                    : "Start chatting"
+                convs.append(
+                    Conversation(
+                        id: dm.topic,
+                        name: dm.username ?? "User \(dm.other_user_id)",
+                        isGroup: false,
+                        isCoach: false,
+                        coachId: nil,
+                        coachEnabled: nil,
+                        avatarUrl: dm.avatar_url,
+                        otherUserId: Int(dm.other_user_id),
+                        previewText: preview,
+                        unreadCount: dm.unread_count ?? 0,
+                        mentionCount: dm.mention_count ?? 0
                     )
                 )
             }
@@ -304,11 +324,12 @@ struct InboxView: View {
 private struct InboxHeaderIconButton: View {
     let symbol: String
     var rotation: Double = 0
+    var badgeCount: Int = 0
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 Circle()
                     .fill(Color.white.opacity(0.94))
                     .frame(width: 56, height: 56)
@@ -318,6 +339,13 @@ private struct InboxHeaderIconButton: View {
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(Color.zymPrimary)
                     .rotationEffect(.degrees(rotation))
+
+                if badgeCount > 0 {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 12, height: 12)
+                        .offset(x: 2, y: -2)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -325,6 +353,7 @@ private struct InboxHeaderIconButton: View {
 }
 
 private struct QuickActionMenu: View {
+    var pendingRequestCount: Int = 0
     let onAddFriend: () -> Void
     let onCreateGroup: () -> Void
     let onAddCoach: () -> Void
@@ -334,6 +363,7 @@ private struct QuickActionMenu: View {
             QuickActionMenuRow(
                 title: "Add Friend",
                 systemImage: "person.badge.plus",
+                badgeCount: pendingRequestCount,
                 action: onAddFriend
             )
 
@@ -367,6 +397,7 @@ private struct QuickActionMenu: View {
 private struct QuickActionMenuRow: View {
     let title: String
     let systemImage: String
+    var badgeCount: Int = 0
     let action: () -> Void
 
     var body: some View {
@@ -380,6 +411,15 @@ private struct QuickActionMenuRow: View {
                     .font(.system(size: 17, weight: .semibold))
 
                 Spacer(minLength: 0)
+
+                if badgeCount > 0 {
+                    Text("\(badgeCount)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(minWidth: 20, minHeight: 20)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                }
             }
             .foregroundColor(.white)
             .padding(.horizontal, 18)

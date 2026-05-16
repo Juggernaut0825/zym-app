@@ -1500,15 +1500,9 @@ private struct ConversationCoachProfileEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Coach profile")
-                    .font(.custom("Syne", size: 20))
-                    .foregroundColor(Color.zymText)
-                Text(profileSummary)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color.zymSubtext)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Coach profile")
+                .font(.custom("Syne", size: 20))
+                .foregroundColor(Color.zymText)
 
             if loading {
                 ProgressView()
@@ -1522,9 +1516,21 @@ private struct ConversationCoachProfileEditorView: View {
                 TextField("eg. bulk, add muscle and strength", text: $draft.goal)
                     .zymFieldStyle()
             }
-            coachOptionPicker("Training days", selection: $draft.trainingDays, options: coachTrainingDayOptions, placeholder: "Training days not set")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Training days")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                coachOptionPicker("Training days", selection: $draft.trainingDays, options: coachTrainingDayOptions, placeholder: "Training days not set")
+            }
             CoachExperienceLevelCards(selection: $draft.experienceLevel)
-            coachOptionPicker("Activity level", selection: $draft.activityLevel, options: coachActivityLevelOptions, placeholder: "Activity not set")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Activity level")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundColor(Color.zymSubtext)
+                coachOptionPicker("Activity level", selection: $draft.activityLevel, options: coachActivityLevelOptions, placeholder: "Activity not set")
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Coach notes")
@@ -1560,13 +1566,6 @@ private struct ConversationCoachProfileEditorView: View {
         }
         .zymCard()
         .onAppear(perform: loadProfile)
-    }
-
-    private var profileSummary: String {
-        let goal = draft.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Goal missing" : draft.goal
-        let days = coachTrainingDayOptions.first(where: { $0.value == draft.trainingDays })?.label ?? "Days missing"
-        let experience = coachExperienceLevelOptions.first(where: { $0.value == draft.experienceLevel })?.label ?? "Experience missing"
-        return "\(goal) · \(days) · \(experience)"
     }
 
     private func coachOptionPicker(_ title: String, selection: Binding<String>, options: [CoachOption], placeholder: String) -> some View {
@@ -1683,10 +1682,6 @@ private struct ConversationNotificationSettingsView: View {
                         Text(conversation.name)
                             .font(.custom("Syne", size: 28))
                             .foregroundColor(Color.zymText)
-                        Text("Keep this chat loud or quiet. You can also pick a simple bubble theme here.")
-                            .font(.system(size: 14))
-                            .foregroundColor(Color.zymSubtext)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .zymAppear(delay: 0.03)
 

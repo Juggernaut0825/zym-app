@@ -784,15 +784,33 @@ private struct CalendarTrendLineChart: View {
                 }
             } else {
                 GeometryReader { proxy in
+                    let yAxisWidth: CGFloat = 38
                     let axisHeight: CGFloat = 28
-                    let plotSize = CGSize(width: proxy.size.width, height: max(1, proxy.size.height - axisHeight))
-                    let chartPoints = normalizedChartPoints(in: plotSize)
+                    let plotOrigin = CGPoint(x: yAxisWidth, y: 0)
+                    let plotSize = CGSize(width: max(1, proxy.size.width - yAxisWidth), height: max(1, proxy.size.height - axisHeight))
+                    let chartPoints = normalizedChartPoints(in: plotSize, originX: plotOrigin.x)
                     let axisY = plotSize.height + 5
+                    let yTicks = yAxisTicks()
 
                     ZStack {
+                        ForEach(yTicks, id: \.self) { tick in
+                            let yRatio = CGFloat((tick - yAxisMin()) / max(0.5, yAxisMax() - yAxisMin()))
+                            let y = 18 + ((1 - yRatio) * max(1, plotSize.height - 36))
+                            Path { path in
+                                path.move(to: CGPoint(x: yAxisWidth, y: y))
+                                path.addLine(to: CGPoint(x: proxy.size.width - 18, y: y))
+                            }
+                            .stroke(Color.zymLine.opacity(0.38), lineWidth: 0.5)
+
+                            Text(chartYLabel(tick))
+                                .font(.system(size: 8, weight: .semibold).monospacedDigit())
+                                .foregroundColor(Color.zymSubtext.opacity(0.72))
+                                .position(x: yAxisWidth / 2, y: y)
+                        }
+
                         Path { path in
-                            path.move(to: CGPoint(x: 18, y: axisY))
-                            path.addLine(to: CGPoint(x: max(18, proxy.size.width - 18), y: axisY))
+                            path.move(to: CGPoint(x: yAxisWidth, y: axisY))
+                            path.addLine(to: CGPoint(x: max(yAxisWidth, proxy.size.width - 18), y: axisY))
                         }
                         .stroke(Color.zymLine.opacity(0.92), lineWidth: 1)
 
@@ -813,15 +831,13 @@ private struct CalendarTrendLineChart: View {
                                 .position(item.point)
                         }
 
-                        ForEach(chartPoints, id: \.index) { item in
+                        ForEach(axisLabels(from: chartPoints, chartWidth: plotSize.width), id: \.index) { item in
                             Path { path in
                                 path.move(to: CGPoint(x: item.point.x, y: axisY - 4))
                                 path.addLine(to: CGPoint(x: item.point.x, y: axisY + 4))
                             }
                             .stroke(Color.zymSubtext.opacity(0.55), lineWidth: 1)
-                        }
 
-                        ForEach(axisLabels(from: chartPoints), id: \.index) { item in
                             Text(calendarShortAxisLabel(item.day))
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundColor(Color.zymSubtext)
@@ -831,10 +847,38 @@ private struct CalendarTrendLineChart: View {
                 }
             }
         }
-        .frame(height: 168)
+        .frame(height: 180)
     }
 
-    private func normalizedChartPoints(in size: CGSize) -> [(index: Int, day: String, point: CGPoint)] {
+    private func yAxisMin() -> Double { plottedValues.map(\.value).min() ?? 0 }
+    private func yAxisMax() -> Double { plottedValues.map(\.value).max() ?? yAxisMin() }
+
+    private func yAxisTicks() -> [Double] {
+        let lo = yAxisMin()
+        let hi = yAxisMax()
+        let range = hi - lo
+        guard range > 0 else { return [lo] }
+        let rawStep = range / 3
+        let magnitude = pow(10, floor(log10(rawStep)))
+        let niceSteps: [Double] = [1, 2, 2.5, 5, 10]
+        let step = (niceSteps.first(where: { $0 * magnitude >= rawStep }) ?? 10) * magnitude
+        let start = (lo / step).rounded(.down) * step
+        var ticks: [Double] = []
+        var t = start
+        while t <= hi + step * 0.01 {
+            if t >= lo - step * 0.5 { ticks.append(t) }
+            t += step
+        }
+        return ticks
+    }
+
+    private func chartYLabel(_ value: Double) -> String {
+        if value >= 1000 { return String(format: "%.0f", value) }
+        if value == value.rounded() { return String(format: "%.0f", value) }
+        return String(format: "%.1f", value)
+    }
+
+    private func normalizedChartPoints(in size: CGSize, originX: CGFloat) -> [(index: Int, day: String, point: CGPoint)] {
         let values = plottedValues.map(\.value)
         let minValue = values.min() ?? 0
         let maxValue = values.max() ?? minValue
@@ -846,18 +890,29 @@ private struct CalendarTrendLineChart: View {
         let drawableHeight = max(1, size.height - verticalInset * 2)
 
         return plottedValues.map { item in
-            let x = horizontalInset + (CGFloat(item.index) / CGFloat(maxIndex) * drawableWidth)
+            let x = originX + horizontalInset + (CGFloat(item.index) / CGFloat(maxIndex) * drawableWidth)
             let yRatio = CGFloat((item.value - minValue) / range)
             let y = verticalInset + ((1 - yRatio) * drawableHeight)
             return (index: item.index, day: item.day, point: CGPoint(x: x, y: y))
         }
     }
 
-    private func axisLabels(from chartPoints: [(index: Int, day: String, point: CGPoint)]) -> [(index: Int, day: String, point: CGPoint)] {
-        guard chartPoints.count > 3 else { return chartPoints }
-        let lastIndex = chartPoints.count - 1
-        let middleIndex = lastIndex / 2
-        let wanted = Set([0, middleIndex, lastIndex])
+    private func axisLabels(from chartPoints: [(index: Int, day: String, point: CGPoint)], chartWidth: CGFloat) -> [(index: Int, day: String, point: CGPoint)] {
+        guard chartPoints.count > 1 else { return chartPoints }
+        let minSpacing: CGFloat = 48
+        let maxLabels = max(2, Int(chartWidth / minSpacing))
+        let totalPoints = chartPoints.count
+        if totalPoints <= maxLabels { return chartPoints }
+        let step = max(1, (totalPoints - 1) / (maxLabels - 1))
+        let lastIndex = totalPoints - 1
+        var selected: [Int] = [0]
+        var next = step
+        while next < lastIndex {
+            selected.append(next)
+            next += step
+        }
+        selected.append(lastIndex)
+        let wanted = Set(selected)
         return chartPoints.enumerated().compactMap { offset, item in
             wanted.contains(offset) ? item : nil
         }

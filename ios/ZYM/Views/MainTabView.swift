@@ -121,7 +121,10 @@ struct MainTabView: View {
             Button("Open Settings") {
                 notificationManager.openSystemSettings()
             }
-            Button("Later", role: .cancel) {}
+            Button("Remind me later", role: .cancel) {}
+            Button("Don\u{2019}t remind me again", role: .destructive) {
+                UserDefaults.standard.set(true, forKey: "zym.notifications.neverRemind")
+            }
         } message: {
             Text("Turn notifications on in Apple Settings so new messages and coach replies can alert you.")
         }
@@ -151,6 +154,7 @@ struct MainTabView: View {
 
     private func promptForNotificationSettingsIfNeeded(resetForEntry: Bool = false) {
         guard appState.isLoggedIn else { return }
+        guard !UserDefaults.standard.bool(forKey: "zym.notifications.neverRemind") else { return }
         if resetForEntry {
             hasPromptedForNotificationsThisEntry = false
         }
@@ -232,7 +236,7 @@ private struct TodayView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Today")
-                        .font(.custom("Syne", size: 36))
+                        .font(.system(size: 34, weight: .bold))
                         .foregroundColor(Color.zymText)
                     Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
                         .font(.system(size: 15, weight: .medium))
@@ -827,32 +831,26 @@ private struct TodayPlanCompleteGraphic: View {
 
 private struct TodayPlanEmptyGraphic: View {
     var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-            let glow = Path(ellipseIn: CGRect(x: w * 0.1, y: h * 0.08, width: w * 0.82, height: h * 0.78))
-            context.fill(glow, with: .color(Color.zymCoachBlue.opacity(0.07)))
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.zymCoachBlue.opacity(0.16), Color.zymPrimary.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 92, height: 92)
 
-            let board = CGRect(x: w * 0.34, y: h * 0.2, width: w * 0.42, height: h * 0.56)
-            context.fill(Path(roundedRect: board, cornerRadius: 9), with: .color(Color.zymSurface))
-            context.stroke(Path(roundedRect: board, cornerRadius: 9), with: .color(Color.zymLine), lineWidth: 1.4)
-
-            let clip = CGRect(x: w * 0.45, y: h * 0.13, width: w * 0.2, height: h * 0.12)
-            context.fill(Path(roundedRect: clip, cornerRadius: 5), with: .color(Color.zymPrimary))
-
-            for index in 0..<3 {
-                let y = h * (0.34 + Double(index) * 0.13)
-                context.fill(Path(ellipseIn: CGRect(x: w * 0.4, y: y, width: w * 0.06, height: w * 0.06)), with: .color(Color.zymSurfaceSoft))
-                var line = Path()
-                line.move(to: CGPoint(x: w * 0.5, y: y + w * 0.03))
-                line.addLine(to: CGPoint(x: w * 0.68, y: y + w * 0.03))
-                context.stroke(line, with: .color(Color.zymSubtext.opacity(0.28)), lineWidth: 3)
-            }
-
-            let weight = CGRect(x: w * 0.16, y: h * 0.6, width: w * 0.24, height: h * 0.18)
-            context.fill(Path(roundedRect: weight, cornerRadius: 10), with: .color(Color.zymPrimaryDark.opacity(0.9)))
-            context.fill(Path(ellipseIn: CGRect(x: w * 0.1, y: h * 0.72, width: w * 0.16, height: w * 0.16)), with: .color(Color.zymPrimary.opacity(0.85)))
-            context.fill(Path(ellipseIn: CGRect(x: w * 0.27, y: h * 0.72, width: w * 0.16, height: w * 0.16)), with: .color(Color.zymPrimary.opacity(0.85)))
+            Image(systemName: "figure.run")
+                .font(.system(size: 38, weight: .light))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color.zymPrimaryDark, Color.zymPrimary],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
         }
     }
 }

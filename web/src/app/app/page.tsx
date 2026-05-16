@@ -2684,6 +2684,7 @@ export default function AppPage() {
           userId: 0,
           coachId: normalizeCoachId(item.coach_id) || 'zj',
         })),
+        ...friendPlaceholders,
         ...inbox.dms.map((item) => ({
           topic: item.topic,
           name: displayUserName(item, item.username),
@@ -2695,7 +2696,6 @@ export default function AppPage() {
           avatarUrl: item.avatar_url,
           userId: Number(item.other_user_id),
         })),
-        ...friendPlaceholders,
         ...inbox.groups.map((item) => ({
           topic: item.topic,
           name: item.name,
@@ -4552,7 +4552,7 @@ export default function AppPage() {
         <section className={`${showConversationList ? 'flex' : 'hidden'} w-full min-h-0 flex-col gap-2.5 sm:gap-3 xl:flex xl:w-[320px]`}>
           <button
             type="button"
-            className="flex items-center justify-center gap-2 rounded-[18px] bg-white/72 px-3 py-2.5 text-[13px] font-semibold shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition hover:bg-white/90 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm"
+            className="relative flex items-center justify-center gap-2 rounded-[18px] bg-white/72 px-3 py-2.5 text-[13px] font-semibold shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition hover:bg-white/90 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm"
             style={{
               color: selectedCoachTheme.ink,
             }}
@@ -4560,6 +4560,11 @@ export default function AppPage() {
           >
             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
             Create Group
+            {requests.length > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                {requests.length}
+              </span>
+            )}
           </button>
           <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1 sm:gap-3">
             {filteredConversations.length === 0 ? (
