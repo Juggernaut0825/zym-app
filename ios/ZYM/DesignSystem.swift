@@ -265,6 +265,7 @@ struct ZYMCelebratingCheckButton: View {
 
     @State private var burst = false
     @State private var checkFlash = false
+    @State private var showParticles = false
 
     private let colors: [Color] = [
         .zymSecondary,
@@ -295,14 +296,16 @@ struct ZYMCelebratingCheckButton: View {
                         .foregroundColor(Color.zymSecondaryDark)
                 }
 
-                ForEach(0..<10, id: \.self) { index in
-                    Circle()
-                        .fill(colors[index % colors.count])
-                        .frame(width: index.isMultiple(of: 2) ? 4 : 3, height: index.isMultiple(of: 2) ? 4 : 3)
-                        .offset(burst ? burstOffset(index) : .zero)
-                        .opacity(burst ? 0 : 1)
-                        .scaleEffect(burst ? 0.7 : 1)
-                        .animation(.easeOut(duration: 0.68), value: burst)
+                if showParticles {
+                    ForEach(0..<10, id: \.self) { index in
+                        Circle()
+                            .fill(colors[index % colors.count])
+                            .frame(width: index.isMultiple(of: 2) ? 4 : 3, height: index.isMultiple(of: 2) ? 4 : 3)
+                            .offset(burst ? burstOffset(index) : .zero)
+                            .opacity(burst ? 0 : 1)
+                            .scaleEffect(burst ? 0.7 : 1)
+                            .animation(.easeOut(duration: 0.68), value: burst)
+                    }
                 }
             }
             .frame(width: size + 18, height: size + 18)
@@ -314,12 +317,14 @@ struct ZYMCelebratingCheckButton: View {
 
     private func fire() {
         checkFlash = true
+        showParticles = true
         burst = false
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
             burst = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) {
             burst = false
+            showParticles = false
             if !isDone {
                 checkFlash = false
             }

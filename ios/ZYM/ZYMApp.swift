@@ -167,12 +167,12 @@ private struct ZYMLaunchSplashView: View {
 
     private static let splashBackground = LinearGradient(
         colors: [
-            Color(red: 0.085, green: 0.067, blue: 0.165),
-            Color(red: 0.157, green: 0.115, blue: 0.255),
-            Color(red: 0.067, green: 0.055, blue: 0.137),
+            Color.black,
+            Color(red: 0.067, green: 0.030, blue: 0.157),
+            Color(red: 0.165, green: 0.094, blue: 0.318),
         ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        startPoint: .topTrailing,
+        endPoint: .bottomLeading
     )
 
     var body: some View {
@@ -180,12 +180,11 @@ private struct ZYMLaunchSplashView: View {
             Self.splashBackground
                 .ignoresSafeArea()
 
-            Text("ZYM")
-                .font(.custom("Syne", size: 72))
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-                .tracking(4)
-                .opacity(animate ? 1 : 0.25)
+            Image("BrandLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 320, maxHeight: 320)
+                .opacity(animate ? 1 : 0.35)
                 .scaleEffect(animate ? 1 : 0.94)
         }
         .onAppear {

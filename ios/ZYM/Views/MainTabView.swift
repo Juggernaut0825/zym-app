@@ -233,18 +233,13 @@ private struct TodayView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Today")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundColor(Color.zymText)
-                    Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(Color.zymSubtext)
-                }
-                Spacer(minLength: 12)
-                TodayPill(text: "\(completedExercises)/\(max(totalExercises, 1)) done", systemImage: "checkmark.circle")
-                    .padding(.top, 10)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Today")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundColor(Color.zymText)
+                Text(Date().formatted(.dateTime.weekday(.wide).month().day()))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(Color.zymSubtext)
             }
 
             HStack(spacing: 8) {
