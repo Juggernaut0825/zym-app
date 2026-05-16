@@ -8,7 +8,18 @@ final class ZYMAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         configurePlaybackAudioSession()
+        configureSharedURLCache()
         return true
+    }
+
+    private func configureSharedURLCache() {
+        let memoryCapacity = 50 * 1024 * 1024
+        let diskCapacity = 500 * 1024 * 1024
+        URLCache.shared = URLCache(
+            memoryCapacity: memoryCapacity,
+            diskCapacity: diskCapacity,
+            directory: nil
+        )
     }
 
     func application(

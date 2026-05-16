@@ -2991,7 +2991,7 @@ func isVideoURL(_ url: String) -> Bool {
     return lower.contains(".mp4") || lower.contains(".mov") || lower.contains(".webm") || lower.contains(".m4v")
 }
 
-private enum ConversationMessageCache {
+enum ConversationMessageCache {
     private static let limit = 80
 
     static func load(userId: Int, topic: String) -> [Message] {

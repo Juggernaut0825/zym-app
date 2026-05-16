@@ -23,6 +23,7 @@ struct InboxView: View {
                         Text("Message")
                             .font(.system(size: 34, weight: .bold))
                             .foregroundColor(Color.zymText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         VStack(spacing: 10) {
                             ForEach(Array(conversations.enumerated()), id: \.element.id) { index, conv in
@@ -33,7 +34,9 @@ struct InboxView: View {
                                 .zymAppear(delay: Double(index) * 0.03)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.top, 76)
                     .padding(.bottom, 20)
@@ -179,6 +182,11 @@ struct InboxView: View {
     func loadInbox() {
         guard let userId = appState.userId else { return }
 
+        if conversations.isEmpty, let cached = InboxListCache.load(userId: userId) {
+            conversations = cached.conversations
+            pendingRequestCount = cached.pendingRequestCount
+        }
+
         guard let inboxURL = apiURL("/messages/inbox/\(userId)") else { return }
         let friendsURL = apiURL("/friends/\(userId)")
         let requestsURL = apiURL("/friends/requests/\(userId)")
@@ -311,12 +319,31 @@ struct InboxView: View {
             }
 
             conversations = convs
+            InboxListCache.save(
+                InboxCachePayload(conversations: convs, pendingRequestCount: requestsCount),
+                userId: userId
+            )
+            prefetchTopConversations(convs, userId: userId)
             if let requestedTopic = appState.requestedConversationTopic,
                let conversation = convs.first(where: { $0.id == requestedTopic }) {
                 selectedConversation = conversation
                 showRequestedConversation = true
                 appState.requestedConversationTopic = nil
             }
+        }
+    }
+
+    private func prefetchTopConversations(_ convs: [Conversation], userId: Int) {
+        let candidates = convs.prefix(3)
+        for conv in candidates {
+            guard let url = apiURL("/messages/\(conv.id)") else { continue }
+            var request = URLRequest(url: url)
+            applyAuthorizationHeader(&request, token: appState.token)
+            authorizedDataTask(appState: appState, request: request) { data, _, _ in
+                guard let data = data,
+                      let response = try? JSONDecoder().decode(MessagesResponse.self, from: data) else { return }
+                ConversationMessageCache.save(response.messages, userId: userId, topic: conv.id)
+            }.resume()
         }
     }
 }
@@ -516,7 +543,7 @@ struct ConversationRow: View {
     }
 }
 
-struct Conversation: Identifiable {
+struct Conversation: Identifiable, Codable {
     let id: String
     let name: String
     let isGroup: Bool
@@ -528,6 +555,27 @@ struct Conversation: Identifiable {
     let previewText: String
     let unreadCount: Int
     let mentionCount: Int
+}
+
+struct InboxCachePayload: Codable {
+    let conversations: [Conversation]
+    let pendingRequestCount: Int
+}
+
+enum InboxListCache {
+    static func load(userId: Int) -> InboxCachePayload? {
+        guard let data = UserDefaults.standard.data(forKey: key(userId: userId)) else { return nil }
+        return try? JSONDecoder().decode(InboxCachePayload.self, from: data)
+    }
+
+    static func save(_ payload: InboxCachePayload, userId: Int) {
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: key(userId: userId))
+    }
+
+    private static func key(userId: Int) -> String {
+        "zym.inboxCache.v1.\(userId)"
+    }
 }
 
 struct InboxResponse: Codable {

@@ -1784,7 +1784,7 @@ app.get(['/media/file/:fileName', '/uploads/:fileName'], async (req, res) => {
       }
 
       res.setHeader('Content-Type', asset.mimeType || inferUploadMimeType(asset.fileName, 'application/octet-stream'));
-      res.setHeader('Cache-Control', hasValidSignature ? 'public, max-age=3600' : 'private, max-age=60');
+      res.setHeader('Cache-Control', hasValidSignature ? 'public, max-age=31536000, immutable' : 'private, max-age=3600');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       if (handle.absolutePath) {
         return res.sendFile(handle.absolutePath);
@@ -1812,7 +1812,7 @@ app.get(['/media/file/:fileName', '/uploads/:fileName'], async (req, res) => {
 
     const mime = inferUploadMimeType(fileName, 'application/octet-stream');
     res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', hasValidSignature ? 'public, max-age=3600' : 'private, max-age=60');
+    res.setHeader('Cache-Control', hasValidSignature ? 'public, max-age=31536000, immutable' : 'private, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.sendFile(resolved);
   } catch (error: any) {
