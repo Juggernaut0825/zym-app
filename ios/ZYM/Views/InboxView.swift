@@ -329,24 +329,24 @@ private struct InboxHeaderIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .topTrailing) {
-                Circle()
-                    .fill(Color.white.opacity(0.94))
-                    .frame(width: 56, height: 56)
-                    .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
-
-                Image(systemName: symbol)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(Color.zymPrimary)
-                    .rotationEffect(.degrees(rotation))
-
-                if badgeCount > 0 {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 12, height: 12)
-                        .offset(x: 2, y: -2)
+            Circle()
+                .fill(Color.white.opacity(0.94))
+                .frame(width: 56, height: 56)
+                .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: 8)
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(Color.zymPrimary)
+                        .rotationEffect(.degrees(rotation))
+                )
+                .overlay(alignment: .topTrailing) {
+                    if badgeCount > 0 {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 12, height: 12)
+                            .offset(x: 2, y: -2)
+                    }
                 }
-            }
         }
         .buttonStyle(.plain)
     }
