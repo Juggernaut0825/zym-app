@@ -50,45 +50,11 @@ struct WorkoutShareSheet: View {
                         }
 
                         VStack(spacing: 12) {
-                            shareButton(
-                                title: "Share to ZYM Community",
-                                subtitle: "Card auto-attached; you can edit the caption.",
-                                systemImage: "person.3.fill",
-                                tint: Color.zymPrimaryDark,
-                                action: shareToCommunity
-                            )
-
-                            shareButton(
-                                title: "Share to Group Chat",
-                                subtitle: "Send the card image to one of your groups.",
-                                systemImage: "bubble.left.and.bubble.right.fill",
-                                tint: Color(red: 0.38, green: 0.55, blue: 0.92),
-                                action: { showGroupPicker = true }
-                            )
-
-                            shareButton(
-                                title: "Instagram Story",
-                                subtitle: "Opens Instagram with the card as your story background.",
-                                systemImage: "camera.fill",
-                                tint: Color(red: 0.91, green: 0.30, blue: 0.55),
-                                action: shareToInstagramStory
-                            )
-
-                            shareButton(
-                                title: "Save to Photos",
-                                subtitle: "Saves the card image to your camera roll.",
-                                systemImage: "square.and.arrow.down.fill",
-                                tint: Color(red: 0.36, green: 0.74, blue: 0.47),
-                                action: saveToPhotos
-                            )
-
-                            shareButton(
-                                title: "More\u{2026} (X, Facebook, DMs)",
-                                subtitle: "Use the iOS share sheet to send anywhere.",
-                                systemImage: "square.and.arrow.up",
-                                tint: Color.zymPrimary,
-                                action: presentSystemShare
-                            )
+                            shareButton(title: "Share to ZYM Community", systemImage: "person.3.fill", tint: Color.zymPrimaryDark, action: shareToCommunity)
+                            shareButton(title: "Share to Group Chat", systemImage: "bubble.left.and.bubble.right.fill", tint: Color(red: 0.38, green: 0.55, blue: 0.92), action: { showGroupPicker = true })
+                            shareButton(title: "Instagram Story", systemImage: "camera.fill", tint: Color(red: 0.91, green: 0.30, blue: 0.55), action: shareToInstagramStory)
+                            shareButton(title: "Save to Photos", systemImage: "square.and.arrow.down.fill", tint: Color(red: 0.36, green: 0.74, blue: 0.47), action: saveToPhotos)
+                            shareButton(title: "More\u{2026}", systemImage: "square.and.arrow.up", tint: Color.zymPrimary, action: presentSystemShare)
                         }
                         .padding(.horizontal, 18)
                         .padding(.bottom, 24)
@@ -130,7 +96,6 @@ struct WorkoutShareSheet: View {
 
     private func shareButton(
         title: String,
-        subtitle: String,
         systemImage: String,
         tint: Color,
         action: @escaping () -> Void
@@ -146,16 +111,9 @@ struct WorkoutShareSheet: View {
                         .foregroundColor(tint)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(Color.zymText)
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(Color.zymSubtext)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
 
                 Spacer(minLength: 0)
 
