@@ -7,9 +7,10 @@ struct ExercisePreviewSheet: View {
 
     private var imageGallery: [String] {
         if let urls = exercise.demo_image_urls, !urls.isEmpty {
-            return urls
+            return urls.filter { !$0.contains("youtube.com") && !$0.contains("youtu.be") }
         }
-        if let url = exercise.demo_url, !url.isEmpty {
+        if let url = exercise.demo_url, !url.isEmpty,
+           !url.contains("youtube.com"), !url.contains("youtu.be") {
             return [url]
         }
         if let thumb = exercise.demo_thumbnail, !thumb.isEmpty {
@@ -30,13 +31,30 @@ struct ExercisePreviewSheet: View {
         return nil
     }
 
+    private var youTubeURL: URL? {
+        let candidates: [String?] = [exercise.demo_video_url, exercise.demo_url]
+        for raw in candidates {
+            guard let raw, !raw.isEmpty else { continue }
+            if raw.contains("youtube.com") || raw.contains("youtu.be") {
+                return URL(string: raw)
+            }
+        }
+        return nil
+    }
+
     private var primaryGifURL: URL? {
-        let candidate = exercise.demo_video_url
-            ?? exercise.demo_url
-            ?? exercise.demo_image_urls?.first
-            ?? exercise.demo_thumbnail
-        guard let candidate, !candidate.isEmpty else { return nil }
-        return URL(string: candidate)
+        let candidates: [String?] = [
+            exercise.demo_thumbnail,
+            exercise.demo_image_urls?.first,
+            exercise.demo_url,
+            exercise.demo_video_url,
+        ]
+        for raw in candidates {
+            guard let raw, !raw.isEmpty else { continue }
+            if raw.contains("youtube.com") || raw.contains("youtu.be") { continue }
+            return URL(string: raw)
+        }
+        return nil
     }
 
     private var doseLabel: String {
@@ -127,6 +145,8 @@ struct ExercisePreviewSheet: View {
             VideoPlayer(player: AVPlayer(url: videoURL))
                 .frame(height: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else if let youTubeURL {
+            youTubeThumbnailSection(videoURL: youTubeURL)
         } else if let primaryGifURL {
             AsyncImage(url: primaryGifURL) { phase in
                 switch phase {
@@ -170,6 +190,72 @@ struct ExercisePreviewSheet: View {
         } else {
             placeholder
         }
+    }
+
+    private func youTubeThumbnailSection(videoURL: URL) -> some View {
+        let thumbURL: URL? = {
+            let str = videoURL.absoluteString
+            if let id = extractYouTubeVideoId(str) {
+                return URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")
+            }
+            return nil
+        }()
+
+        return Button {
+            UIApplication.shared.open(videoURL)
+        } label: {
+            ZStack {
+                if let thumbURL {
+                    AsyncImage(url: thumbURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Color.zymSurfaceSoft.opacity(0.6)
+                        }
+                    }
+                } else {
+                    Color.zymSurfaceSoft.opacity(0.6)
+                }
+
+                Circle()
+                    .fill(.black.opacity(0.55))
+                    .frame(width: 56, height: 56)
+                    .overlay(
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.white)
+                            .offset(x: 2)
+                    )
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 240)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func extractYouTubeVideoId(_ raw: String) -> String? {
+        guard let url = URL(string: raw) else { return nil }
+        let host = url.host?.lowercased() ?? ""
+        if host.contains("youtu.be") {
+            let id = url.pathComponents.dropFirst().first
+            return id?.isEmpty == false ? id : nil
+        }
+        if host.contains("youtube.com") {
+            if let v = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty {
+                return v
+            }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            if let idx = parts.firstIndex(of: "shorts"), idx + 1 < parts.count {
+                return parts[idx + 1]
+            }
+            if let idx = parts.firstIndex(of: "embed"), idx + 1 < parts.count {
+                return parts[idx + 1]
+            }
+        }
+        return nil
     }
 
     private var placeholder: some View {
