@@ -176,7 +176,12 @@ struct WorkoutShareSheet: View {
     private func shareToInstagramStory() {
         guard let image = renderOrShowError(),
               let pngData = image.pngData() else { return }
-        guard let url = URL(string: "instagram-stories://share") else {
+        let fbAppId = Bundle.main.object(forInfoDictionaryKey: "FacebookAppID") as? String ?? ""
+        let hasFbId = !fbAppId.isEmpty && fbAppId != "YOUR_FACEBOOK_APP_ID"
+        let urlString = hasFbId
+            ? "instagram-stories://share?source_application=\(fbAppId)"
+            : "instagram-stories://share"
+        guard let url = URL(string: urlString) else {
             showError("Instagram link unavailable.")
             return
         }
