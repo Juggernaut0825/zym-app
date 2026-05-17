@@ -356,7 +356,13 @@ struct WorkoutShareSheet: View {
     }
 
     private func defaultCaption() -> String {
-        let title = plan.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = plan.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = raw.filter { char in
+            let scalars = char.unicodeScalars
+            guard let first = scalars.first else { return false }
+            return !(first.properties.isEmojiPresentation || (first.properties.isEmoji && first.value > 0x23F))
+        }
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty {
             return "Today's training is in the books."
         }

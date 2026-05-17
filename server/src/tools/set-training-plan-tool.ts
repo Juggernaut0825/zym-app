@@ -22,7 +22,7 @@ export class SetTrainingPlanTool implements Tool {
         },
         title: {
           type: 'string',
-          description: 'Short plan title, for example Upper Body 40.',
+          description: 'Short plain-text plan title without emoji, for example Upper Body 40.',
           minLength: 2,
           maxLength: 160,
         },
@@ -58,7 +58,7 @@ export class SetTrainingPlanTool implements Tool {
     const result = await coachTypedToolsService.setTrainingPlan(userId, {
       day: args?.day,
       timezone: args?.timezone,
-      title: args?.title,
+      title: String(args?.title || '').replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim(),
       summary: args?.summary,
       exercises: args?.exercises,
     });
