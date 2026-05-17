@@ -325,15 +325,6 @@ struct ConversationView: View {
                         .padding(.horizontal, 14)
                     }
 
-                    if conversation.isGroup && groupCoachEnabled {
-                        HStack {
-                            Text("Tip: mention @coach in group to trigger AI reply.")
-                                .font(.system(size: 12))
-                                .foregroundColor(Color.zymSubtext)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                    }
                 }
                 .padding(.bottom, 10)
                 .padding(.top, 6)
