@@ -2096,11 +2096,10 @@ app.get('/users/search', (req, res) => {
   const users = getDB().prepare(`
     SELECT id, public_uuid, ${displayNameSql()} AS username, username AS account_username, ${displayNameSql()} AS display_name, avatar_url
     FROM users
-    WHERE LOWER(username) LIKE ?
-       OR LOWER(COALESCE(display_name, '')) LIKE ?
+    WHERE LOWER(${displayNameSql()}) LIKE ?
     ORDER BY display_name ASC, username ASC
     LIMIT 12
-  `).all(pattern, pattern).map((row: any) => ({
+  `).all(pattern).map((row: any) => ({
     id: Number(row.id),
     public_uuid: String(row.public_uuid || '').trim() || null,
     username: String(row.username || ''),
