@@ -336,6 +336,28 @@ export class PushNotificationService {
     })));
   }
 
+  static async sendPushToUser(input: {
+    recipientUserId: number;
+    title: string;
+    body: string;
+    payload?: Record<string, any>;
+  }): Promise<void> {
+    const config = apnsConfig();
+    if (!config) return;
+    const tokens = tokensForRecipients([input.recipientUserId]);
+    if (tokens.length === 0) return;
+    const apnsPayload = {
+      aps: { alert: { title: input.title, body: input.body }, sound: 'default' },
+      ...(input.payload || {}),
+    };
+    await Promise.all(tokens.map((row) => sendAPNSRequest({
+      config,
+      environment: resolveEnvironment(row.environment),
+      deviceToken: row.device_token,
+      payload: apnsPayload,
+    })));
+  }
+
   static async sendCommunityNotifications(input: CommunityPushInput): Promise<void> {
     const config = apnsConfig();
     if (!config) return;

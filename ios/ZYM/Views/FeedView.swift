@@ -180,7 +180,7 @@ private struct FeedDiscoverChallengeRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "flag.fill")
+            Image(systemName: challengeGoalIcon(challenge.goal_type))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(Color.zymPrimaryDark)
                 .frame(width: 36, height: 36)
@@ -195,7 +195,7 @@ private struct FeedDiscoverChallengeRow: View {
                     if let avatars = challenge.member_avatars, !avatars.isEmpty {
                         FeedAvatarStack(urls: avatars, size: 16)
                     }
-                    Text("\(challenge.member_count) members · \(challenge.goal_type.replacingOccurrences(of: "_", with: " "))")
+                    Text("\(challenge.member_count) members · \(challengeGoalLabel(challenge.goal_type))")
                         .font(.system(size: 12))
                         .foregroundColor(Color.zymSubtext)
                 }
@@ -232,6 +232,8 @@ struct FeedView: View {
     @State private var selectedTab = 0
     @State private var discoverChallenges: [DiscoverChallenge] = []
     @State private var discoverLoading = false
+    @State private var challengeInvitations: [ChallengeInvitation] = []
+    @State private var invitationPendingId: Int?
     @State private var selectedChallengeForDetail: IdentifiableInt?
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
@@ -307,6 +309,70 @@ struct FeedView: View {
                                     .zymAppear(delay: 0.01)
                                 }
 
+                                if !challengeInvitations.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Invitations")
+                                            .font(.custom("Syne", size: 18))
+                                            .foregroundColor(Color.zymText)
+
+                                        ForEach(challengeInvitations) { inv in
+                                            HStack(spacing: 10) {
+                                                if let url = inv.inviter_avatar_url, let imgUrl = URL(string: url) {
+                                                    AsyncImage(url: imgUrl) { phase in
+                                                        if case .success(let img) = phase {
+                                                            img.resizable().scaledToFill()
+                                                        } else {
+                                                            Circle().fill(Color.zymSurfaceSoft)
+                                                        }
+                                                    }
+                                                    .frame(width: 32, height: 32)
+                                                    .clipShape(Circle())
+                                                } else {
+                                                    Circle().fill(Color.zymSurfaceSoft).frame(width: 32, height: 32)
+                                                }
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(inv.challenge_title)
+                                                        .font(.system(size: 14, weight: .semibold))
+                                                        .foregroundColor(Color.zymText)
+                                                    Text("from \(inv.inviter_display_name ?? inv.inviter_username ?? "someone")")
+                                                        .font(.system(size: 12))
+                                                        .foregroundColor(Color.zymSubtext)
+                                                }
+                                                Spacer()
+                                                Button {
+                                                    acceptInvitation(inv)
+                                                } label: {
+                                                    Text("Join")
+                                                        .font(.system(size: 13, weight: .semibold))
+                                                        .foregroundColor(.white)
+                                                        .padding(.horizontal, 14)
+                                                        .padding(.vertical, 6)
+                                                        .background(Color.zymPrimary)
+                                                        .clipShape(Capsule())
+                                                }
+                                                .disabled(invitationPendingId == inv.id)
+                                                Button {
+                                                    declineInvitation(inv)
+                                                } label: {
+                                                    Image(systemName: "xmark")
+                                                        .font(.system(size: 12, weight: .semibold))
+                                                        .foregroundColor(Color.zymSubtext)
+                                                        .frame(width: 28, height: 28)
+                                                        .background(Color.zymSurfaceSoft)
+                                                        .clipShape(Circle())
+                                                }
+                                                .disabled(invitationPendingId == inv.id)
+                                            }
+                                            .padding(10)
+                                            .background(Color.white.opacity(0.6))
+                                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        }
+                                    }
+                                    .padding(14)
+                                    .background(Color.white.opacity(0.74))
+                                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                }
+
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text("Discover")
                                         .font(.custom("Syne", size: 18))
@@ -342,6 +408,7 @@ struct FeedView: View {
                         .refreshable {
                             loadChallenges()
                             loadDiscoverChallenges()
+                            loadChallengeInvitations()
                         }
                     } else {
                         ScrollView {
@@ -477,6 +544,7 @@ struct FeedView: View {
                 loadFeed()
                 loadChallenges()
                 loadDiscoverChallenges()
+                loadChallengeInvitations()
                 loadNotifications()
                 connectRealtime()
             }
@@ -647,6 +715,55 @@ struct FeedView: View {
             DispatchQueue.main.async {
                 withAnimation(.zymSoft) {
                     discoverChallenges = response.challenges
+                }
+            }
+        }.resume()
+    }
+
+    func loadChallengeInvitations() {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/invitations/\(userId)") else { return }
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ChallengeInvitationsResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                withAnimation(.zymSoft) { challengeInvitations = response.invitations }
+            }
+        }.resume()
+    }
+
+    func acceptInvitation(_ invitation: ChallengeInvitation) {
+        guard let url = apiURL("/challenges/invitations/\(invitation.id)/accept") else { return }
+        invitationPendingId = invitation.id
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
+            DispatchQueue.main.async {
+                invitationPendingId = nil
+                withAnimation(.zymSoft) {
+                    challengeInvitations.removeAll { $0.id == invitation.id }
+                }
+                loadChallenges()
+            }
+        }.resume()
+    }
+
+    func declineInvitation(_ invitation: ChallengeInvitation) {
+        guard let url = apiURL("/challenges/invitations/\(invitation.id)/decline") else { return }
+        invitationPendingId = invitation.id
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
+            DispatchQueue.main.async {
+                invitationPendingId = nil
+                withAnimation(.zymSoft) {
+                    challengeInvitations.removeAll { $0.id == invitation.id }
                 }
             }
         }.resume()
@@ -1184,18 +1301,22 @@ struct FeedView: View {
 struct CreateChallengeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
-    @State private var title = "7-day consistency"
+    @State private var title = ""
     @State private var descriptionText = ""
     @State private var goalType = "plan_completion"
     @State private var visibility = "friends"
     @State private var isCreating = false
     @State private var errorText = ""
+    @State private var startDate = Date()
+    @State private var endDate = Calendar.current.date(byAdding: .day, value: 6, to: Date()) ?? Date()
+    @State private var customGoalText = ""
     let onCreated: () -> Void
     private let goalOptions: [(value: String, title: String, subtitle: String, icon: String)] = [
         ("plan_completion", "Plan", "Finish today’s workout", "checklist"),
         ("workouts", "Workouts", "Log a training day", "figure.strengthtraining.traditional"),
         ("meals", "Meals", "Hit a nutrition action", "fork.knife"),
         ("steps", "Steps", "Move 4k+ steps today", "figure.walk"),
+        ("custom", "Custom", "Define your own daily task", "pencil.and.outline"),
     ]
 
     var body: some View {
@@ -1206,7 +1327,7 @@ struct CreateChallengeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 10) {
-                            Image(systemName: "flag.fill")
+                            Image(systemName: challengeGoalIcon(goalType))
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(Color.zymPrimaryDark)
                                 .frame(width: 42, height: 42)
@@ -1237,6 +1358,17 @@ struct CreateChallengeView: View {
                                 Text("Public").tag("public")
                             }
                             .pickerStyle(.segmented)
+                        }
+
+                        challengeField(label: "Duration") {
+                            VStack(spacing: 10) {
+                                DatePicker("Start", selection: $startDate, in: Date()..., displayedComponents: .date)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color.zymText)
+                                DatePicker("End", selection: $endDate, in: startDate..., displayedComponents: .date)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(Color.zymText)
+                            }
                         }
 
                         challengeField(label: "Daily completion") {
@@ -1273,6 +1405,14 @@ struct CreateChallengeView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
+                            }
+                        }
+
+                        if goalType == "custom" {
+                            challengeField(label: "What should members do daily?") {
+                                TextField("e.g. Drink 2L of water", text: $customGoalText)
+                                    .foregroundColor(Color.zymText)
+                                    .zymFieldStyle()
                             }
                         }
 
@@ -1327,10 +1467,11 @@ struct CreateChallengeView: View {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
-        let start = formatter.string(from: Date())
-        var components = DateComponents()
-        components.day = 6
-        let end = Calendar(identifier: .gregorian).date(byAdding: components, to: Date()) ?? Date()
+        let start = formatter.string(from: startDate)
+        var challengeDesc = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if goalType == "custom" && !customGoalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            challengeDesc = customGoalText.trimmingCharacters(in: .whitespacesAndNewlines) + (challengeDesc.isEmpty ? "" : "\n\n\(challengeDesc)")
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -1339,11 +1480,11 @@ struct CreateChallengeView: View {
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "userId": userId,
             "title": trimmedTitle,
-            "description": descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
+            "description": challengeDesc,
             "goalType": goalType,
             "targetCount": 1,
             "startDate": start,
-            "endDate": formatter.string(from: end),
+            "endDate": formatter.string(from: endDate),
             "visibility": visibility,
             "coachId": appState.selectedCoach ?? "zj",
         ])

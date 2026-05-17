@@ -452,3 +452,24 @@ struct ChallengeMember: Codable, Identifiable {
 struct ChallengeMembersResponse: Decodable {
     let members: [ChallengeMember]
 }
+
+struct ChallengeInvitation: Codable, Identifiable {
+    let id: Int
+    let challenge_id: Int
+    let inviter_user_id: Int
+    let status: String
+    let created_at: String
+    let challenge_title: String
+    let challenge_description: String?
+    let goal_type: String
+    let start_date: String
+    let end_date: String
+    let visibility: String?
+    let inviter_username: String?
+    let inviter_display_name: String?
+    let inviter_avatar_url: String?
+}
+
+struct ChallengeInvitationsResponse: Decodable {
+    let invitations: [ChallengeInvitation]
+}

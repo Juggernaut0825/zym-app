@@ -3093,6 +3093,16 @@ app.post('/friends/add', requireSameUserIdFromBody('userId'), APIGateway.validat
       type: 'friends_updated',
       userIds: [userId, Number(friendId)],
     }, 'friends-add-updated');
+
+    const senderRow = getDB().prepare(`SELECT username, ${displayNameSql()} AS display_name FROM users WHERE id = ?`).get(userId) as { username: string; display_name?: string } | undefined;
+    const senderName = senderRow?.display_name || senderRow?.username || 'Someone';
+    void PushNotificationService.sendPushToUser({
+      recipientUserId: Number(friendId),
+      title: 'Friend Request',
+      body: `${senderName} sent you a friend request`,
+      payload: { type: 'friend_request', fromUserId: String(userId) },
+    });
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -3192,7 +3202,7 @@ app.post('/groups/create',
   const location = readOptionalLocationSelection(req.body || {});
   const groupId = await GroupService.createGroup(
     String(req.body.name || '').trim() || 'New Group',
-    String(ownerId),
+    ownerId,
     String(req.body.coachEnabled || 'none'),
     location,
   );
@@ -3669,15 +3679,77 @@ app.post('/challenges/:challengeId/invite',
       if (alreadyMember) {
         return res.json({ success: true, alreadyMember: true });
       }
+      const existingInvite = getDB().prepare('SELECT id, status FROM challenge_invitations WHERE challenge_id = ? AND invitee_user_id = ?').get(challengeId, targetUserId) as { id: number; status: string } | undefined;
+      if (existingInvite && existingInvite.status === 'pending') {
+        return res.json({ success: true, alreadyInvited: true });
+      }
       getDB().prepare(`
-        INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
-        VALUES (?, ?, 'member')
-      `).run(challengeId, targetUserId);
+        INSERT OR REPLACE INTO challenge_invitations (challenge_id, inviter_user_id, invitee_user_id, status)
+        VALUES (?, ?, ?, 'pending')
+      `).run(challengeId, userId, targetUserId);
+
+      const inviterUser = getDB().prepare('SELECT display_name, username FROM users WHERE id = ?').get(userId) as { display_name?: string; username: string } | undefined;
+      const inviterName = inviterUser?.display_name || inviterUser?.username || 'Someone';
+      const challengeRow = getDB().prepare('SELECT title FROM challenges WHERE id = ?').get(challengeId) as { title: string } | undefined;
+      void PushNotificationService.sendPushToUser({
+        recipientUserId: targetUserId,
+        title: 'Challenge Invitation',
+        body: `${inviterName} invited you to "${(challengeRow?.title || 'a challenge').slice(0, 60)}"`,
+        payload: { type: 'challenge_invitation', challengeId: String(challengeId) },
+      });
+
       res.json({ success: true, alreadyMember: false });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to invite user' });
     }
   });
+
+app.get('/challenges/invitations/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const rows = getDB().prepare(`
+      SELECT ci.id, ci.challenge_id, ci.inviter_user_id, ci.status, ci.created_at,
+        c.title AS challenge_title, c.description AS challenge_description, c.goal_type,
+        c.start_date, c.end_date, c.visibility,
+        u.username AS inviter_username, ${displayNameSql('u')} AS inviter_display_name, u.avatar_url AS inviter_avatar_url
+      FROM challenge_invitations ci
+      JOIN challenges c ON c.id = ci.challenge_id
+      JOIN users u ON u.id = ci.inviter_user_id
+      WHERE ci.invitee_user_id = ? AND ci.status = 'pending' AND c.status = 'active'
+      ORDER BY ci.created_at DESC
+    `).all(userId);
+    res.json({ invitations: rows.map((r: any) => ({ ...r, inviter_avatar_url: mediaUrlForClient(req, r.inviter_avatar_url) })) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load invitations' });
+  }
+});
+
+app.post('/challenges/invitations/:invitationId/accept', (req, res) => {
+  try {
+    const userId = assertAuthUser(req);
+    const invitationId = Number(req.params.invitationId);
+    const invitation = getDB().prepare('SELECT * FROM challenge_invitations WHERE id = ? AND invitee_user_id = ? AND status = ?').get(invitationId, userId, 'pending') as any;
+    if (!invitation) return res.status(404).json({ error: 'Invitation not found' });
+    getDB().prepare("UPDATE challenge_invitations SET status = 'accepted' WHERE id = ?").run(invitationId);
+    getDB().prepare("INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role) VALUES (?, ?, 'member')").run(invitation.challenge_id, userId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to accept invitation' });
+  }
+});
+
+app.post('/challenges/invitations/:invitationId/decline', (req, res) => {
+  try {
+    const userId = assertAuthUser(req);
+    const invitationId = Number(req.params.invitationId);
+    const invitation = getDB().prepare('SELECT * FROM challenge_invitations WHERE id = ? AND invitee_user_id = ? AND status = ?').get(invitationId, userId, 'pending') as any;
+    if (!invitation) return res.status(404).json({ error: 'Invitation not found' });
+    getDB().prepare("UPDATE challenge_invitations SET status = 'declined' WHERE id = ?").run(invitationId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to decline invitation' });
+  }
+});
 
 app.get('/challenges/discover/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   try {

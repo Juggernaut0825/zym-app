@@ -17,7 +17,10 @@ import {
   completeChallenge,
   completeTrainingPlanExercise,
   createAbuseReport,
+  acceptChallengeInvitation,
+  declineChallengeInvitation,
   getChallenges,
+  getChallengeInvitations,
   getChallengeMembers,
   getDiscoverChallenges,
   inviteToChallenge,
@@ -1172,6 +1175,11 @@ export default function AppPage() {
   const [challengeInviteResults, setChallengeInviteResults] = useState<any[]>([]);
   const [challengeInvitePending, setChallengeInvitePending] = useState(false);
   const [challengeJoinPending, setChallengeJoinPending] = useState(false);
+  const [challengeInvitations, setChallengeInvitations] = useState<any[]>([]);
+  const [challengeInvitationPending, setChallengeInvitationPending] = useState<number | null>(null);
+  const [challengeStartDate, setChallengeStartDate] = useState('');
+  const [challengeEndDate, setChallengeEndDate] = useState('');
+  const [challengeCustomGoal, setChallengeCustomGoal] = useState('');
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDraft, setProfileDraft] = useState({ display_name: '', bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
@@ -2417,7 +2425,10 @@ export default function AppPage() {
   useEffect(() => {
     if (!ready || !authUserId || (tab !== 'today' && tab !== 'community')) return;
     void loadChallengesData(authUserId);
-    if (tab === 'community') void loadDiscoverChallengesData();
+    if (tab === 'community') {
+      void loadDiscoverChallengesData();
+      void loadChallengeInvitationsData();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authUserId, tab]);
 
@@ -3118,25 +3129,30 @@ export default function AppPage() {
     if (!authUserId || !challengeTitle.trim()) return;
     try {
       setChallengesLoading(true);
-      const start = challengeDay || todayData?.day;
+      const today = challengeDay || todayData?.day || new Date().toISOString().slice(0, 10);
+      const start = challengeStartDate || today;
+      const end = challengeEndDate || (() => { const d = new Date(`${start}T00:00:00`); d.setDate(d.getDate() + 6); return d.toISOString().slice(0, 10); })();
+      let desc = challengeDescription.trim();
+      if (challengeGoalType === 'custom' && challengeCustomGoal.trim()) {
+        desc = challengeCustomGoal.trim() + (desc ? `\n\n${desc}` : '');
+      }
       await createChallenge({
         userId: authUserId,
         title: challengeTitle.trim(),
-        description: challengeDescription.trim() || undefined,
+        description: desc || undefined,
         goalType: challengeGoalType,
         targetCount: 1,
         startDate: start,
-        endDate: start ? (() => {
-          const date = new Date(`${start}T00:00:00.000Z`);
-          date.setUTCDate(date.getUTCDate() + 6);
-          return date.toISOString().slice(0, 10);
-        })() : undefined,
+        endDate: end,
         visibility: challengeVisibility,
         coachId: selectedCoach,
       });
       await loadChallengesData(authUserId);
-      setChallengeTitle('7-day consistency');
+      setChallengeTitle('');
       setChallengeDescription('');
+      setChallengeStartDate('');
+      setChallengeEndDate('');
+      setChallengeCustomGoal('');
       setChallengeVisibility('friends');
       setCommunityCreateMode(null);
       setCommunityComposerOpen(false);
@@ -3238,6 +3254,40 @@ export default function AppPage() {
       setChallengeInviteResults(results.filter((u: any) => !challengeMembers.some((m) => m.id === u.id)));
     } catch {
       setChallengeInviteResults([]);
+    }
+  }
+
+  async function loadChallengeInvitationsData() {
+    if (!authUserId) return;
+    try {
+      const result = await getChallengeInvitations(authUserId);
+      setChallengeInvitations(result.invitations || []);
+    } catch { /* silent */ }
+  }
+
+  async function handleAcceptInvitation(invitationId: number) {
+    try {
+      setChallengeInvitationPending(invitationId);
+      await acceptChallengeInvitation(invitationId);
+      showNotice('Joined challenge!');
+      setChallengeInvitations((prev) => prev.filter((i) => i.id !== invitationId));
+      await loadChallengesData(authUserId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to accept invitation.');
+    } finally {
+      setChallengeInvitationPending(null);
+    }
+  }
+
+  async function handleDeclineInvitation(invitationId: number) {
+    try {
+      setChallengeInvitationPending(invitationId);
+      await declineChallengeInvitation(invitationId);
+      setChallengeInvitations((prev) => prev.filter((i) => i.id !== invitationId));
+    } catch (err: any) {
+      setError(err.message || 'Failed to decline invitation.');
+    } finally {
+      setChallengeInvitationPending(null);
     }
   }
 
@@ -5598,6 +5648,42 @@ export default function AppPage() {
                     </div>
                   </section>
 
+                  {challengeInvitations.length > 0 ? (
+                    <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
+                      <h2 className="text-lg font-semibold tracking-tight text-slate-900">Invitations</h2>
+                      <div className="mt-3 divide-y divide-slate-200/70">
+                        {challengeInvitations.map((inv: any) => (
+                          <div key={inv.id} className="flex items-center justify-between gap-3 py-3">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-900">{inv.challenge_title}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                from {inv.inviter_display_name || inv.inviter_username || 'someone'} · {inv.goal_type?.replace(/_/g, ' ')}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                                disabled={challengeInvitationPending === inv.id}
+                                onClick={() => void handleAcceptInvitation(inv.id)}
+                              >
+                                Join
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-full bg-slate-100 px-2.5 py-1.5 text-sm text-slate-500 transition hover:bg-slate-200"
+                                disabled={challengeInvitationPending === inv.id}
+                                onClick={() => void handleDeclineInvitation(inv.id)}
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
                   <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
                     <h2 className="text-lg font-semibold tracking-tight text-slate-900">Discover</h2>
                     <p className="mt-1 text-xs text-slate-500">Public challenges you can join</p>
@@ -5744,6 +5830,28 @@ export default function AppPage() {
                             placeholder="What does finishing this challenge mean?"
                           />
                         </label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="grid gap-1.5">
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Start date</span>
+                            <input
+                              type="date"
+                              className="input-shell"
+                              value={challengeStartDate}
+                              min={new Date().toISOString().slice(0, 10)}
+                              onChange={(e) => setChallengeStartDate(e.target.value)}
+                            />
+                          </label>
+                          <label className="grid gap-1.5">
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">End date</span>
+                            <input
+                              type="date"
+                              className="input-shell"
+                              value={challengeEndDate}
+                              min={challengeStartDate || new Date().toISOString().slice(0, 10)}
+                              onChange={(e) => setChallengeEndDate(e.target.value)}
+                            />
+                          </label>
+                        </div>
                         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                           <label className="grid gap-1.5">
                             <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Daily completion type</span>
@@ -5756,6 +5864,7 @@ export default function AppPage() {
                               <option value="workouts">Workouts</option>
                               <option value="meals">Meals</option>
                               <option value="steps">Steps</option>
+                              <option value="custom">Custom</option>
                             </select>
                           </label>
                           <label className="grid gap-1.5">
@@ -5769,6 +5878,19 @@ export default function AppPage() {
                               <option value="public">Public</option>
                             </select>
                           </label>
+                        </div>
+                        {challengeGoalType === 'custom' ? (
+                          <label className="grid gap-1.5">
+                            <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">What should members do daily?</span>
+                            <input
+                              className="input-shell"
+                              value={challengeCustomGoal}
+                              onChange={(e) => setChallengeCustomGoal(e.target.value.slice(0, 200))}
+                              placeholder="e.g. Drink 2L of water"
+                            />
+                          </label>
+                        ) : null}
+                        <div>
                           <button className={selectedCoachButtonClass} type="button" disabled={challengesLoading || !challengeTitle.trim()} onClick={() => void handleCreateChallenge()}>
                             {challengesLoading ? 'Creating...' : 'Create challenge'}
                           </button>

@@ -866,6 +866,18 @@ export async function createChallenge(payload: {
   });
 }
 
+export async function getChallengeInvitations(userId: number): Promise<{ invitations: any[] }> {
+  return request<{ invitations: any[] }>(`/challenges/invitations/${userId}`);
+}
+
+export async function acceptChallengeInvitation(invitationId: number): Promise<{ success: boolean }> {
+  return request(`/challenges/invitations/${invitationId}/accept`, { method: 'POST' });
+}
+
+export async function declineChallengeInvitation(invitationId: number): Promise<{ success: boolean }> {
+  return request(`/challenges/invitations/${invitationId}/decline`, { method: 'POST' });
+}
+
 export async function completeChallenge(payload: {
   userId: number;
   challengeId: number;

@@ -403,6 +403,16 @@ private struct QuickActionMenu: View {
                 systemImage: "message.badge",
                 action: onCreateGroup
             )
+
+            Divider()
+                .overlay(Color.white.opacity(0.14))
+                .padding(.leading, 48)
+
+            QuickActionMenuRow(
+                title: "Add Coach",
+                systemImage: "brain.head.profile",
+                action: onAddCoach
+            )
         }
         .frame(width: 212)
         .background(Color.black.opacity(0.72))

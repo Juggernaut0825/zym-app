@@ -1,5 +1,26 @@
 import SwiftUI
 
+func challengeGoalIcon(_ goalType: String) -> String {
+    switch goalType {
+    case "steps": return "figure.walk"
+    case "workouts": return "dumbbell.fill"
+    case "meals": return "fork.knife"
+    case "plan_completion": return "checkmark.seal.fill"
+    default: return "flag.fill"
+    }
+}
+
+func challengeGoalLabel(_ goalType: String, targetCount: Int = 1) -> String {
+    switch goalType {
+    case "steps": return "Move \(targetCount > 1 ? "\(targetCount)" : "4k") steps today"
+    case "workouts": return "Complete \(targetCount) workout\(targetCount == 1 ? "" : "s") today"
+    case "meals": return "Log \(targetCount) meal\(targetCount == 1 ? "" : "s") today"
+    case "plan_completion": return "Complete your training plan today"
+    case "custom": return "Complete today's task"
+    default: return goalType.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
 struct ChallengeDetailView: View {
     let challengeId: Int
     var onJoined: (() -> Void)?
@@ -25,7 +46,7 @@ struct ChallengeDetailView: View {
                 ScrollView {
                     VStack(spacing: 18) {
                         VStack(spacing: 10) {
-                            Image(systemName: "flag.fill")
+                            Image(systemName: challengeGoalIcon(challenge?.goal_type ?? ""))
                                 .font(.system(size: 24))
                                 .foregroundColor(Color.zymPrimaryDark)
                                 .frame(width: 60, height: 60)
@@ -62,9 +83,14 @@ struct ChallengeDetailView: View {
                                 }
                                 .padding(.top, 4)
 
-                                Text("Goal: \(c.goal_type.replacingOccurrences(of: "_", with: " ").capitalized)")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(Color.zymSubtext)
+                                HStack(spacing: 6) {
+                                    Image(systemName: challengeGoalIcon(c.goal_type))
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Color.zymPrimary)
+                                    Text(challengeGoalLabel(c.goal_type, targetCount: c.target_count))
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(Color.zymSubtext)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity)

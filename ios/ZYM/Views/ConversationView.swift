@@ -423,6 +423,8 @@ struct ConversationView: View {
             if let prefill = appState.requestedConversationPrefill, !prefill.isEmpty {
                 newMessage = prefill
                 appState.requestedConversationPrefill = nil
+            } else if let saved = UserDefaults.standard.string(forKey: "draft_\(conversation.id)"), !saved.isEmpty {
+                newMessage = saved
             }
         }
         .onDisappear {
@@ -431,6 +433,12 @@ struct ConversationView: View {
             wsManager.disconnect()
             clearDraftAttachments()
             cancelAllCoachReplyRevealAnimations()
+            let draft = newMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if draft.isEmpty {
+                UserDefaults.standard.removeObject(forKey: "draft_\(conversation.id)")
+            } else {
+                UserDefaults.standard.set(draft, forKey: "draft_\(conversation.id)")
+            }
         }
         .photosPicker(
             isPresented: $showMediaPicker,
@@ -532,6 +540,14 @@ struct ConversationView: View {
             case .subscribed:
                 break
             case .error(let message):
+                if message.lowercased().contains("not authenticated") {
+                    wsManager.disconnect()
+                    if let token = appState.token, !token.isEmpty {
+                        wsManager.connect(token: token)
+                        wsManager.subscribe(topic: conversation.id)
+                    }
+                    return
+                }
                 infoNotice = message
             }
         }
@@ -665,6 +681,7 @@ struct ConversationView: View {
 
         isSending = true
         newMessage = ""
+        UserDefaults.standard.removeObject(forKey: "draft_\(conversation.id)")
         lastTypingSent = false
         wsManager.sendTyping(topic: conversation.id, isTyping: false)
 

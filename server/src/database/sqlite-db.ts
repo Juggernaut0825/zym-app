@@ -490,6 +490,16 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       UNIQUE(challenge_id, user_id, local_day)
     );
 
+    CREATE TABLE IF NOT EXISTS challenge_invitations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      challenge_id INTEGER NOT NULL,
+      inviter_user_id INTEGER NOT NULL,
+      invitee_user_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(challenge_id, invitee_user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS abuse_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       reporter_user_id INTEGER NOT NULL,

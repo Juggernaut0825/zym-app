@@ -481,7 +481,12 @@ private struct TodayView: View {
     }
 
     private func loadAll() {
-        guard appState.userId != nil else { return }
+        guard appState.userId != nil, appState.token != nil else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if appState.token != nil { loadAll() }
+            }
+            return
+        }
         isLoading = true
         errorText = ""
         loadToday()
@@ -824,6 +829,8 @@ private struct TodayExerciseRow: View {
                     switch phase {
                     case .success(let image):
                         image.resizable().scaledToFill()
+                            .frame(width: 52, height: 52)
+                            .clipped()
                     default:
                         Image(systemName: "figure.strengthtraining.traditional")
                             .font(.system(size: 16, weight: .semibold))
@@ -894,9 +901,14 @@ private struct TodayChallengeRow: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(challenge.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(Color.zymText)
+                    HStack(spacing: 6) {
+                        Image(systemName: challengeGoalIcon(challenge.goal_type))
+                            .font(.system(size: 11))
+                            .foregroundColor(Color.zymPrimary)
+                        Text(challenge.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color.zymText)
+                    }
                     HStack(spacing: 4) {
                         if let avatars = challenge.member_avatars, !avatars.isEmpty {
                             TodayAvatarStack(urls: avatars, size: 18)

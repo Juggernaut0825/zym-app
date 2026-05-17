@@ -5,13 +5,13 @@ const GROUP_MEMBER_LIMIT = 500;
 
 export interface CreateGroupOptions {
   name: string;
-  ownerId: string;
+  ownerId: number;
   coachEnabled?: string;
   location?: LocationSelection | null;
 }
 
 export class GroupService {
-  static async createGroup(name: string, ownerId: string, coachEnabled?: string, location?: LocationSelection | null) {
+  static async createGroup(name: string, ownerId: number, coachEnabled?: string, location?: LocationSelection | null) {
     const db = getDB();
     const result = db.prepare(
       'INSERT INTO groups (name, owner_id, coach_enabled, location_label, location_city, location_latitude, location_longitude, location_precision) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
