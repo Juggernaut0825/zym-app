@@ -172,9 +172,15 @@ struct CreateGroupView: View {
             guard statusCode >= 200 && statusCode < 300,
                   let data = data,
                   let payload = try? JSONDecoder().decode(CreateGroupResponse.self, from: data) else {
+                let serverError: String? = {
+                    guard let data = data,
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let msg = json["error"] as? String else { return nil }
+                    return msg
+                }()
                 DispatchQueue.main.async {
                     pending = false
-                    statusText = "Failed to create group."
+                    statusText = serverError ?? "Failed to create group."
                 }
                 return
             }

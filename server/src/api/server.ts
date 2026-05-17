@@ -2098,10 +2098,9 @@ app.get('/users/search', (req, res) => {
     FROM users
     WHERE LOWER(username) LIKE ?
        OR LOWER(COALESCE(display_name, '')) LIKE ?
-       OR LOWER(COALESCE(email, '')) LIKE ?
     ORDER BY display_name ASC, username ASC
     LIMIT 12
-  `).all(pattern, pattern, pattern).map((row: any) => ({
+  `).all(pattern, pattern).map((row: any) => ({
     id: Number(row.id),
     public_uuid: String(row.public_uuid || '').trim() || null,
     username: String(row.username || ''),
@@ -3193,20 +3192,24 @@ app.post('/groups/create',
   locationPrecision: { type: 'string', enum: ['city', 'precise'] },
 }),
   async (req, res) => {
-  const authUserId = assertAuthUser(req);
-  const ownerId = toUserId(req.body.ownerId);
-  if (authUserId !== ownerId) {
-    return res.status(403).json({ error: 'Forbidden owner scope' });
-  }
+  try {
+    const authUserId = assertAuthUser(req);
+    const ownerId = toUserId(req.body.ownerId);
+    if (authUserId !== ownerId) {
+      return res.status(403).json({ error: 'Forbidden owner scope' });
+    }
 
-  const location = readOptionalLocationSelection(req.body || {});
-  const groupId = await GroupService.createGroup(
-    String(req.body.name || '').trim() || 'New Group',
-    ownerId,
-    String(req.body.coachEnabled || 'none'),
-    location,
-  );
-  res.json({ groupId });
+    const location = readOptionalLocationSelection(req.body || {});
+    const groupId = await GroupService.createGroup(
+      String(req.body.name || '').trim() || 'New Group',
+      ownerId,
+      String(req.body.coachEnabled || 'none'),
+      location,
+    );
+    res.json({ groupId });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || 'Failed to create group' });
+  }
 });
 
 app.post('/groups/add-member',
