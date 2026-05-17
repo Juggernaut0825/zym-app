@@ -231,6 +231,7 @@ struct FeedView: View {
     @State private var challengePendingId: Int?
     @State private var selectedTab = 0
     @State private var discoverChallenges: [DiscoverChallenge] = []
+    @State private var discoverVisible: [DiscoverChallenge] = []
     @State private var discoverLoading = false
     @State private var challengeInvitations: [ChallengeInvitation] = []
     @State private var invitationPendingId: Int?
@@ -374,9 +375,27 @@ struct FeedView: View {
                                 }
 
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("Discover")
-                                        .font(.custom("Syne", size: 18))
-                                        .foregroundColor(Color.zymText)
+                                    HStack {
+                                        Text("Discover")
+                                            .font(.custom("Syne", size: 18))
+                                            .foregroundColor(Color.zymText)
+                                        Spacer()
+                                        if discoverChallenges.count > 5 {
+                                            Button {
+                                                withAnimation(.zymSoft) {
+                                                    discoverVisible = Array(discoverChallenges.shuffled().prefix(5))
+                                                }
+                                            } label: {
+                                                Image(systemName: "shuffle")
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundColor(Color.zymPrimary)
+                                                    .padding(8)
+                                                    .background(Color.zymPrimary.opacity(0.1))
+                                                    .clipShape(Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
 
                                     if discoverLoading && discoverChallenges.isEmpty {
                                         ProgressView()
@@ -388,7 +407,7 @@ struct FeedView: View {
                                             .foregroundColor(Color.zymSubtext)
                                             .padding(.vertical, 6)
                                     } else {
-                                        ForEach(discoverChallenges) { challenge in
+                                        ForEach(discoverVisible) { challenge in
                                             Button {
                                                 selectedChallengeForDetail = IdentifiableInt(challenge.id)
                                             } label: {
@@ -715,6 +734,7 @@ struct FeedView: View {
             DispatchQueue.main.async {
                 withAnimation(.zymSoft) {
                     discoverChallenges = response.challenges
+                    discoverVisible = Array(response.challenges.shuffled().prefix(5))
                 }
             }
         }.resume()

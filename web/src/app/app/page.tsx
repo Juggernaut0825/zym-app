@@ -1166,6 +1166,7 @@ export default function AppPage() {
   const [challengeVisibility, setChallengeVisibility] = useState<'public' | 'friends'>('friends');
   const [communityTab, setCommunityTab] = useState<'challenges' | 'posts'>('challenges');
   const [discoverChallenges, setDiscoverChallenges] = useState<DiscoverChallenge[]>([]);
+  const [discoverVisible, setDiscoverVisible] = useState<DiscoverChallenge[]>([]);
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [challengeDetailId, setChallengeDetailId] = useState<number | null>(null);
   const [challengeMembers, setChallengeMembers] = useState<ChallengeMember[]>([]);
@@ -3184,12 +3185,19 @@ export default function AppPage() {
     }
   }
 
+  function shuffleDiscoverVisible(all: DiscoverChallenge[]) {
+    const shuffled = [...all].sort(() => Math.random() - 0.5);
+    setDiscoverVisible(shuffled.slice(0, 5));
+  }
+
   async function loadDiscoverChallengesData() {
     if (!authUserId) return;
     try {
       setDiscoverLoading(true);
       const result = await getDiscoverChallenges(authUserId);
-      setDiscoverChallenges(result.challenges || []);
+      const all = result.challenges || [];
+      setDiscoverChallenges(all);
+      shuffleDiscoverVisible(all);
     } catch {
       // silent
     } finally {
@@ -5685,8 +5693,22 @@ export default function AppPage() {
                   ) : null}
 
                   <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
-                    <h2 className="text-lg font-semibold tracking-tight text-slate-900">Discover</h2>
-                    <p className="mt-1 text-xs text-slate-500">Public challenges you can join</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-lg font-semibold tracking-tight text-slate-900">Discover</h2>
+                        <p className="mt-1 text-xs text-slate-500">Public challenges you can join</p>
+                      </div>
+                      {discoverChallenges.length > 5 ? (
+                        <button
+                          type="button"
+                          className="flex size-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                          onClick={() => shuffleDiscoverVisible(discoverChallenges)}
+                          title="Shuffle"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="mt-4 divide-y divide-slate-200/70">
                       {discoverLoading ? (
                         <p className="py-4 text-sm text-slate-500">Loading...</p>
@@ -5694,7 +5716,7 @@ export default function AppPage() {
                       {!discoverLoading && discoverChallenges.length === 0 ? (
                         <p className="py-4 text-sm text-slate-500">No public challenges available right now.</p>
                       ) : null}
-                      {discoverChallenges.map((dc) => (
+                      {discoverVisible.map((dc) => (
                         <div key={dc.id} className="flex items-center justify-between gap-3 py-3">
                           <button type="button" className="min-w-0 text-left" onClick={() => void handleOpenChallengeDetail(dc.id)}>
                             <p className="font-semibold text-slate-900">{dc.title}</p>
