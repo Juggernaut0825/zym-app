@@ -246,7 +246,8 @@ struct InboxView: View {
                             ? (coach.last_message_preview ?? "")
                             : "Ask about training, meals, or form.",
                         unreadCount: coach.unread_count ?? 0,
-                        mentionCount: coach.mention_count ?? 0
+                        mentionCount: coach.mention_count ?? 0,
+                        lastMessageAt: coach.last_message_at
                     )
             }
 
@@ -271,7 +272,8 @@ struct InboxView: View {
                         otherUserId: friend.id,
                         previewText: "Start chatting",
                         unreadCount: 0,
-                        mentionCount: 0
+                        mentionCount: 0,
+                        lastMessageAt: nil
                     )
                 )
             }
@@ -292,7 +294,8 @@ struct InboxView: View {
                         otherUserId: Int(dm.other_user_id),
                         previewText: preview,
                         unreadCount: dm.unread_count ?? 0,
-                        mentionCount: dm.mention_count ?? 0
+                        mentionCount: dm.mention_count ?? 0,
+                        lastMessageAt: dm.last_message_at
                     )
                 )
             }
@@ -313,11 +316,22 @@ struct InboxView: View {
                         otherUserId: nil,
                         previewText: preview,
                         unreadCount: group.unread_count ?? 0,
-                        mentionCount: group.mention_count ?? 0
+                        mentionCount: group.mention_count ?? 0,
+                        lastMessageAt: group.last_message_at
                     )
                 )
             }
 
+            let coaches = convs.filter { $0.isCoach }
+            let rest = convs.filter { !$0.isCoach }.sorted { a, b in
+                let aTime = a.lastMessageAt ?? ""
+                let bTime = b.lastMessageAt ?? ""
+                if aTime.isEmpty && bTime.isEmpty { return false }
+                if aTime.isEmpty { return true }
+                if bTime.isEmpty { return false }
+                return aTime > bTime
+            }
+            convs = coaches + rest
             conversations = convs
             InboxListCache.save(
                 InboxCachePayload(conversations: convs, pendingRequestCount: requestsCount),
@@ -555,6 +569,7 @@ struct Conversation: Identifiable, Codable {
     let previewText: String
     let unreadCount: Int
     let mentionCount: Int
+    let lastMessageAt: String?
 }
 
 struct InboxCachePayload: Codable {

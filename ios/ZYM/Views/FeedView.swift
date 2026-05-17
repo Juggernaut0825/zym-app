@@ -869,7 +869,8 @@ struct FeedView: View {
             otherUserId: userId,
             previewText: "",
             unreadCount: 0,
-            mentionCount: 0
+            mentionCount: 0,
+            lastMessageAt: nil
         )
         viewedProfile = nil
         profileLoading = true

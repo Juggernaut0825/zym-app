@@ -200,7 +200,8 @@ struct ConversationView: View {
                                                 otherUserId: userId,
                                                 previewText: "",
                                                 unreadCount: 0,
-                                                mentionCount: 0
+                                                mentionCount: 0,
+                                                lastMessageAt: nil
                                             )
                                         )
                                     }
@@ -324,11 +325,9 @@ struct ConversationView: View {
                         .padding(.horizontal, 14)
                     }
 
-                    if conversation.isGroup {
+                    if conversation.isGroup && groupCoachEnabled {
                         HStack {
-                            Text(groupCoachEnabled
-                                 ? "Tip: mention @coach in group to trigger AI reply."
-                                 : "Coach is disabled in this group.")
+                            Text("Tip: mention @coach in group to trigger AI reply.")
                                 .font(.system(size: 12))
                                 .foregroundColor(Color.zymSubtext)
                             Spacer()

@@ -500,7 +500,8 @@ struct FriendsView: View {
             otherUserId: user.id,
             previewText: "",
             unreadCount: 0,
-            mentionCount: 0
+            mentionCount: 0,
+            lastMessageAt: nil
         )
         viewedProfile = nil
         profileLoading = true
@@ -1545,7 +1546,8 @@ struct AddFriendView: View {
             otherUserId: user.id,
             previewText: "",
             unreadCount: 0,
-            mentionCount: 0
+            mentionCount: 0,
+            lastMessageAt: nil
         )
         viewedProfile = nil
         profileLoading = true
