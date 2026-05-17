@@ -1,11 +1,11 @@
 import SwiftUI
+import CoreLocation
 
 struct CreateGroupView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var appState: AppState
+    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
     @State private var groupName = ""
-    @State private var selectedCoachId = "zj"
-    @State private var coachPickerExpanded = false
     @State private var inviteQuery = ""
     @State private var inviteResults: [Friend] = []
     @State private var invitees: [Friend] = []
@@ -13,6 +13,8 @@ struct CreateGroupView: View {
     @State private var inviteSearchSequence = 0
     @State private var pending = false
     @State private var statusText = ""
+    @State private var selectedLocation: SharedLocationSelectionPayload?
+    @State private var showLocationSheet = false
     let onCreate: () -> Void
 
     var body: some View {
@@ -31,9 +33,10 @@ struct CreateGroupView: View {
                             )
                             .cornerRadius(12)
 
-                        GroupCoachPickerCard(
-                            selectedCoachId: $selectedCoachId,
-                            expanded: $coachPickerExpanded
+                        GroupLocationCard(
+                            selectedLocation: selectedLocation,
+                            onTap: { showLocationSheet = true },
+                            onRemove: { selectedLocation = nil }
                         )
 
                         VStack(alignment: .leading, spacing: 10) {
@@ -120,14 +123,19 @@ struct CreateGroupView: View {
                         .foregroundColor(Color.zymPrimary)
                 }
             }
+            .sheet(isPresented: $showLocationSheet) {
+                GroupLocationSheet(
+                    selectedLocation: selectedLocation,
+                    locationCoordinator: locationCoordinator,
+                    onSelected: { location in
+                        selectedLocation = location
+                    }
+                )
+                .environmentObject(appState)
+            }
         }
         .onChange(of: inviteQuery) { _, value in
             scheduleInviteSearch(for: value)
-        }
-        .onAppear {
-            if appState.selectedCoach == "lc" {
-                selectedCoachId = "lc"
-            }
         }
     }
 
@@ -144,11 +152,19 @@ struct CreateGroupView: View {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuthorizationHeader(&request, token: appState.token)
 
-        let body = [
+        var body: [String: Any] = [
             "name": groupName.trimmingCharacters(in: .whitespacesAndNewlines),
             "ownerId": userId,
-            "coachEnabled": selectedCoachId
-        ] as [String : Any]
+            "coachEnabled": "none"
+        ]
+
+        if let loc = selectedLocation {
+            body["locationLabel"] = loc.label
+            body["locationCity"] = loc.city
+            body["locationLatitude"] = loc.latitude
+            body["locationLongitude"] = loc.longitude
+            body["locationPrecision"] = loc.precision
+        }
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         authorizedDataTask(appState: appState, request: request) { data, response, _ in
@@ -282,72 +298,52 @@ struct CreateGroupView: View {
     }
 }
 
-private struct GroupCoachPickerCard: View {
-    @Binding var selectedCoachId: String
-    @Binding var expanded: Bool
+// MARK: - Location Card
 
-    private let coaches: [(id: String, name: String, detail: String)] = [
-        ("zj", "ZJ", "Analytical coach"),
-        ("lc", "LC", "Direct coach")
-    ]
+private struct GroupLocationCard: View {
+    let selectedLocation: SharedLocationSelectionPayload?
+    let onTap: () -> Void
+    let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                    expanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    GroupCoachAvatar(coachId: selectedCoachId)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AI Coach")
+        VStack(alignment: .leading, spacing: 10) {
+            if let location = selectedLocation {
+                HStack {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(Color.zymPrimary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(location.label)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(Color.zymText)
-                        Text(selectedCoachId.uppercased())
-                            .font(.system(size: 12, weight: .medium))
+                        Text(location.precision == "city" ? "City-level" : "Precise location")
+                            .font(.system(size: 12))
                             .foregroundColor(Color.zymSubtext)
                     }
-
                     Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(Color.zymSubtext)
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                    Button { onRemove() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+                    .buttonStyle(.plain)
                 }
-            }
-            .buttonStyle(.plain)
-
-            if expanded {
-                HStack(spacing: 12) {
-                    ForEach(coaches, id: \.id) { coach in
-                        Button {
-                            withAnimation(.spring(response: 0.22, dampingFraction: 0.9)) {
-                                selectedCoachId = coach.id
-                                expanded = false
-                            }
-                        } label: {
-                            VStack(spacing: 7) {
-                                GroupCoachAvatar(coachId: coach.id, selected: selectedCoachId == coach.id)
-                                Text(coach.name)
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(Color.zymText)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.zymSurfaceSoft.opacity(selectedCoachId == coach.id ? 0.95 : 0.55))
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(selectedCoachId == coach.id ? Color.zymCoachAccent(coach.id) : Color.zymLine, lineWidth: selectedCoachId == coach.id ? 1.5 : 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
+            } else {
+                Button(action: onTap) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "mappin.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.zymPrimary)
+                        Text("Add Location")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color.zymText)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color.zymSubtext)
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .buttonStyle(.plain)
             }
         }
         .padding(12)
@@ -360,12 +356,176 @@ private struct GroupCoachPickerCard: View {
     }
 }
 
-private struct GroupCoachAvatar: View {
-    let coachId: String
-    var selected = false
+// MARK: - Location Sheet
+
+private struct GroupLocationSheet: View {
+    let selectedLocation: SharedLocationSelectionPayload?
+    @ObservedObject var locationCoordinator: AppLocationPermissionCoordinator
+    let onSelected: (SharedLocationSelectionPayload?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
+    @State private var query = ""
+    @State private var results: [SharedLocationSelectionPayload] = []
+    @State private var loading = false
+    @State private var statusText = ""
 
     var body: some View {
-        CoachAvatar(coach: coachId, state: selected ? .selected : .idle, size: 40, animated: false)
+        NavigationView {
+            ZStack {
+                ZYMBackgroundLayer().ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Add a location so nearby users can discover this group.")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color.zymSubtext)
+
+                    HStack(spacing: 8) {
+                        Button("Use Current City") {
+                            requestCurrentLocation(precise: false)
+                        }
+                        .buttonStyle(ZYMGhostButton())
+                        .disabled(loading)
+
+                        Button("Use Precise") {
+                            requestCurrentLocation(precise: true)
+                        }
+                        .buttonStyle(ZYMGhostButton())
+                        .disabled(loading)
+                    }
+
+                    TextField("Search city or neighborhood", text: $query)
+                        .padding(12)
+                        .background(Color.zymSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .onChange(of: query) { _, _ in
+                            searchLocations()
+                        }
+
+                    if loading {
+                        ProgressView()
+                    } else if query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && results.isEmpty {
+                        Text("No matching locations.")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.zymSubtext)
+                    }
+
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(results, id: \.label) { result in
+                                Button {
+                                    onSelected(result)
+                                    dismiss()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(result.label)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(Color.zymText)
+                                        Text("\(result.city) · \(result.precision == "city" ? "City-level" : "Precise")")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.zymSubtext)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color.white.opacity(0.9))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if !statusText.isEmpty {
+                        Text(statusText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.zymPrimary)
+                    }
+
+                    Spacer()
+                }
+                .padding(16)
+            }
+            .navigationTitle("Group Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func searchLocations() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = apiURL("/location/search?q=\(encoded)") else {
+            results = []
+            loading = false
+            return
+        }
+
+        loading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async { loading = false }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(LocationSearchResponse.self, from: data) else { return }
+            DispatchQueue.main.async { results = response.results }
+        }.resume()
+    }
+
+    private func requestCurrentLocation(precise: Bool) {
+        loading = true
+        statusText = ""
+        locationCoordinator.requestCurrentCoordinate(precise: precise) { result in
+            switch result {
+            case .success(let coordinate):
+                reverseLocation(latitude: coordinate.latitude, longitude: coordinate.longitude, precise: precise)
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    loading = false
+                    statusText = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func reverseLocation(latitude: Double, longitude: Double, precise: Bool) {
+        guard let url = apiURL("/location/reverse") else {
+            loading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&request, token: appState.token)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "latitude": latitude,
+            "longitude": longitude,
+        ])
+
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(LocationReverseResponse.self, from: data) else {
+                DispatchQueue.main.async {
+                    loading = false
+                    statusText = "Failed to resolve location."
+                }
+                return
+            }
+            let selection = precise ? response.precise : response.city
+            DispatchQueue.main.async {
+                loading = false
+                if let selection {
+                    onSelected(selection)
+                    dismiss()
+                } else {
+                    statusText = "Failed to resolve location."
+                }
+            }
+        }.resume()
     }
 }
 
@@ -373,6 +533,27 @@ struct Group: Identifiable, Codable {
     let id: Int
     let name: String
     let coach_enabled: String?
+    let location_label: String?
+    let location_city: String?
+    let location_latitude: Double?
+    let location_longitude: Double?
+    let location_precision: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, coach_enabled, location_label, location_city, location_latitude, location_longitude, location_precision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        coach_enabled = try container.decodeIfPresent(String.self, forKey: .coach_enabled)
+        location_label = try container.decodeIfPresent(String.self, forKey: .location_label)
+        location_city = try container.decodeIfPresent(String.self, forKey: .location_city)
+        location_latitude = try container.decodeIfPresent(Double.self, forKey: .location_latitude)
+        location_longitude = try container.decodeIfPresent(Double.self, forKey: .location_longitude)
+        location_precision = try container.decodeIfPresent(String.self, forKey: .location_precision)
+    }
 }
 
 struct GroupsResponse: Codable {

@@ -413,10 +413,42 @@ struct ChallengeSummary: Codable, Identifiable {
     let visibility: String?
     let role: String
     let member_count: Int
+    let member_avatars: [String]?
     let today_status: String?
 }
 
 struct ChallengesResponse: Decodable {
     let day: String
     let challenges: [ChallengeSummary]
+}
+
+struct DiscoverChallenge: Codable, Identifiable {
+    let id: Int
+    let owner_user_id: Int?
+    let title: String
+    let description: String?
+    let goal_type: String
+    let target_count: Int
+    let start_date: String
+    let end_date: String
+    let visibility: String?
+    let member_count: Int
+    let member_avatars: [String]?
+    let created_at: String?
+}
+
+struct DiscoverChallengesResponse: Decodable {
+    let challenges: [DiscoverChallenge]
+}
+
+struct ChallengeMember: Codable, Identifiable {
+    let id: Int
+    let username: String
+    let display_name: String
+    let avatar_url: String?
+    let role: String
+}
+
+struct ChallengeMembersResponse: Decodable {
+    let members: [ChallengeMember]
 }

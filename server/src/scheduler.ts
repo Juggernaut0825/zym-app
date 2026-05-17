@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { initDB } from './database/runtime-db.js';
+import { ChallengeReminderScheduler } from './services/challenge-reminder-scheduler.js';
 import { CoachOutreachScheduler } from './services/coach-outreach-scheduler.js';
 import { MediaCleanupScheduler } from './services/media-cleanup-scheduler.js';
 import { SessionCleanupScheduler } from './services/session-cleanup-scheduler.js';
@@ -11,6 +12,7 @@ dotenv.config();
 
 ensureAppDataDirs();
 
+const challengeReminder = new ChallengeReminderScheduler();
 const coachOutreach = new CoachOutreachScheduler();
 const mediaCleanup = new MediaCleanupScheduler();
 const sessionCleanup = new SessionCleanupScheduler();
@@ -20,6 +22,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info(`[scheduler] received ${signal}, shutting down (${formatProcessMemoryUsage()})`);
+  challengeReminder.stop();
   coachOutreach.stop();
   mediaCleanup.stop();
   sessionCleanup.stop();
@@ -28,6 +31,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
 
 async function main() {
   await initDB();
+  challengeReminder.start();
   coachOutreach.start();
   mediaCleanup.start();
   sessionCleanup.start();

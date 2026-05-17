@@ -77,16 +77,37 @@ private struct NearbyAvatarTile: View {
 }
 
 struct FriendsView: View {
-    @State private var friends: [Friend] = []
-    @State private var requests: [Friend] = []
     @State private var searchQuery = ""
     @State private var searchResults: [Friend] = []
+    @State private var groupSearchResults: [ExploreGroupResult] = []
     @State private var searchPending = false
     @State private var searchStatusText = ""
     @State private var searchSequence = 0
+    @State private var showAllResults = false
     @State private var selectedConversation: Conversation?
     @State private var showConversation = false
+    @State private var nearbyUsers: [NearbyUserPayload] = []
+    @State private var nearbyGroups: [ExploreGroupResult] = []
+    @State private var nearbyLoading = false
+    @State private var sharedLocation: StoredUserLocationPayload?
+    @State private var nearbyLocationSheetOpen = false
+    @State private var profileConversation: Conversation?
+    @State private var viewedProfile: ConversationPublicProfileResponse?
+    @State private var profileLoading = false
+    @State private var profileReportPending = false
+    @State private var profileActionPending = false
+    @State private var selectedGroupDetail: ExploreGroupResult?
+    @StateObject private var locationCoordinator = AppLocationPermissionCoordinator()
+    private let nearbyRefreshTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
     @EnvironmentObject var appState: AppState
+
+    private var visibleSearchResults: [Friend] {
+        showAllResults ? searchResults : Array(searchResults.prefix(10))
+    }
+
+    private var visibleGroupResults: [ExploreGroupResult] {
+        showAllResults ? groupSearchResults : Array(groupSearchResults.prefix(5))
+    }
 
     var body: some View {
         NavigationView {
@@ -94,19 +115,16 @@ struct FriendsView: View {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 14) {
+                    VStack(spacing: 18) {
+                        // Search bar
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Search People")
-                                .foregroundColor(Color.zymText)
-                                .font(.custom("Syne", size: 20))
-
-                            TextField("Search people by username", text: $searchQuery)
+                            TextField("Search users or groups", text: $searchQuery)
                                 .zymFieldStyle()
                                 .textInputAutocapitalization(.never)
                                 .disableAutocorrection(true)
 
                             if searchPending {
-                                Text("Searching usernames...")
+                                Text("Searching...")
                                     .foregroundColor(Color.zymSubtext)
                                     .font(.system(size: 12, weight: .medium))
                             } else if !searchStatusText.isEmpty {
@@ -115,54 +133,135 @@ struct FriendsView: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
 
-                            ForEach(Array(searchResults.enumerated()), id: \.element.id) { index, friend in
-                                FriendSearchResultRow(friend: friend) {
-                                    sendFriendRequest(to: friend.id)
+                            if !searchResults.isEmpty || !groupSearchResults.isEmpty {
+                                // User results
+                                ForEach(Array(visibleSearchResults.enumerated()), id: \.element.id) { index, friend in
+                                    FriendSearchResultRow(friend: friend) {
+                                        sendFriendRequest(to: friend.id)
+                                    }
+                                    .zymAppear(delay: Double(index) * 0.02)
                                 }
-                                .zymAppear(delay: Double(index) * 0.02)
+
+                                // Group results
+                                ForEach(visibleGroupResults, id: \.id) { group in
+                                    ExploreGroupRow(group: group) {
+                                        selectedGroupDetail = group
+                                    }
+                                }
+
+                                if !showAllResults && (searchResults.count > 10 || groupSearchResults.count > 5) {
+                                    Button {
+                                        withAnimation(.zymSoft) { showAllResults = true }
+                                    } label: {
+                                        Text("See more")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(Color.zymPrimary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(Color.zymSurface)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(Color.zymLine, lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                         .padding(.horizontal, 14)
 
-                        if !requests.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Friend Requests")
+                        // Nearby Users section
+                        if searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Nearby Users")
+                                        .foregroundColor(Color.zymText)
+                                        .font(.custom("Syne", size: 20))
+                                    Spacer()
+                                    if sharedLocation == nil {
+                                        Button("Enable") { nearbyLocationSheetOpen = true }
+                                            .buttonStyle(ZYMGhostButton())
+                                    } else {
+                                        Button {
+                                            nearbyLocationSheetOpen = true
+                                        } label: {
+                                            Image(systemName: "location.circle")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(Color.zymPrimary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+
+                                if sharedLocation != nil {
+                                    if nearbyLoading && nearbyUsers.isEmpty {
+                                        ProgressView()
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .padding(.vertical, 20)
+                                    } else if nearbyUsers.isEmpty {
+                                        Text("No nearby users yet.")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(Color.zymSubtext)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .zymCard()
+                                    } else {
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 12) {
+                                                ForEach(nearbyUsers) { user in
+                                                    NearbyAvatarTile(user: user) {
+                                                        openNearbyProfile(user)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text("Enable location sharing to discover people nearby.")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .zymCard()
+                                }
+                            }
+                            .padding(.horizontal, 14)
+
+                            // Nearby Groups section
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Nearby Groups")
                                     .foregroundColor(Color.zymText)
                                     .font(.custom("Syne", size: 20))
 
-                                ForEach(Array(requests.enumerated()), id: \.element.id) { index, friend in
-                                    FriendRequestRow(friend: friend, onAccept: { acceptFriend(friend.id) })
-                                        .zymAppear(delay: Double(index) * 0.02)
+                                if sharedLocation != nil {
+                                    if nearbyGroups.isEmpty && !nearbyLoading {
+                                        Text("No nearby groups yet.")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(Color.zymSubtext)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .zymCard()
+                                    } else {
+                                        ForEach(nearbyGroups, id: \.id) { group in
+                                            ExploreGroupRow(group: group) {
+                                                selectedGroupDetail = group
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text("Enable location to find groups nearby.")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Color.zymSubtext)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .zymCard()
                                 }
                             }
                             .padding(.horizontal, 14)
                         }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Friends")
-                                .foregroundColor(Color.zymText)
-                                .font(.custom("Syne", size: 20))
-
-                            if friends.isEmpty {
-                                Text("No friends yet")
-                                    .foregroundColor(Color.zymSubtext)
-                                    .font(.system(size: 13))
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .zymCard()
-                            }
-
-                            ForEach(Array(friends.enumerated()), id: \.element.id) { index, friend in
-                                FriendRow(friend: friend, onDM: { openDM(with: friend) })
-                                    .zymAppear(delay: Double(index) * 0.02)
-                            }
-                        }
-                        .padding(.horizontal, 14)
                     }
                     .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
             }
-            .navigationTitle("Friends")
+            .navigationTitle("Explore")
             .background(
                 NavigationLink(
                     isActive: $showConversation,
@@ -178,58 +277,145 @@ struct FriendsView: View {
                 )
                 .hidden()
             )
-            .onAppear(perform: loadFriends)
+            .onAppear {
+                loadStoredLocation()
+                loadNearbyUsers()
+                loadNearbyGroups()
+            }
+            .onReceive(nearbyRefreshTimer) { _ in
+                guard sharedLocation != nil else { return }
+                loadNearbyUsers()
+            }
             .onChange(of: searchQuery) { _, value in
+                showAllResults = false
                 scheduleSearch(for: value)
             }
-        }
-    }
-
-    func loadFriends() {
-        guard let userId = appState.userId else { return }
-
-        if let url = apiURL("/friends/\(userId)") {
-            var request = URLRequest(url: url)
-            applyAuthorizationHeader(&request, token: appState.token)
-            authorizedDataTask(appState: appState, request: request) { data, _, _ in
-                guard let data = data,
-                      let response = try? JSONDecoder().decode(FriendsResponse.self, from: data) else { return }
-                DispatchQueue.main.async {
-                    friends = response.friends
-                }
-            }.resume()
-        }
-
-        if let url = apiURL("/friends/requests/\(userId)") {
-            var request = URLRequest(url: url)
-            applyAuthorizationHeader(&request, token: appState.token)
-            authorizedDataTask(appState: appState, request: request) { data, _, _ in
-                guard let data = data,
-                      let response = try? JSONDecoder().decode(RequestsResponse.self, from: data) else { return }
-                DispatchQueue.main.async {
-                    requests = response.requests
-                }
-            }.resume()
-        }
-    }
-
-    func acceptFriend(_ friendId: Int) {
-        guard let userId = appState.userId,
-              let url = apiURL("/friends/accept") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuthorizationHeader(&request, token: appState.token)
-        let body = ["userId": userId, "friendId": friendId]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        authorizedDataTask(appState: appState, request: request) { _, _, _ in
-            DispatchQueue.main.async {
-                loadFriends()
+            .sheet(isPresented: $nearbyLocationSheetOpen) {
+                NearbyLocationSheet(
+                    initialLocation: sharedLocation,
+                    onSaved: { location in
+                        sharedLocation = location
+                        loadNearbyUsers()
+                        loadNearbyGroups()
+                    },
+                    onDisabled: {
+                        sharedLocation = nil
+                        nearbyUsers = []
+                        nearbyGroups = []
+                    },
+                    locationCoordinator: locationCoordinator
+                )
+                .environmentObject(appState)
             }
-        }.resume()
+            .sheet(item: $selectedGroupDetail) { group in
+                GroupDetailView(group: group)
+                    .environmentObject(appState)
+            }
+            .sheet(item: $profileConversation) { conversation in
+                ConversationProfileSheet(
+                    conversation: conversation,
+                    appCoach: appState.selectedCoach ?? "zj",
+                    profile: viewedProfile,
+                    loading: profileLoading,
+                    primaryActionLabel: profilePrimaryActionLabel(),
+                    primaryActionEnabled: profilePrimaryActionEnabled(),
+                    primaryActionPending: profileActionPending,
+                    onPrimaryAction: handleProfilePrimaryAction,
+                    canReportUser: conversation.otherUserId != nil,
+                    reportPending: profileReportPending,
+                    onReportUser: { reportNearbyProfileUser() }
+                )
+                .environmentObject(appState)
+            }
+        }
     }
 
-    func sendFriendRequest(to friendId: Int, dismissAfterAdd: Bool = true) {
+    // MARK: - Search
+
+    func scheduleSearch(for rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchSequence += 1
+        let currentSequence = searchSequence
+
+        guard trimmed.count >= 2 else {
+            searchPending = false
+            searchResults = []
+            groupSearchResults = []
+            searchStatusText = ""
+            return
+        }
+
+        searchPending = true
+        searchStatusText = ""
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            guard currentSequence == searchSequence else { return }
+            searchAll(query: trimmed, sequence: currentSequence)
+        }
+    }
+
+    func searchAll(query: String, sequence: Int) {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
+
+        var usersFinished = false
+        var groupsFinished = false
+        let checkDone = { if usersFinished && groupsFinished { searchPending = false } }
+
+        // Search users
+        if let url = apiURL("/users/search?q=\(encoded)") {
+            var request = URLRequest(url: url)
+            applyAuthorizationHeader(&request, token: appState.token)
+            authorizedDataTask(appState: appState, request: request) { data, _, _ in
+                guard sequence == searchSequence else { return }
+                DispatchQueue.main.async {
+                    usersFinished = true
+                    if let data = data,
+                       let response = try? JSONDecoder().decode(UserSearchResponse.self, from: data) {
+                        let ownUserId = appState.userId ?? -1
+                        searchResults = response.users.filter { $0.id != ownUserId }
+                    } else {
+                        searchResults = []
+                    }
+                    if searchResults.isEmpty && groupSearchResults.isEmpty {
+                        searchStatusText = "No results."
+                    } else {
+                        searchStatusText = ""
+                    }
+                    checkDone()
+                }
+            }.resume()
+        } else {
+            usersFinished = true
+        }
+
+        // Search groups
+        if let url = apiURL("/groups/search?q=\(encoded)&limit=10") {
+            var request = URLRequest(url: url)
+            applyAuthorizationHeader(&request, token: appState.token)
+            authorizedDataTask(appState: appState, request: request) { data, _, _ in
+                guard sequence == searchSequence else { return }
+                DispatchQueue.main.async {
+                    groupsFinished = true
+                    if let data = data,
+                       let response = try? JSONDecoder().decode(ExploreGroupSearchResponse.self, from: data) {
+                        groupSearchResults = response.groups
+                    } else {
+                        groupSearchResults = []
+                    }
+                    if searchResults.isEmpty && groupSearchResults.isEmpty {
+                        searchStatusText = "No results."
+                    } else {
+                        searchStatusText = ""
+                    }
+                    checkDone()
+                }
+            }.resume()
+        } else {
+            groupsFinished = true
+        }
+    }
+
+    func sendFriendRequest(to friendId: Int) {
         guard let userId = appState.userId,
               let url = apiURL("/friends/add") else { return }
 
@@ -256,98 +442,215 @@ struct FriendsView: View {
                     return
                 }
                 searchStatusText = "Friend request sent."
-                searchQuery = ""
-                searchResults = []
-                loadFriends()
             }
         }.resume()
     }
 
-    func openDM(with friend: Friend) {
-        guard let userId = appState.userId,
-              let url = apiURL("/messages/open-dm") else { return }
+    // MARK: - Nearby
 
+    func loadStoredLocation() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/profile/\(userId)") else { return }
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(StoredLocationResponse.self, from: data) else { return }
+            DispatchQueue.main.async { sharedLocation = response.location }
+        }.resume()
+    }
+
+    func loadNearbyUsers() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/nearby/\(userId)") else { return }
+        nearbyLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async { nearbyLoading = false }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(NearbyUsersResponse.self, from: data) else { return }
+            DispatchQueue.main.async { nearbyUsers = response.users }
+        }.resume()
+    }
+
+    func loadNearbyGroups() {
+        guard let userId = appState.userId,
+              let url = apiURL("/location/nearby-groups/\(userId)") else { return }
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ExploreNearbyGroupsResponse.self, from: data) else { return }
+            DispatchQueue.main.async { nearbyGroups = response.groups }
+        }.resume()
+    }
+
+    // MARK: - Profile
+
+    func openNearbyProfile(_ user: NearbyUserPayload) {
+        profileConversation = Conversation(
+            id: "user_\(user.id)",
+            name: user.username,
+            isGroup: false,
+            isCoach: false,
+            coachId: nil,
+            coachEnabled: nil,
+            avatarUrl: user.avatar_url,
+            otherUserId: user.id,
+            previewText: "",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+        viewedProfile = nil
+        profileLoading = true
+
+        guard let url = apiURL("/profile/public/\(user.id)") else {
+            profileLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            defer { DispatchQueue.main.async { profileLoading = false } }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(ConversationPublicProfileResponse.self, from: data) else { return }
+            DispatchQueue.main.async { viewedProfile = response }
+        }.resume()
+    }
+
+    func profilePrimaryActionLabel() -> String? {
+        guard let profile = viewedProfile else { return nil }
+        return friendshipPrimaryActionLabel(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId
+        )
+    }
+
+    func profilePrimaryActionEnabled() -> Bool {
+        guard let profile = viewedProfile else { return false }
+        return friendshipPrimaryActionEnabled(
+            status: profile.friendship_status,
+            targetUserId: profile.profile.id,
+            currentUserId: appState.userId,
+            pending: profileActionPending
+        )
+    }
+
+    func handleProfilePrimaryAction() {
+        guard let profile = viewedProfile else { return }
+        switch friendshipStatus(from: profile.friendship_status) {
+        case .accepted:
+            break
+        case .none:
+            sendFriendRequest(to: profile.profile.id)
+        case .incomingPending:
+            acceptFriendFromProfile(targetUserId: profile.profile.id)
+        default:
+            break
+        }
+    }
+
+    func acceptFriendFromProfile(targetUserId: Int) {
+        guard let userId = appState.userId,
+              let url = apiURL("/friends/accept") else { return }
+        profileActionPending = true
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuthorizationHeader(&request, token: appState.token)
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "userId": userId,
-            "otherUserId": friend.id,
+            "friendId": targetUserId,
         ])
-
-        authorizedDataTask(appState: appState, request: request) { data, _, _ in
-            guard let data = data,
-                  let payload = try? JSONDecoder().decode(DMOpenResponse.self, from: data) else { return }
+        authorizedDataTask(appState: appState, request: request) { _, _, _ in
             DispatchQueue.main.async {
-                selectedConversation = Conversation(
-                    id: payload.topic,
-                    name: friend.username,
-                    isGroup: false,
-                    isCoach: false,
-                    coachId: nil,
-                    coachEnabled: nil,
-                    avatarUrl: friend.avatar_url,
-                    otherUserId: friend.id,
-                    previewText: "Start chatting",
-                    unreadCount: 0,
-                    mentionCount: 0
-                )
-                showConversation = true
+                profileActionPending = false
+                profileConversation = nil
             }
         }.resume()
     }
 
-    func scheduleSearch(for rawValue: String) {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        searchSequence += 1
-        let currentSequence = searchSequence
-
-        guard trimmed.count >= 2 else {
-            searchPending = false
-            searchResults = []
-            searchStatusText = trimmed.isEmpty ? "" : "Type at least 2 characters."
-            return
-        }
-
-        searchPending = true
-        searchStatusText = ""
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-            guard currentSequence == searchSequence else { return }
-            searchUsers(query: trimmed, sequence: currentSequence)
+    func reportNearbyProfileUser() {
+        profileReportPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            profileReportPending = false
         }
     }
+}
 
-    func searchUsers(query: String, sequence: Int) {
-        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = apiURL("/users/search?q=\(encoded)") else {
-            DispatchQueue.main.async {
-                searchPending = false
-                searchResults = []
-                searchStatusText = "Search is unavailable right now."
-            }
-            return
-        }
+// MARK: - Group Search Models
 
-        var request = URLRequest(url: url)
-        applyAuthorizationHeader(&request, token: appState.token)
-        authorizedDataTask(appState: appState, request: request) { data, _, _ in
-            guard sequence == searchSequence else { return }
-            DispatchQueue.main.async {
-                searchPending = false
-                guard let data = data,
-                      let response = try? JSONDecoder().decode(UserSearchResponse.self, from: data) else {
-                    searchResults = []
-                    searchStatusText = "Failed to search users."
-                    return
+struct ExploreGroupResult: Identifiable, Codable {
+    let id: Int
+    let name: String
+    let location_label: String?
+    let location_city: String?
+    let location_latitude: Double?
+    let location_longitude: Double?
+    let location_precision: String?
+    let member_count: Int?
+    let distance_km: Double?
+}
+
+struct ExploreGroupSearchResponse: Codable {
+    let groups: [ExploreGroupResult]
+}
+
+struct ExploreNearbyGroupsResponse: Codable {
+    let groups: [ExploreGroupResult]
+}
+
+// MARK: - Group Row
+
+struct ExploreGroupRow: View {
+    let group: ExploreGroupResult
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.zymSurfaceSoft)
+                    .frame(width: 40, height: 40)
+                    .overlay(
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color.zymPrimary)
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    HStack(spacing: 6) {
+                        if let count = group.member_count {
+                            Text("\(count) members")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymSubtext)
+                        }
+                        if let city = group.location_city, !city.isEmpty {
+                            Text("· \(city)")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymSubtext)
+                        }
+                        if let dist = group.distance_km {
+                            Text("· \(nearbyDistanceText(dist))")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color.zymSubtext)
+                        }
+                    }
                 }
-
-                let ownUserId = appState.userId ?? -1
-                searchResults = response.users.filter { $0.id != ownUserId }
-                searchStatusText = searchResults.isEmpty ? "No matching users." : ""
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Color.zymSubtext)
             }
-        }.resume()
+            .zymCard()
+        }
+        .buttonStyle(.plain)
     }
 }
 

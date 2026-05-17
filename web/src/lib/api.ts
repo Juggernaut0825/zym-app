@@ -888,6 +888,28 @@ export async function completeChallenge(payload: {
   });
 }
 
+export async function getDiscoverChallenges(userId: number, limit = 10): Promise<{ challenges: import('./types').DiscoverChallenge[] }> {
+  return request<{ challenges: import('./types').DiscoverChallenge[] }>(`/challenges/discover/${userId}?limit=${limit}`);
+}
+
+export async function getChallengeMembers(challengeId: number): Promise<{ members: import('./types').ChallengeMember[] }> {
+  return request<{ members: import('./types').ChallengeMember[] }>(`/challenges/${challengeId}/members`);
+}
+
+export async function joinChallenge(challengeId: number, userId: number): Promise<{ success: boolean }> {
+  return request(`/challenges/${challengeId}/invite`, {
+    method: 'POST',
+    body: JSON.stringify({ userId, targetUserId: userId }),
+  });
+}
+
+export async function inviteToChallenge(challengeId: number, userId: number, targetUserId: number): Promise<{ success: boolean }> {
+  return request(`/challenges/${challengeId}/invite`, {
+    method: 'POST',
+    body: JSON.stringify({ userId, targetUserId }),
+  });
+}
+
 export async function updateCoachRecordProfile(payload: {
   userId: number;
   height?: string;

@@ -3176,6 +3176,11 @@ app.post('/groups/create',
   ownerId: { required: true, type: 'number', integer: true, min: 1 },
   name: { type: 'string', minLength: 1, maxLength: 80 },
   coachEnabled: { type: 'string', enum: ['none', 'zj', 'lc'] },
+  locationLabel: { type: 'string', maxLength: 160 },
+  locationCity: { type: 'string', maxLength: 120 },
+  locationLatitude: { type: 'number', min: -90, max: 90 },
+  locationLongitude: { type: 'number', min: -180, max: 180 },
+  locationPrecision: { type: 'string', enum: ['city', 'precise'] },
 }),
   async (req, res) => {
   const authUserId = assertAuthUser(req);
@@ -3184,10 +3189,12 @@ app.post('/groups/create',
     return res.status(403).json({ error: 'Forbidden owner scope' });
   }
 
+  const location = readOptionalLocationSelection(req.body || {});
   const groupId = await GroupService.createGroup(
     String(req.body.name || '').trim() || 'New Group',
     String(ownerId),
     String(req.body.coachEnabled || 'none'),
+    location,
   );
   res.json({ groupId });
 });
@@ -3280,6 +3287,37 @@ app.get('/groups/:groupId/members', async (req, res) => {
 
 app.get('/groups/user/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   const groups = await GroupService.getGroups(req.params.userId);
+  res.json({ groups });
+});
+
+app.get('/groups/search', async (req, res) => {
+  assertAuthUser(req);
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) {
+    return res.json({ groups: [] });
+  }
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
+  const groups = await GroupService.searchGroups(q, limit);
+  res.json({ groups });
+});
+
+app.get('/groups/:groupId/detail', async (req, res) => {
+  assertAuthUser(req);
+  const groupId = req.params.groupId;
+  const detail = await GroupService.getGroupDetail(groupId);
+  if (!detail) {
+    return res.status(404).json({ error: 'Group not found' });
+  }
+  res.json({ group: detail });
+});
+
+app.get('/location/nearby-groups/:userId', requireSameUserIdFromParam('userId'), (req, res) => {
+  const userId = toUserId(req.params.userId);
+  const userLocation = LocationService.getUserLocation(userId);
+  if (!userLocation) {
+    return res.json({ groups: [] });
+  }
+  const groups = GroupService.getNearbyGroups(userLocation.latitude, userLocation.longitude);
   res.json({ groups });
 });
 
@@ -3415,24 +3453,32 @@ app.get('/challenges/:userId', requireSameUserIdFromParam('userId'), async (req,
     `).all(userId, today, today, userId, userId, userId) as Array<Record<string, unknown>>;
 
     const sourceCache: { daily?: CoachDailyRecords | null; trainingPlan?: any } = {};
-    const challenges = await Promise.all(rows.map(async (row) => ({
-      id: Number(row.id),
-      owner_user_id: Number(row.owner_user_id),
-      group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
-      title: sanitizePlainText(row.title, 120),
-      description: sanitizePlainText(row.description, 280) || null,
-      goal_type: sanitizePlainText(row.goal_type, 40),
-      target_count: Number(row.target_count || 1),
-      start_date: sanitizePlainText(row.start_date, 20),
-      end_date: sanitizePlainText(row.end_date, 20),
-      coach_id: normalizeCoachId(row.coach_id) || 'zj',
-      status: sanitizePlainText(row.status, 20),
-      visibility: normalizeChallengeVisibility(row.visibility, 'friends'),
-      role: sanitizePlainText(row.role, 20),
-      member_count: Number(row.member_count || 0),
-      today_status: await computeChallengeTodayStatus(userId, String(row.goal_type || ''), today, sourceCache),
-      created_at: sanitizePlainText(row.created_at, 80),
-    })));
+    const challenges = await Promise.all(rows.map(async (row) => {
+      const avatars = getDB().prepare(`
+        SELECT u.avatar_url
+        FROM challenge_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.challenge_id = ? LIMIT 5
+      `).all(Number(row.id)).map((a: any) => mediaUrlForClient(req, a.avatar_url)).filter(Boolean);
+      return {
+        id: Number(row.id),
+        owner_user_id: Number(row.owner_user_id),
+        group_id: row.group_id === null || row.group_id === undefined ? null : Number(row.group_id),
+        title: sanitizePlainText(row.title, 120),
+        description: sanitizePlainText(row.description, 280) || null,
+        goal_type: sanitizePlainText(row.goal_type, 40),
+        target_count: Number(row.target_count || 1),
+        start_date: sanitizePlainText(row.start_date, 20),
+        end_date: sanitizePlainText(row.end_date, 20),
+        coach_id: normalizeCoachId(row.coach_id) || 'zj',
+        status: sanitizePlainText(row.status, 20),
+        visibility: normalizeChallengeVisibility(row.visibility, 'friends'),
+        role: sanitizePlainText(row.role, 20),
+        member_count: Number(row.member_count || 0),
+        member_avatars: avatars,
+        today_status: await computeChallengeTodayStatus(userId, String(row.goal_type || ''), today, sourceCache),
+        created_at: sanitizePlainText(row.created_at, 80),
+      };
+    }));
 
     res.json({ day: today, challenges });
   } catch (err: any) {
@@ -3566,6 +3612,122 @@ app.post('/challenges/:challengeId/delete',
       res.status(400).json({ error: err.message || 'Failed to delete challenge' });
     }
   });
+
+app.get('/challenges/:challengeId/members', async (req, res) => {
+  try {
+    const authUserId = assertAuthUser(req);
+    const challengeId = Number(req.params.challengeId);
+    if (!Number.isInteger(challengeId) || challengeId <= 0) {
+      return res.status(400).json({ error: 'Invalid challengeId' });
+    }
+    const challenge = getDB().prepare('SELECT id, owner_user_id, visibility FROM challenges WHERE id = ?').get(challengeId) as { id: number; owner_user_id: number; visibility?: string } | undefined;
+    if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+    if (!canAccessChallenge(authUserId, challenge)) {
+      return res.status(403).json({ error: 'Challenge is not visible to this user' });
+    }
+    const members = getDB().prepare(`
+      SELECT u.id, u.username, ${displayNameSql('u')} AS display_name, u.avatar_url, cm.role
+      FROM challenge_members cm
+      JOIN users u ON u.id = cm.user_id
+      WHERE cm.challenge_id = ?
+      ORDER BY cm.role = 'owner' DESC, cm.joined_at ASC
+    `).all(challengeId).map((row: any) => ({
+      ...row,
+      id: Number(row.id),
+      avatar_url: mediaUrlForClient(req, row.avatar_url),
+    }));
+    res.json({ members });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to load challenge members' });
+  }
+});
+
+app.post('/challenges/:challengeId/invite',
+  requireSameUserIdFromBody('userId'),
+  APIGateway.rateLimit(60, 10 * 60_000, 'challenge-invite'),
+  APIGateway.validateSchema({
+    userId: { required: true, type: 'number', integer: true, min: 1 },
+    targetUserId: { required: true, type: 'number', integer: true, min: 1 },
+  }),
+  (req, res) => {
+    try {
+      const userId = toUserId(req.body.userId);
+      const targetUserId = toUserId(req.body.targetUserId);
+      const challengeId = Number(req.params.challengeId);
+      if (!Number.isInteger(challengeId) || challengeId <= 0) {
+        return res.status(400).json({ error: 'Invalid challengeId' });
+      }
+      const challenge = getDB().prepare('SELECT id, owner_user_id, visibility FROM challenges WHERE id = ? AND status = ?').get(challengeId, 'active') as { id: number; owner_user_id: number; visibility?: string } | undefined;
+      if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
+      const membership = getDB().prepare('SELECT 1 FROM challenge_members WHERE challenge_id = ? AND user_id = ? LIMIT 1').get(challengeId, userId);
+      if (!membership) return res.status(403).json({ error: 'You must be a member to invite others' });
+      const visibility = normalizeChallengeVisibility(challenge.visibility, 'friends');
+      if (visibility === 'friends' && !isFriend(Number(challenge.owner_user_id), targetUserId)) {
+        return res.status(403).json({ error: 'This challenge is friends-only; the user must be friends with the challenge owner' });
+      }
+      const alreadyMember = getDB().prepare('SELECT 1 FROM challenge_members WHERE challenge_id = ? AND user_id = ? LIMIT 1').get(challengeId, targetUserId);
+      if (alreadyMember) {
+        return res.json({ success: true, alreadyMember: true });
+      }
+      getDB().prepare(`
+        INSERT OR IGNORE INTO challenge_members (challenge_id, user_id, role)
+        VALUES (?, ?, 'member')
+      `).run(challengeId, targetUserId);
+      res.json({ success: true, alreadyMember: false });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to invite user' });
+    }
+  });
+
+app.get('/challenges/discover/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
+  try {
+    const userId = toUserId(req.params.userId);
+    const userRow = getDB().prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as { timezone?: string | null } | undefined;
+    const timezone = isValidTimeZone(String(userRow?.timezone || '')) ? String(userRow?.timezone) : 'UTC';
+    const today = localDayForTimezone(new Date(), timezone);
+    const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 20));
+    const rows = getDB().prepare(`
+      SELECT
+        c.*,
+        (SELECT COUNT(*) FROM challenge_members m WHERE m.challenge_id = c.id) AS member_count
+      FROM challenges c
+      WHERE c.status = 'active'
+        AND c.visibility = 'public'
+        AND c.end_date >= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM challenge_members cm WHERE cm.challenge_id = c.id AND cm.user_id = ?
+        )
+      ORDER BY c.created_at DESC
+      LIMIT ?
+    `).all(today, userId, limit) as Array<Record<string, unknown>>;
+
+    const challenges = rows.map((row) => {
+      const avatars = getDB().prepare(`
+        SELECT u.avatar_url
+        FROM challenge_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.challenge_id = ? LIMIT 5
+      `).all(Number(row.id)).map((a: any) => mediaUrlForClient(req, a.avatar_url)).filter(Boolean);
+      return {
+        id: Number(row.id),
+        owner_user_id: Number(row.owner_user_id),
+        title: sanitizePlainText(row.title, 120),
+        description: sanitizePlainText(row.description, 280) || null,
+        goal_type: sanitizePlainText(row.goal_type, 40),
+        target_count: Number(row.target_count || 1),
+        start_date: sanitizePlainText(row.start_date, 20),
+        end_date: sanitizePlainText(row.end_date, 20),
+        visibility: 'public' as const,
+        member_count: Number(row.member_count || 0),
+        member_avatars: avatars,
+        created_at: sanitizePlainText(row.created_at, 80),
+      };
+    });
+
+    res.json({ challenges });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to discover challenges' });
+  }
+});
 
 app.get('/profile/:userId', requireSameUserIdFromParam('userId'), async (req, res) => {
   const db = getDB();

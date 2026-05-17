@@ -18,6 +18,10 @@ import {
   completeTrainingPlanExercise,
   createAbuseReport,
   getChallenges,
+  getChallengeMembers,
+  getDiscoverChallenges,
+  inviteToChallenge,
+  joinChallenge,
   getConversationNotificationPreference,
   getAuthSessions,
   getAbuseReports,
@@ -82,7 +86,9 @@ import {
   Friend,
   GroupMember,
   HealthMomentumResponse,
+  ChallengeMember,
   ChallengeSummary,
+  DiscoverChallenge,
   LocationSelection,
   LeaderboardEntry,
   MentionNotification,
@@ -1155,6 +1161,17 @@ export default function AppPage() {
   const [challengeDescription, setChallengeDescription] = useState('');
   const [challengeGoalType, setChallengeGoalType] = useState('plan_completion');
   const [challengeVisibility, setChallengeVisibility] = useState<'public' | 'friends'>('friends');
+  const [communityTab, setCommunityTab] = useState<'challenges' | 'posts'>('challenges');
+  const [discoverChallenges, setDiscoverChallenges] = useState<DiscoverChallenge[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [challengeDetailId, setChallengeDetailId] = useState<number | null>(null);
+  const [challengeMembers, setChallengeMembers] = useState<ChallengeMember[]>([]);
+  const [challengeMembersLoading, setChallengeMembersLoading] = useState(false);
+  const [challengeInviteOpen, setChallengeInviteOpen] = useState(false);
+  const [challengeInviteQuery, setChallengeInviteQuery] = useState('');
+  const [challengeInviteResults, setChallengeInviteResults] = useState<any[]>([]);
+  const [challengeInvitePending, setChallengeInvitePending] = useState(false);
+  const [challengeJoinPending, setChallengeJoinPending] = useState(false);
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDraft, setProfileDraft] = useState({ display_name: '', bio: '', fitness_goal: '', hobbies: '', avatar_url: '', background_url: '' });
@@ -2400,6 +2417,7 @@ export default function AppPage() {
   useEffect(() => {
     if (!ready || !authUserId || (tab !== 'today' && tab !== 'community')) return;
     void loadChallengesData(authUserId);
+    if (tab === 'community') void loadDiscoverChallengesData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, authUserId, tab]);
 
@@ -3147,6 +3165,79 @@ export default function AppPage() {
       setError(err.message || 'Failed to update challenge.');
     } finally {
       setChallengePendingId(null);
+    }
+  }
+
+  async function loadDiscoverChallengesData() {
+    if (!authUserId) return;
+    try {
+      setDiscoverLoading(true);
+      const result = await getDiscoverChallenges(authUserId);
+      setDiscoverChallenges(result.challenges || []);
+    } catch {
+      // silent
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }
+
+  async function handleOpenChallengeDetail(challengeId: number) {
+    setChallengeDetailId(challengeId);
+    try {
+      setChallengeMembersLoading(true);
+      const result = await getChallengeMembers(challengeId);
+      setChallengeMembers(result.members || []);
+    } catch {
+      setChallengeMembers([]);
+    } finally {
+      setChallengeMembersLoading(false);
+    }
+  }
+
+  async function handleJoinChallenge(challengeId: number) {
+    if (!authUserId) return;
+    try {
+      setChallengeJoinPending(true);
+      await joinChallenge(challengeId, authUserId);
+      showNotice('Joined challenge!');
+      await loadChallengesData(authUserId);
+      await loadDiscoverChallengesData();
+      setChallengeDetailId(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to join challenge.');
+    } finally {
+      setChallengeJoinPending(false);
+    }
+  }
+
+  async function handleInviteToChallenge(targetUserId: number) {
+    if (!authUserId || !challengeDetailId) return;
+    try {
+      setChallengeInvitePending(true);
+      await inviteToChallenge(challengeDetailId, authUserId, targetUserId);
+      showNotice('Invite sent!');
+      setChallengeInviteQuery('');
+      setChallengeInviteResults([]);
+      const result = await getChallengeMembers(challengeDetailId);
+      setChallengeMembers(result.members || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to invite.');
+    } finally {
+      setChallengeInvitePending(false);
+    }
+  }
+
+  async function handleChallengeInviteSearch(query: string) {
+    setChallengeInviteQuery(query);
+    if (query.trim().length < 2) {
+      setChallengeInviteResults([]);
+      return;
+    }
+    try {
+      const results = await searchUsers(query.trim());
+      setChallengeInviteResults(results.filter((u: any) => !challengeMembers.some((m) => m.id === u.id)));
+    } catch {
+      setChallengeInviteResults([]);
     }
   }
 
@@ -5430,48 +5521,129 @@ export default function AppPage() {
         <div className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-6 sm:p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <section className="min-h-0 overflow-y-auto pr-1">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-6">
-              <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Accountability</p>
-                    <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Challenges</h2>
-                  </div>
-                </div>
+              <div className="flex items-center gap-1 rounded-full bg-slate-100/80 p-1">
+                <button
+                  type="button"
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${communityTab === 'challenges' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  onClick={() => setCommunityTab('challenges')}
+                >
+                  Challenges
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${communityTab === 'posts' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  onClick={() => setCommunityTab('posts')}
+                >
+                  Posts
+                </button>
+              </div>
 
-                <div className="mt-4 divide-y divide-slate-200/70">
-                  {challengesLoading && challenges.length === 0 ? (
-                    <p className="py-4 text-sm text-slate-500">Loading challenges...</p>
-                  ) : null}
-                  {!challengesLoading && challenges.length === 0 ? (
-                    <p className="py-4 text-sm text-slate-500">No active challenges yet.</p>
-                  ) : null}
-                  {challenges.map((challenge) => {
-                    const completed = challenge.today_status === 'completed';
-                    return (
-                      <div key={challenge.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-slate-900">{challenge.title}</p>
-                          {challenge.description ? (
-                            <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{challenge.description}</p>
-                          ) : null}
-                          <p className="mt-1 text-xs text-slate-500">
-                            {challenge.goal_type.replace(/_/g, ' ')} · {challenge.member_count} member{challenge.member_count === 1 ? '' : 's'} · {challenge.start_date} to {challenge.end_date}
-                          </p>
-                        </div>
-                        <button
-                          className={`inline-flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition ${completed ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                          type="button"
-                          disabled={challengePendingId === challenge.id}
-                          onClick={() => void handleCompleteChallenge(challenge)}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: 17 }}>{completed ? 'check' : 'flag'}</span>
-                          {challengePendingId === challenge.id ? 'Saving...' : completed ? 'Done today' : 'Mark done'}
-                        </button>
+              {communityTab === 'challenges' ? (
+                <>
+                  <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Accountability</p>
+                        <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">My Challenges</h2>
                       </div>
-                    );
-                  })}
-                </div>
-              </section>
+                    </div>
+
+                    <div className="mt-4 divide-y divide-slate-200/70">
+                      {challengesLoading && challenges.length === 0 ? (
+                        <p className="py-4 text-sm text-slate-500">Loading challenges...</p>
+                      ) : null}
+                      {!challengesLoading && challenges.length === 0 ? (
+                        <p className="py-4 text-sm text-slate-500">No active challenges yet.</p>
+                      ) : null}
+                      {challenges.map((challenge) => {
+                        const completed = challenge.today_status === 'completed';
+                        return (
+                          <div key={challenge.id} className="flex flex-col gap-3 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <button type="button" className="min-w-0 text-left" onClick={() => void handleOpenChallengeDetail(challenge.id)}>
+                                <p className="font-semibold text-slate-900">{challenge.title}</p>
+                                {challenge.description ? (
+                                  <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{challenge.description}</p>
+                                ) : null}
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {challenge.goal_type.replace(/_/g, ' ')} · {challenge.member_count} member{challenge.member_count === 1 ? '' : 's'} · {challenge.start_date} to {challenge.end_date}
+                                </p>
+                              </button>
+                              <span className="material-symbols-outlined text-slate-400" style={{ fontSize: 18 }}>chevron_right</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              {challenge.member_avatars && challenge.member_avatars.length > 0 ? (
+                                <div className="flex items-center -space-x-2">
+                                  {challenge.member_avatars.slice(0, 5).map((url, i) => (
+                                    <div key={i} className="size-7 overflow-hidden rounded-full border-2 border-white" style={{ zIndex: 5 - i }}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={resolveApiAssetUrl(url)} alt="" className="h-full w-full object-cover" />
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : <div />}
+                              <button
+                                className={`inline-flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm font-semibold transition ${completed ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                                type="button"
+                                disabled={challengePendingId === challenge.id}
+                                onClick={() => void handleCompleteChallenge(challenge)}
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: 17 }}>{completed ? 'check' : 'flag'}</span>
+                                {challengePendingId === challenge.id ? 'Saving...' : completed ? 'Done today' : 'Mark done'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[24px] bg-white/72 p-4 shadow-[0_14px_34px_rgba(15,23,42,0.04)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
+                    <h2 className="text-lg font-semibold tracking-tight text-slate-900">Discover</h2>
+                    <p className="mt-1 text-xs text-slate-500">Public challenges you can join</p>
+                    <div className="mt-4 divide-y divide-slate-200/70">
+                      {discoverLoading ? (
+                        <p className="py-4 text-sm text-slate-500">Loading...</p>
+                      ) : null}
+                      {!discoverLoading && discoverChallenges.length === 0 ? (
+                        <p className="py-4 text-sm text-slate-500">No public challenges available right now.</p>
+                      ) : null}
+                      {discoverChallenges.map((dc) => (
+                        <div key={dc.id} className="flex items-center justify-between gap-3 py-3">
+                          <button type="button" className="min-w-0 text-left" onClick={() => void handleOpenChallengeDetail(dc.id)}>
+                            <p className="font-semibold text-slate-900">{dc.title}</p>
+                            {dc.description ? <p className="mt-1 text-sm text-slate-500">{dc.description}</p> : null}
+                            <div className="mt-1 flex items-center gap-2">
+                              {dc.member_avatars?.length > 0 ? (
+                                <div className="flex -space-x-1.5">
+                                  {dc.member_avatars.slice(0, 4).map((url, i) => (
+                                    <div key={i} className="size-5 overflow-hidden rounded-full border-2 border-white" style={{ zIndex: 4 - i }}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={resolveApiAssetUrl(url)} alt="" className="h-full w-full object-cover" />
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                              <p className="text-xs text-slate-500">{dc.member_count} member{dc.member_count === 1 ? '' : 's'}</p>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                            disabled={challengeJoinPending}
+                            onClick={() => void handleJoinChallenge(dc.id)}
+                          >
+                            Join
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              ) : null}
+
+              {communityTab === 'posts' ? (
+                <>
 
               <section className="rounded-[24px] bg-white/62 p-4 shadow-[0_22px_54px_rgba(15,23,42,0.06)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5">
                 <div className="flex items-center justify-between gap-3">
@@ -6013,12 +6185,14 @@ export default function AppPage() {
                   No community posts matched your search.
                 </div>
               ) : null}
+                </>
+              ) : null}
             </div>
           </section>
 
           <aside className="hidden min-h-0 flex-col gap-5 overflow-y-auto xl:flex">
             <section className="rounded-[24px] bg-white/58 p-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)] backdrop-blur-xl">
-              <h3 className="text-lg font-semibold text-slate-900">Trending</h3>
+              <h3 className="text-lg font-semibold text-slate-900">Hashtags</h3>
               <div className="mt-4 flex flex-wrap gap-2">
                 {trendingHashtags.length > 0 ? trendingHashtags.map((item) => (
                   <button
@@ -6037,6 +6211,129 @@ export default function AppPage() {
 
           </aside>
         </div>
+
+        {challengeDetailId !== null ? (
+          <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(15,23,42,0.18)] p-3 backdrop-blur-[2px] sm:items-center sm:p-6">
+            <div className="w-full max-w-lg rounded-[28px] bg-white/96 p-4 shadow-[0_28px_80px_rgba(15,23,42,0.18)] backdrop-blur-xl sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Challenge</p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">
+                    {challenges.find((c) => c.id === challengeDetailId)?.title || discoverChallenges.find((c) => c.id === challengeDetailId)?.title || 'Challenge'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  className="flex size-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+                  onClick={() => { setChallengeDetailId(null); setChallengeInviteOpen(false); }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+                </button>
+              </div>
+
+              {(() => {
+                const myChallenge = challenges.find((c) => c.id === challengeDetailId);
+                const discChallenge = discoverChallenges.find((c) => c.id === challengeDetailId);
+                const detail = myChallenge || discChallenge;
+                const isMember = !!myChallenge;
+                return (
+                  <div className="mt-4 space-y-4">
+                    {detail?.description ? <p className="text-sm leading-6 text-slate-600">{detail.description}</p> : null}
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1">{detail?.goal_type?.replace(/_/g, ' ')}</span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1">{detail?.start_date} → {detail?.end_date}</span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1">{detail?.visibility}</span>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">Members ({challengeMembers.length})</h4>
+                      <div className="mt-2 max-h-[200px] divide-y divide-slate-100 overflow-y-auto">
+                        {challengeMembersLoading ? <p className="py-2 text-sm text-slate-500">Loading...</p> : null}
+                        {challengeMembers.map((m) => (
+                          <div key={m.id} className="flex items-center gap-3 py-2">
+                            <div className="size-8 overflow-hidden rounded-full bg-slate-200">
+                              {m.avatar_url ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={resolveApiAssetUrl(m.avatar_url)} alt="" className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-slate-500">
+                                  {(m.display_name || m.username || '?')[0]?.toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-slate-800">{m.display_name || m.username}</p>
+                            </div>
+                            {m.role === 'owner' ? <span className="text-xs font-semibold text-slate-400">Owner</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {!isMember ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-full bg-slate-900 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                        disabled={challengeJoinPending}
+                        onClick={() => void handleJoinChallenge(challengeDetailId)}
+                      >
+                        {challengeJoinPending ? 'Joining...' : 'Join Challenge'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="w-full rounded-full bg-slate-100 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+                        onClick={() => setChallengeInviteOpen(true)}
+                      >
+                        Invite a friend
+                      </button>
+                    )}
+
+                    {challengeInviteOpen ? (
+                      <div className="rounded-[18px] bg-slate-50 p-3">
+                        <input
+                          className="input-shell text-sm"
+                          placeholder="Search users to invite..."
+                          value={challengeInviteQuery}
+                          onChange={(e) => void handleChallengeInviteSearch(e.target.value)}
+                        />
+                        {challengeInviteResults.length > 0 ? (
+                          <div className="mt-2 max-h-[160px] divide-y divide-slate-100 overflow-y-auto">
+                            {challengeInviteResults.map((u: any) => (
+                              <div key={u.id} className="flex items-center justify-between gap-2 py-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="size-7 overflow-hidden rounded-full bg-slate-200">
+                                    {u.avatar_url ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={resolveApiAssetUrl(u.avatar_url)} alt="" className="h-full w-full object-cover" />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-[10px] font-bold text-slate-400">
+                                        {(u.display_name || u.username || '?')[0]?.toUpperCase()}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="text-sm text-slate-700">{u.display_name || u.username}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white"
+                                  disabled={challengeInvitePending}
+                                  onClick={() => void handleInviteToChallenge(u.id)}
+                                >
+                                  Invite
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        ) : null}
 
         {locationPickerOpen ? (
           <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(15,23,42,0.18)] p-3 backdrop-blur-[2px] sm:items-center sm:p-6">

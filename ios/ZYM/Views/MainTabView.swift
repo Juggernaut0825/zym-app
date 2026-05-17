@@ -183,6 +183,9 @@ private struct TodayView: View {
     @State private var trainingExpanded = true
     @State private var showWorkoutShareSheet = false
     @State private var previewExercise: TrainingPlanExercise?
+    @State private var todayChallengeDetailId: IdentifiableChallengeId?
+    @State private var todayChallengeInviteId: IdentifiableChallengeId?
+    @State private var todayChallengeInviteVisibility = "friends"
 
     private var completedExercises: Int {
         today?.trainingPlan?.exercises.filter { $0.completed_at != nil }.count ?? 0
@@ -242,6 +245,17 @@ private struct TodayView: View {
             }
             .sheet(item: $previewExercise) { exercise in
                 ExercisePreviewSheet(exercise: exercise)
+            }
+            .sheet(item: $todayChallengeDetailId) { wrapper in
+                ChallengeDetailView(challengeId: wrapper.id, onJoined: { loadChallenges() })
+                    .environmentObject(appState)
+            }
+            .sheet(item: $todayChallengeInviteId) { wrapper in
+                ChallengeInviteSearchSheet(
+                    challengeId: wrapper.id,
+                    visibility: todayChallengeInviteVisibility
+                )
+                .environmentObject(appState)
             }
         }
     }
@@ -381,7 +395,7 @@ private struct TodayView: View {
                         Text("No plan yet")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(Color.zymText)
-                        Button("Ask for today's plan", action: openCoach)
+                        Button("Ask for today's plan") { openCoach() }
                             .buttonStyle(ZYMPrimaryButton())
                             .padding(.top, 2)
                     }
@@ -396,8 +410,12 @@ private struct TodayView: View {
     private var coachShortcutsSection: some View {
         TodaySection(title: "Ask coach") {
             VStack(spacing: 10) {
-                TodayShortcutButton(title: "I don’t know this exercise", systemImage: "questionmark.circle", action: openCoach)
-                TodayShortcutButton(title: "Adjust my plan", systemImage: "slider.horizontal.3", action: openCoach)
+                TodayShortcutButton(title: "I don’t know this exercise", systemImage: "questionmark.circle") {
+                    openCoach(prefill: "I don’t know this exercise")
+                }
+                TodayShortcutButton(title: "Adjust my plan", systemImage: "slider.horizontal.3") {
+                    openCoach(prefill: "Adjust my plan")
+                }
             }
         }
     }
@@ -421,6 +439,13 @@ private struct TodayView: View {
                             },
                             onDelete: {
                                 deleteChallenge(challenge)
+                            },
+                            onOpenDetail: {
+                                todayChallengeDetailId = IdentifiableChallengeId(challenge.id)
+                            },
+                            onInvite: {
+                                todayChallengeInviteId = IdentifiableChallengeId(challenge.id)
+                                todayChallengeInviteVisibility = challenge.visibility ?? "friends"
                             }
                         )
                         if challenge.id != challenges.prefix(3).last?.id {
@@ -595,9 +620,10 @@ private struct TodayView: View {
         }.resume()
     }
 
-    private func openCoach() {
+    private func openCoach(prefill: String? = nil) {
         guard let userId = appState.userId else { return }
         let coach = today?.selectedCoach ?? appState.selectedCoach ?? "zj"
+        appState.requestedConversationPrefill = prefill
         appState.requestedConversationTopic = coach == "lc" ? "coach_lc_\(userId)" : "coach_\(userId)"
         appState.requestedTabIndex = 1
     }
@@ -610,6 +636,11 @@ private struct TodayView: View {
         appState.requestedCoachProfileEditor = true
         appState.requestedTabIndex = 4
     }
+}
+
+private struct IdentifiableChallengeId: Identifiable {
+    let id: Int
+    init(_ value: Int) { self.id = value }
 }
 
 private struct TodayPlanMutationResponse: Decodable {
@@ -832,6 +863,8 @@ private struct TodayChallengeRow: View {
     let isPending: Bool
     let onUpdateVisibility: (String) -> Void
     let onDelete: () -> Void
+    var onOpenDetail: (() -> Void)?
+    var onInvite: (() -> Void)?
 
     @State private var showDeleteConfirm = false
     @State private var showVisibilityConfirm = false
@@ -842,63 +875,83 @@ private struct TodayChallengeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(isDone ? Color.zymSecondary.opacity(0.16) : Color.clear)
-                    .frame(width: 26, height: 26)
-                Circle()
-                    .stroke(isDone ? Color.zymSecondary : Color.zymLine, lineWidth: 2)
-                    .frame(width: 26, height: 26)
-                if isPending {
-                    ProgressView().scaleEffect(0.58)
-                } else if isDone {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(Color.zymSecondaryDark)
+        Button { onOpenDetail?() } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(isDone ? Color.zymSecondary.opacity(0.16) : Color.clear)
+                        .frame(width: 26, height: 26)
+                    Circle()
+                        .stroke(isDone ? Color.zymSecondary : Color.zymLine, lineWidth: 2)
+                        .frame(width: 26, height: 26)
+                    if isPending {
+                        ProgressView().scaleEffect(0.58)
+                    } else if isDone {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color.zymSecondaryDark)
+                    }
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(challenge.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Color.zymText)
-                Text("\(challenge.member_count) members · \(isDone ? "done today" : "open today")")
-                    .font(.system(size: 12))
-                    .foregroundColor(Color.zymSubtext)
-            }
-
-            Spacer()
-
-            if isOwner {
-                Menu {
-                    let currentVisibility = challenge.visibility ?? "friends"
-                    let nextVisibility = currentVisibility == "public" ? "friends" : "public"
-                    Button {
-                        pendingVisibility = nextVisibility
-                        showVisibilityConfirm = true
-                    } label: {
-                        Label(
-                            nextVisibility == "public" ? "Make Public" : "Make Friends Only",
-                            systemImage: nextVisibility == "public" ? "globe" : "person.2.fill"
-                        )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(challenge.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color.zymText)
+                    HStack(spacing: 4) {
+                        if let avatars = challenge.member_avatars, !avatars.isEmpty {
+                            TodayAvatarStack(urls: avatars, size: 18)
+                        }
+                        Text("\(challenge.member_count) members · \(isDone ? "done today" : "open today")")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color.zymSubtext)
                     }
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("Delete Challenge", systemImage: "trash")
+                }
+
+                Spacer()
+
+                Button { onInvite?() } label: {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.zymLine, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+                            .frame(width: 26, height: 26)
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color.zymPrimary)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color.zymSubtext)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                if isOwner {
+                    Menu {
+                        let currentVisibility = challenge.visibility ?? "friends"
+                        let nextVisibility = currentVisibility == "public" ? "friends" : "public"
+                        Button {
+                            pendingVisibility = nextVisibility
+                            showVisibilityConfirm = true
+                        } label: {
+                            Label(
+                                nextVisibility == "public" ? "Make Public" : "Make Friends Only",
+                                systemImage: nextVisibility == "public" ? "globe" : "person.2.fill"
+                            )
+                        }
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete Challenge", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color.zymSubtext)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .padding(.vertical, 10)
         }
-        .padding(.vertical, 10)
+        .buttonStyle(.plain)
         .alert("Delete this challenge?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { onDelete() }
@@ -920,6 +973,36 @@ private struct TodayChallengeRow: View {
             Text(pendingVisibility == "public"
                  ? "Anyone on ZYM will be able to see this challenge."
                  : "Only your friends will see this challenge.")
+        }
+    }
+}
+
+private struct TodayAvatarStack: View {
+    let urls: [String]
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: -(size * 0.3)) {
+            ForEach(Array(urls.prefix(5).enumerated()), id: \.offset) { index, urlString in
+                ZStack {
+                    if let url = resolveRemoteURL(urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                Circle().fill(Color.zymSurfaceSoft)
+                            }
+                        }
+                    } else {
+                        Circle().fill(Color.zymSurfaceSoft)
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                .zIndex(Double(5 - index))
+            }
         }
     }
 }

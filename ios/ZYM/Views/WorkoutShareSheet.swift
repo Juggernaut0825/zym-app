@@ -13,6 +13,7 @@ struct WorkoutShareSheet: View {
     @State private var statusText: String?
     @State private var statusKind: StatusKind = .info
     @State private var systemSharePayload: SystemShareSnapshot?
+    @State private var showGroupPicker = false
 
     private enum StatusKind {
         case info
@@ -58,6 +59,14 @@ struct WorkoutShareSheet: View {
                             )
 
                             shareButton(
+                                title: "Share to Group Chat",
+                                subtitle: "Send the card image to one of your groups.",
+                                systemImage: "bubble.left.and.bubble.right.fill",
+                                tint: Color(red: 0.38, green: 0.55, blue: 0.92),
+                                action: { showGroupPicker = true }
+                            )
+
+                            shareButton(
                                 title: "Instagram Story",
                                 subtitle: "Opens Instagram with the card as your story background.",
                                 systemImage: "camera.fill",
@@ -96,6 +105,14 @@ struct WorkoutShareSheet: View {
             .onAppear(perform: ensureRender)
             .sheet(item: $systemSharePayload) { snapshot in
                 ShareSheet(activityItems: [snapshot.image])
+            }
+            .sheet(isPresented: $showGroupPicker) {
+                WorkoutGroupPickerSheet(
+                    onSelect: { topic in
+                        shareToGroup(topic: topic)
+                    }
+                )
+                .environmentObject(appState)
             }
         }
     }
@@ -260,12 +277,90 @@ struct WorkoutShareSheet: View {
         statusText = message
     }
 
+    @MainActor
+    private func shareToGroup(topic: String) {
+        guard let image = renderOrShowError(),
+              let pngData = image.pngData(),
+              let userId = appState.userId else { return }
+
+        statusKind = .info
+        statusText = "Uploading to group..."
+
+        guard let uploadURL = apiURL("/media/upload") else {
+            showError("Upload URL unavailable.")
+            return
+        }
+
+        let boundary = UUID().uuidString
+        var uploadRequest = URLRequest(url: uploadURL)
+        uploadRequest.httpMethod = "POST"
+        uploadRequest.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuthorizationHeader(&uploadRequest, token: appState.token)
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"userId\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(userId)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"workout-card.png\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
+        body.append(pngData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        uploadRequest.httpBody = body
+
+        authorizedDataTask(appState: appState, request: uploadRequest) { data, response, _ in
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard statusCode >= 200 && statusCode < 300,
+                  let data = data,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let mediaUrl = payload["url"] as? String else {
+                DispatchQueue.main.async { showError("Failed to upload card image.") }
+                return
+            }
+
+            let mediaId = payload["mediaId"] as? String
+
+            guard let sendURL = apiURL("/messages/send") else {
+                DispatchQueue.main.async { showError("Send URL unavailable.") }
+                return
+            }
+
+            var sendRequest = URLRequest(url: sendURL)
+            sendRequest.httpMethod = "POST"
+            sendRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            applyAuthorizationHeader(&sendRequest, token: appState.token)
+
+            var sendBody: [String: Any] = [
+                "fromUserId": userId,
+                "topic": topic,
+                "content": defaultCaption(),
+                "mediaUrls": [mediaUrl],
+            ]
+            if let mediaId {
+                sendBody["mediaIds"] = [mediaId]
+            }
+            sendRequest.httpBody = try? JSONSerialization.data(withJSONObject: sendBody)
+
+            authorizedDataTask(appState: appState, request: sendRequest) { _, sendResponse, _ in
+                DispatchQueue.main.async {
+                    let sendStatus = (sendResponse as? HTTPURLResponse)?.statusCode ?? 0
+                    if sendStatus >= 200 && sendStatus < 300 {
+                        statusKind = .info
+                        statusText = "Shared to group!"
+                    } else {
+                        showError("Failed to send message.")
+                    }
+                }
+            }.resume()
+        }.resume()
+    }
+
     private func defaultCaption() -> String {
         let title = plan.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty {
             return "Today's training is in the books."
         }
-        return "Finished today's plan: \(title) ✅"
+        return "Finished today's plan: \(title)"
     }
 }
 
@@ -301,4 +396,104 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct WorkoutGroupPickerSheet: View {
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
+    @State private var groups: [WorkoutShareGroup] = []
+    @State private var loading = true
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.zymBackgroundSoft.ignoresSafeArea()
+
+                if loading {
+                    ProgressView()
+                } else if groups.isEmpty {
+                    VStack(spacing: 10) {
+                        Text("No groups yet")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(Color.zymSubtext)
+                        Text("Create a group first to share your workout card there.")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.zymSubtext)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(groups, id: \.id) { group in
+                                Button {
+                                    dismiss()
+                                    onSelect("grp_\(group.id)")
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(Color.zymSurfaceSoft)
+                                            .frame(width: 40, height: 40)
+                                            .overlay(
+                                                Image(systemName: "person.3.fill")
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(Color.zymPrimary)
+                                            )
+                                        Text(group.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundColor(Color.zymText)
+                                        Spacer()
+                                        Image(systemName: "paperplane.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(Color.zymPrimary)
+                                    }
+                                    .padding(12)
+                                    .background(Color.white.opacity(0.86))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .navigationTitle("Choose a Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(Color.zymSubtext)
+                }
+            }
+            .onAppear(perform: loadGroups)
+        }
+    }
+
+    private func loadGroups() {
+        guard let userId = appState.userId,
+              let url = apiURL("/groups/user/\(userId)") else {
+            loading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async { loading = false }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(WorkoutShareGroupsResponse.self, from: data) else { return }
+            DispatchQueue.main.async { groups = response.groups }
+        }.resume()
+    }
+}
+
+private struct WorkoutShareGroup: Codable, Identifiable {
+    let id: Int
+    let name: String
+}
+
+private struct WorkoutShareGroupsResponse: Codable {
+    let groups: [WorkoutShareGroup]
 }

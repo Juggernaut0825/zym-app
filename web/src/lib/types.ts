@@ -520,8 +520,31 @@ export interface ChallengeSummary {
   visibility: 'friends' | 'public';
   role: string;
   member_count: number;
+  member_avatars?: string[];
   today_status: string | null;
   created_at: string;
+}
+
+export interface DiscoverChallenge {
+  id: number;
+  owner_user_id: number;
+  title: string;
+  description: string | null;
+  goal_type: string;
+  start_date: string;
+  end_date: string;
+  visibility: 'friends' | 'public';
+  status: string;
+  member_count: number;
+  member_avatars: string[];
+}
+
+export interface ChallengeMember {
+  id: number;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  role: string;
 }
 
 export interface ChallengesResponse {

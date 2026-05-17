@@ -592,6 +592,7 @@ class AppState: ObservableObject {
 
     @Published var requestedTabIndex: Int?
     @Published var requestedConversationTopic: String?
+    @Published var requestedConversationPrefill: String?
     @Published var requestedCoachProfileEditor = false
     @Published var pendingPostAttachmentPNG: Data?
     @Published var pendingPostInitialContent: String?

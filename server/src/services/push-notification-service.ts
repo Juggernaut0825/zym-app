@@ -306,6 +306,36 @@ export class PushNotificationService {
       })));
   }
 
+  static async sendChallengeReminderNotification(input: {
+    recipientUserId: number;
+    challengeId: number;
+    challengeTitle: string;
+  }): Promise<void> {
+    const config = apnsConfig();
+    if (!config) return;
+
+    const tokens = tokensForRecipients([input.recipientUserId]);
+    if (tokens.length === 0) return;
+
+    const title = 'Challenge reminder';
+    const body = `You missed yesterday's "${String(input.challengeTitle).slice(0, 60)}" challenge — get back on track today!`;
+    const payload = {
+      aps: {
+        alert: { title, body },
+        sound: 'default',
+      },
+      type: 'challenge_reminder',
+      challengeId: input.challengeId,
+    };
+
+    await Promise.all(tokens.map((row) => sendAPNSRequest({
+      config,
+      environment: resolveEnvironment(row.environment),
+      deviceToken: row.device_token,
+      payload,
+    })));
+  }
+
   static async sendCommunityNotifications(input: CommunityPushInput): Promise<void> {
     const config = apnsConfig();
     if (!config) return;

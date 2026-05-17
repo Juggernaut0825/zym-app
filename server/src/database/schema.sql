@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS groups (
   name TEXT NOT NULL,
   owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   coach_enabled TEXT NOT NULL DEFAULT 'none',
+  location_label TEXT,
+  location_city TEXT,
+  location_latitude DOUBLE PRECISION,
+  location_longitude DOUBLE PRECISION,
+  location_precision TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

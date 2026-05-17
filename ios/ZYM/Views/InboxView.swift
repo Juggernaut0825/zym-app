@@ -300,7 +300,7 @@ struct InboxView: View {
             for group in groups {
                 let preview = group.last_message_preview?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                     ? (group.last_message_preview ?? "")
-                    : ((group.coach_enabled == "none") ? "Coach disabled" : "Mention @coach to bring AI into the chat")
+                    : "Start chatting"
                 convs.append(
                     Conversation(
                         id: group.topic,
@@ -402,16 +402,6 @@ private struct QuickActionMenu: View {
                 title: "Create Group",
                 systemImage: "message.badge",
                 action: onCreateGroup
-            )
-
-            Divider()
-                .overlay(Color.white.opacity(0.14))
-                .padding(.leading, 48)
-
-            QuickActionMenuRow(
-                title: "Add Coach",
-                systemImage: "sparkles",
-                action: onAddCoach
             )
         }
         .frame(width: 212)

@@ -29,6 +29,8 @@
 		A11F0E2B3C4D5E6F7000000F /* WorkoutShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000010 /* WorkoutShareCard.swift */; };
 		A11F0E2B3C4D5E6F70000011 /* WorkoutShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000012 /* WorkoutShareSheet.swift */; };
 		A11F0E2B3C4D5E6F70000013 /* ExercisePreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000014 /* ExercisePreviewSheet.swift */; };
+		A11F0E2B3C4D5E6F70000015 /* GroupDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000016 /* GroupDetailView.swift */; };
+		A11F0E2B3C4D5E6F70000017 /* ChallengeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11F0E2B3C4D5E6F70000018 /* ChallengeDetailView.swift */; };
 		A5E96CAFDC3B09E07A29EC0E /* APIResponses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBA823B57936AAADB82FE2A /* APIResponses.swift */; settings = {COMPILER_FLAGS = "-fobjc-arc"; }; };
 		BD61835EA67486247630D80B /* ZYMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC0AD496B349508F2DACC2B /* ZYMApp.swift */; };
 		CD4BA61072A48CE5D1453411 /* CreateGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E4E5EAFB2D43375547B235 /* CreateGroupView.swift */; };
@@ -62,6 +64,8 @@
 		A11F0E2B3C4D5E6F70000010 /* WorkoutShareCard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkoutShareCard.swift; path = ZYM/Views/WorkoutShareCard.swift; sourceTree = "<group>"; };
 		A11F0E2B3C4D5E6F70000012 /* WorkoutShareSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkoutShareSheet.swift; path = ZYM/Views/WorkoutShareSheet.swift; sourceTree = "<group>"; };
 		A11F0E2B3C4D5E6F70000014 /* ExercisePreviewSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExercisePreviewSheet.swift; path = ZYM/Views/ExercisePreviewSheet.swift; sourceTree = "<group>"; };
+		A11F0E2B3C4D5E6F70000016 /* GroupDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GroupDetailView.swift; path = ZYM/Views/GroupDetailView.swift; sourceTree = "<group>"; };
+		A11F0E2B3C4D5E6F70000018 /* ChallengeDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ChallengeDetailView.swift; path = ZYM/Views/ChallengeDetailView.swift; sourceTree = "<group>"; };
 		A11F0E2B3C4D5E6F70000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = ZYM/Assets.xcassets; sourceTree = "<group>"; };
 		ABD8953369AFD68CF2995D07 /* CreatePostView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CreatePostView.swift; path = ZYM/Views/CreatePostView.swift; sourceTree = "<group>"; };
 		B977A73E78161F25F55F9612 /* ConversationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ConversationView.swift; path = ZYM/Views/ConversationView.swift; sourceTree = "<group>"; };
@@ -120,6 +124,8 @@
 				A11F0E2B3C4D5E6F70000010 /* WorkoutShareCard.swift */,
 				A11F0E2B3C4D5E6F70000012 /* WorkoutShareSheet.swift */,
 				A11F0E2B3C4D5E6F70000014 /* ExercisePreviewSheet.swift */,
+				A11F0E2B3C4D5E6F70000016 /* GroupDetailView.swift */,
+				A11F0E2B3C4D5E6F70000018 /* ChallengeDetailView.swift */,
 			);
 			name = Views;
 			sourceTree = "<group>";
@@ -282,6 +288,8 @@
 				A11F0E2B3C4D5E6F7000000F /* WorkoutShareCard.swift in Sources */,
 				A11F0E2B3C4D5E6F70000011 /* WorkoutShareSheet.swift in Sources */,
 				A11F0E2B3C4D5E6F70000013 /* ExercisePreviewSheet.swift in Sources */,
+				A11F0E2B3C4D5E6F70000015 /* GroupDetailView.swift in Sources */,
+				A11F0E2B3C4D5E6F70000017 /* ChallengeDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

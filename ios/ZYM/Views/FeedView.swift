@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct IdentifiableInt: Identifiable {
+    let id: Int
+    init(_ value: Int) { self.id = value }
+}
+
 private func feedExtractHashtags(from content: String?) -> [String] {
     guard let content, !content.isEmpty else { return [] }
     let nsContent = content as NSString
@@ -70,11 +75,12 @@ private struct FeedChallengeSection: View {
     let loading: Bool
     let pendingId: Int?
     let onToggle: (ChallengeSummary) -> Void
+    var onOpen: ((ChallengeSummary) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Challenges")
+                Text("Your Challenges")
                     .font(.custom("Syne", size: 18))
                     .foregroundColor(Color.zymText)
                 Spacer()
@@ -93,25 +99,38 @@ private struct FeedChallengeSection: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(challenges) { challenge in
-                        HStack(spacing: 12) {
-                            ZYMCelebratingCheckButton(
-                                isDone: challenge.today_status == "completed",
-                                isPending: pendingId == challenge.id,
-                                size: 26,
-                                action: { onToggle(challenge) }
-                            )
+                        Button {
+                            onOpen?(challenge)
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZYMCelebratingCheckButton(
+                                    isDone: challenge.today_status == "completed",
+                                    isPending: pendingId == challenge.id,
+                                    size: 26,
+                                    action: { onToggle(challenge) }
+                                )
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(challenge.title)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(Color.zymText)
-                                Text("\(challenge.member_count) members · \(challenge.today_status == "completed" ? "done today" : "open today") · \(challenge.visibility == "public" ? "public" : "friends")")
-                                    .font(.system(size: 12))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(challenge.title)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(Color.zymText)
+                                    HStack(spacing: 4) {
+                                        if let avatars = challenge.member_avatars, !avatars.isEmpty {
+                                            FeedAvatarStack(urls: avatars, size: 18)
+                                        }
+                                        Text("\(challenge.member_count) members · \(challenge.today_status == "completed" ? "done today" : "open today")")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.zymSubtext)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(Color.zymSubtext)
                             }
-                            Spacer()
+                            .padding(.vertical, 10)
                         }
-                        .padding(.vertical, 10)
+                        .buttonStyle(.plain)
 
                         if challenge.id != challenges.last?.id {
                             Divider().background(Color.zymLine)
@@ -123,6 +142,70 @@ private struct FeedChallengeSection: View {
         .padding(14)
         .background(Color.white.opacity(0.74))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct FeedAvatarStack: View {
+    let urls: [String]
+    let size: CGFloat
+
+    var body: some View {
+        HStack(spacing: -(size * 0.3)) {
+            ForEach(Array(urls.prefix(5).enumerated()), id: \.offset) { index, urlString in
+                ZStack {
+                    if let url = resolveRemoteURL(urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                Circle().fill(Color.zymSurfaceSoft)
+                            }
+                        }
+                    } else {
+                        Circle().fill(Color.zymSurfaceSoft)
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                .zIndex(Double(5 - index))
+            }
+        }
+    }
+}
+
+private struct FeedDiscoverChallengeRow: View {
+    let challenge: DiscoverChallenge
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color.zymPrimaryDark)
+                .frame(width: 36, height: 36)
+                .background(Color.zymSurfaceSoft.opacity(0.86))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(challenge.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.zymText)
+                HStack(spacing: 4) {
+                    if let avatars = challenge.member_avatars, !avatars.isEmpty {
+                        FeedAvatarStack(urls: avatars, size: 16)
+                    }
+                    Text("\(challenge.member_count) members · \(challenge.goal_type.replacingOccurrences(of: "_", with: " "))")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color.zymSubtext)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Color.zymSubtext)
+        }
+        .padding(.vertical, 6)
     }
 }
 
@@ -146,6 +229,10 @@ struct FeedView: View {
     @State private var profileActionPending = false
     @State private var challengesLoading = false
     @State private var challengePendingId: Int?
+    @State private var selectedTab = 0
+    @State private var discoverChallenges: [DiscoverChallenge] = []
+    @State private var discoverLoading = false
+    @State private var selectedChallengeForDetail: IdentifiableInt?
     @StateObject private var wsManager = WebSocketManager()
     @EnvironmentObject var appState: AppState
 
@@ -196,43 +283,93 @@ struct FeedView: View {
             ZStack {
                 ZYMBackgroundLayer().ignoresSafeArea()
 
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        TrendingStrip(
-                            items: trendingItems
-                        )
-                        .zymAppear(delay: 0.01)
+                VStack(spacing: 0) {
+                    Picker("", selection: $selectedTab) {
+                        Text("Challenges").tag(0)
+                        Text("Posts").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 6)
+                    .padding(.bottom, 8)
 
-                        if challengesLoading || !challenges.isEmpty {
-                            FeedChallengeSection(
-                                challenges: Array(challenges.prefix(5)),
-                                loading: challengesLoading,
-                                pendingId: challengePendingId,
-                                onToggle: completeChallenge
-                            )
-                            .zymAppear(delay: 0.02)
+                    if selectedTab == 0 {
+                        ScrollView {
+                            LazyVStack(spacing: 16) {
+                                if challengesLoading || !challenges.isEmpty {
+                                    FeedChallengeSection(
+                                        challenges: challenges,
+                                        loading: challengesLoading,
+                                        pendingId: challengePendingId,
+                                        onToggle: completeChallenge,
+                                        onOpen: { selectedChallengeForDetail = IdentifiableInt($0.id) }
+                                    )
+                                    .zymAppear(delay: 0.01)
+                                }
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Discover")
+                                        .font(.custom("Syne", size: 18))
+                                        .foregroundColor(Color.zymText)
+
+                                    if discoverLoading && discoverChallenges.isEmpty {
+                                        ProgressView()
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .padding(.vertical, 12)
+                                    } else if discoverChallenges.isEmpty {
+                                        Text("No public challenges to join right now.")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(Color.zymSubtext)
+                                            .padding(.vertical, 6)
+                                    } else {
+                                        ForEach(discoverChallenges) { challenge in
+                                            Button {
+                                                selectedChallengeForDetail = IdentifiableInt(challenge.id)
+                                            } label: {
+                                                FeedDiscoverChallengeRow(challenge: challenge)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                                .padding(14)
+                                .background(Color.white.opacity(0.74))
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.top, 4)
                         }
+                        .refreshable {
+                            loadChallenges()
+                            loadDiscoverChallenges()
+                        }
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 16) {
+                                TrendingStrip(items: trendingItems)
+                                    .zymAppear(delay: 0.01)
 
-                        ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
-                            PostCard(
-                                post: post,
-                                isReacting: reactingIds.contains(post.id),
-                                onOpen: { selectedPost = post },
-                                onOpenProfile: {
-                                    openPublicProfile(userId: post.user_id, username: post.username ?? "User", avatarURL: post.avatar_url)
-                                },
-                                onReact: { reactToPost(postId: post.id) }
-                            )
-                            .zymAppear(delay: Double(min(index, 8)) * 0.02)
+                                ForEach(Array(posts.enumerated()), id: \.element.id) { index, post in
+                                    PostCard(
+                                        post: post,
+                                        isReacting: reactingIds.contains(post.id),
+                                        onOpen: { selectedPost = post },
+                                        onOpenProfile: {
+                                            openPublicProfile(userId: post.user_id, username: post.username ?? "User", avatarURL: post.avatar_url)
+                                        },
+                                        onReact: { reactToPost(postId: post.id) }
+                                    )
+                                    .zymAppear(delay: Double(min(index, 8)) * 0.02)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.top, 4)
+                        }
+                        .refreshable {
+                            loadFeed()
+                            loadNotifications()
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
-                }
-                .refreshable {
-                    loadFeed()
-                    loadChallenges()
-                    loadNotifications()
                 }
 
                 VStack {
@@ -339,6 +476,7 @@ struct FeedView: View {
             .onAppear {
                 loadFeed()
                 loadChallenges()
+                loadDiscoverChallenges()
                 loadNotifications()
                 connectRealtime()
             }
@@ -423,6 +561,16 @@ struct FeedView: View {
                     }
                 )
             }
+            .sheet(item: $selectedChallengeForDetail) { wrapper in
+                ChallengeDetailView(
+                    challengeId: wrapper.id,
+                    onJoined: {
+                        loadChallenges()
+                        loadDiscoverChallenges()
+                    }
+                )
+                .environmentObject(appState)
+            }
             .sheet(item: $profileConversation) { conversation in
                 ConversationProfileSheet(
                     conversation: conversation,
@@ -481,6 +629,24 @@ struct FeedView: View {
             DispatchQueue.main.async {
                 withAnimation(.zymSoft) {
                     challenges = response.challenges
+                }
+            }
+        }.resume()
+    }
+
+    func loadDiscoverChallenges() {
+        guard let userId = appState.userId,
+              let url = apiURL("/challenges/discover/\(userId)") else { return }
+        discoverLoading = true
+        var request = URLRequest(url: url)
+        applyAuthorizationHeader(&request, token: appState.token)
+        authorizedDataTask(appState: appState, request: request) { data, _, _ in
+            DispatchQueue.main.async { discoverLoading = false }
+            guard let data = data,
+                  let response = try? JSONDecoder().decode(DiscoverChallengesResponse.self, from: data) else { return }
+            DispatchQueue.main.async {
+                withAnimation(.zymSoft) {
+                    discoverChallenges = response.challenges
                 }
             }
         }.resume()
@@ -1414,31 +1580,21 @@ private struct TrendingStrip: View {
     let items: [(tag: String, count: Int)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Trending")
-                .font(.custom("Syne", size: 18))
-                .foregroundColor(Color.zymText)
-
-            if items.isEmpty {
-                Text("No post tags yet.")
-                    .font(.system(size: 13))
-                    .foregroundColor(Color.zymSubtext)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(items.enumerated()), id: \.offset) { entry in
-                            Text("#\(entry.element.tag)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color.zymSurfaceSoft.opacity(0.92))
-                                .clipShape(Capsule())
-                        }
+        if !items.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { entry in
+                        Text("#\(entry.element.tag)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.zymSurfaceSoft.opacity(0.92))
+                            .clipShape(Capsule())
                     }
                 }
             }
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
     }
 }
 

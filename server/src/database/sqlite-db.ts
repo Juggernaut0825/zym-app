@@ -272,6 +272,11 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       name TEXT NOT NULL,
       owner_id INTEGER NOT NULL,
       coach_enabled TEXT DEFAULT 'none',
+      location_label TEXT,
+      location_city TEXT,
+      location_latitude REAL,
+      location_longitude REAL,
+      location_precision TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -693,6 +698,23 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
   }
   if (!challengeColumns.some((column) => column.name === 'visibility')) {
     sqlite.exec("ALTER TABLE challenges ADD COLUMN visibility TEXT NOT NULL DEFAULT 'friends'");
+  }
+
+  const groupColumns = sqlite.prepare('PRAGMA table_info(groups)').all() as Array<{ name: string }>;
+  if (!groupColumns.some((column) => column.name === 'location_label')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN location_label TEXT');
+  }
+  if (!groupColumns.some((column) => column.name === 'location_city')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN location_city TEXT');
+  }
+  if (!groupColumns.some((column) => column.name === 'location_latitude')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN location_latitude REAL');
+  }
+  if (!groupColumns.some((column) => column.name === 'location_longitude')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN location_longitude REAL');
+  }
+  if (!groupColumns.some((column) => column.name === 'location_precision')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN location_precision TEXT');
   }
 
   sqlite.exec(`

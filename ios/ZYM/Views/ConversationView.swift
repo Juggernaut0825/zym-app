@@ -295,15 +295,6 @@ struct ConversationView: View {
                             .accessibilityLabel("Message")
                             .focused($messageFieldFocused)
 
-                        if conversation.isGroup && groupCoachEnabled {
-                            Button("@coach") {
-                                if !newMessage.lowercased().contains("@coach") {
-                                    newMessage = newMessage.isEmpty ? "@coach " : "@coach \(newMessage)"
-                                }
-                            }
-                            .buttonStyle(ZYMGhostButton())
-                        }
-
                         Button(action: sendMessage) {
                             Text(isSending ? "..." : "Send")
                                 .frame(width: 52, height: 20)
@@ -429,6 +420,10 @@ struct ConversationView: View {
             if groupId != nil {
                 loadGroupMembers()
             }
+            if let prefill = appState.requestedConversationPrefill, !prefill.isEmpty {
+                newMessage = prefill
+                appState.requestedConversationPrefill = nil
+            }
         }
         .onDisappear {
             wsManager.sendTyping(topic: conversation.id, isTyping: false)
@@ -517,9 +512,7 @@ struct ConversationView: View {
                 )
 
                 if !messages.contains(where: { $0.id == mapped.id }) {
-                    withAnimation(.zymSpring) {
-                        messages.append(mapped)
-                    }
+                    messages.append(mapped)
                     persistMessagesToCache(messages)
                     scheduleCoachReplyRevealIfNeeded(for: mapped)
                 }
@@ -556,9 +549,7 @@ struct ConversationView: View {
             guard let data = data,
                   let response = try? JSONDecoder().decode(MessagesResponse.self, from: data) else { return }
             DispatchQueue.main.async {
-                withAnimation(.zymSoft) {
-                    messages = response.messages
-                }
+                messages = response.messages
                 persistMessagesToCache(response.messages)
                 pruneCoachReplyRevealAnimations(validMessageIds: Set(response.messages.map(\.id)))
                 markConversationRead(messageId: response.messages.last?.id)
@@ -571,9 +562,7 @@ struct ConversationView: View {
         guard let userId = appState.userId else { return }
         let cached = ConversationMessageCache.load(userId: userId, topic: conversation.id)
         guard !cached.isEmpty else { return }
-        withAnimation(.zymSoft) {
-            messages = cached
-        }
+        messages = cached
         pruneCoachReplyRevealAnimations(validMessageIds: Set(cached.map(\.id)))
         scrollToLatestRequest += 1
     }
@@ -584,17 +573,13 @@ struct ConversationView: View {
     }
 
     private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool = true) {
-        let delays: [TimeInterval] = animated ? [0, 0.08, 0.24] : [0, 0.05, 0.18]
-        for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                let scroll = {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if animated {
+                withAnimation(.zymSoft) {
                     proxy.scrollTo(latestMessageAnchor, anchor: .bottom)
                 }
-                if animated {
-                    withAnimation(.zymSoft, scroll)
-                } else {
-                    scroll()
-                }
+            } else {
+                proxy.scrollTo(latestMessageAnchor, anchor: .bottom)
             }
         }
     }
