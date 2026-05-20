@@ -33,11 +33,12 @@ export class SetTrainingPlanTool implements Tool {
         },
         exercises: {
           type: 'array',
-          description: 'Ordered exercise list. Keep beginner plans short and clear.',
+          description: 'Ordered exercise list. Keep beginner plans short and clear. For each exercise, pass the exercise_key returned by search_exercise so the in-house demo media (images, target muscle, equipment) is auto-attached for the user.',
           itemType: 'object',
           items: {
             type: 'object',
             properties: {
+              exercise_key: { type: 'string', description: 'The exercise_key returned by search_exercise (e.g. "Barbell_Bench_Press_-_Medium_Grip"). Always include this when the exercise comes from search_exercise results so the demo images render on iOS and web.', minLength: 1, maxLength: 120 },
               name: { type: 'string', description: 'Exercise name.', minLength: 1, maxLength: 120 },
               sets: { type: 'number', description: 'Number of working sets.', minimum: 1, maximum: 20 },
               reps: { type: 'string', description: 'Rep target such as 8-10 or 30 sec.', minLength: 1, maxLength: 30 },
