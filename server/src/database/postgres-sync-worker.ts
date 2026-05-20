@@ -178,24 +178,91 @@ function splitSqlStatements(input: string): string[] {
   const statements: string[] = [];
   let current = '';
   let inSingleQuote = false;
+  let inLineComment = false;       // -- comment, ends at newline
+  let inBlockComment = false;      // /* comment */
+  let inDollarQuote = false;       // $$ ... $$ or $tag$ ... $tag$
+  let dollarTag = '';
 
   for (let index = 0; index < input.length; index += 1) {
     const char = input[index];
     const next = input[index + 1];
 
-    current += char;
-
-    if (char === "'") {
-      if (inSingleQuote && next === "'") {
-        current += next;
-        index += 1;
-        continue;
-      }
-      inSingleQuote = !inSingleQuote;
+    // Line comment: skip until newline. Newline itself stays in `current` for readability.
+    if (inLineComment) {
+      current += char;
+      if (char === '\n') inLineComment = false;
       continue;
     }
 
-    if (!inSingleQuote && char === ';') {
+    // Block comment: skip until */.
+    if (inBlockComment) {
+      current += char;
+      if (char === '*' && next === '/') {
+        current += next;
+        index += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    // Dollar-quoted body: skip until the matching $tag$.
+    if (inDollarQuote) {
+      current += char;
+      if (char === '$' && input.slice(index, index + dollarTag.length) === dollarTag) {
+        current += dollarTag.slice(1);
+        index += dollarTag.length - 1;
+        inDollarQuote = false;
+        dollarTag = '';
+      }
+      continue;
+    }
+
+    // Inside single-quoted literal: only ' (with '' escape) ends it.
+    if (inSingleQuote) {
+      current += char;
+      if (char === "'") {
+        if (next === "'") {
+          current += next;
+          index += 1;
+        } else {
+          inSingleQuote = false;
+        }
+      }
+      continue;
+    }
+
+    // Comment / quote openers.
+    if (char === '-' && next === '-') {
+      inLineComment = true;
+      current += char;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      inBlockComment = true;
+      current += char;
+      continue;
+    }
+    if (char === "'") {
+      inSingleQuote = true;
+      current += char;
+      continue;
+    }
+    if (char === '$') {
+      // Look for a $tag$ opener: $$, $foo$, etc. The tag is [A-Za-z_][A-Za-z0-9_]*.
+      const remainder = input.slice(index);
+      const match = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(remainder);
+      if (match) {
+        dollarTag = match[0];
+        inDollarQuote = true;
+        current += dollarTag;
+        index += dollarTag.length - 1;
+        continue;
+      }
+    }
+
+    current += char;
+
+    if (char === ';') {
       const trimmed = current.trim();
       if (trimmed) {
         statements.push(trimmed.slice(0, -1).trim());

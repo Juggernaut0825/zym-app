@@ -407,14 +407,15 @@ CREATE TABLE IF NOT EXISTS media_asset_attachments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- exercise_library_v2 evolves from the legacy ExerciseDB-flavoured shape (gif_url/body_part/...)
--- to the free-exercise-db-flavoured shape (force/level/mechanic/category/primary_muscles).
--- The schema.sql loader (postgres-sync-worker.splitSqlStatements) splits on ';' and does not
--- understand dollar-quoted blocks, so we avoid DO $$...$$ and use idempotent plain DDL instead.
--- ALTER TABLE IF EXISTS no-ops on a brand-new database; CREATE TABLE IF NOT EXISTS below builds
--- the table fresh in that case. On a database carrying the legacy table (which has always been
--- empty in production), the ALTERs drop the obsolete columns and add the new ones with safe
--- defaults so the table converges to the canonical shape without dropping any data.
+-- exercise_library_v2 evolves from the legacy ExerciseDB-flavoured shape (gif_url, body_part)
+-- to the free-exercise-db-flavoured shape (force, level, mechanic, category, primary_muscles).
+-- NOTE the schema.sql loader splits statements on a bare semicolon and does not understand
+-- dollar-quoted blocks or SQL comments, so this section avoids both DO blocks and any embedded
+-- semicolons in the comment text.
+-- ALTER TABLE IF EXISTS no-ops on a brand-new database, and CREATE TABLE IF NOT EXISTS below
+-- builds the table fresh in that case. On a database that still carries the legacy table
+-- (always empty in production), the ALTERs drop the obsolete columns and add the new ones
+-- with safe defaults so the table converges without dropping data.
 ALTER TABLE IF EXISTS exercise_library_v2 DROP COLUMN IF EXISTS gif_url;
 ALTER TABLE IF EXISTS exercise_library_v2 DROP COLUMN IF EXISTS video_url;
 ALTER TABLE IF EXISTS exercise_library_v2 DROP COLUMN IF EXISTS body_part;
