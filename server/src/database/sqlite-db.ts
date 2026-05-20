@@ -601,26 +601,40 @@ function initializeSqliteSchema(sqlite: Database.Database): void {
       PRIMARY KEY (media_asset_id, entity_type, entity_id, entity_key)
     );
 
+  `);
+
+  // exercise_library_v2 is handled separately so the idempotent migration (drop legacy schema if
+  // present) can run *before* we touch CREATE INDEX statements that reference the new columns.
+  // Inlining it into the big sqlite.exec() above would fail on databases still on the old schema,
+  // because `CREATE INDEX ... ON exercise_library_v2(category)` would run against a table that
+  // still has body_part/gif_url and lacks `category`.
+  const legacyExerciseCols = sqlite.prepare('PRAGMA table_info(exercise_library_v2)').all() as Array<{ name: string }>;
+  const hasLegacyExerciseCol = legacyExerciseCols.some((column) => column.name === 'gif_url');
+  if (hasLegacyExerciseCol) {
+    sqlite.exec('DROP TABLE IF EXISTS exercise_library_v2');
+  }
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS exercise_library_v2 (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       external_id TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
-      body_part TEXT,
-      target_muscle TEXT,
+      force TEXT,
+      level TEXT NOT NULL,
+      mechanic TEXT,
       equipment TEXT,
-      secondary_muscles TEXT,
-      instructions TEXT,
-      gif_url TEXT,
-      video_url TEXT,
-      image_urls TEXT,
+      category TEXT NOT NULL,
+      primary_muscles TEXT NOT NULL DEFAULT '[]',
+      secondary_muscles TEXT NOT NULL DEFAULT '[]',
+      instructions TEXT NOT NULL DEFAULT '[]',
+      image_urls TEXT NOT NULL DEFAULT '[]',
       embedding TEXT,
       search_text TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-
     CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_external_id ON exercise_library_v2(external_id);
-    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_body_part ON exercise_library_v2(body_part);
+    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_category ON exercise_library_v2(category);
+    CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_level ON exercise_library_v2(level);
     CREATE INDEX IF NOT EXISTS idx_exercise_library_v2_equipment ON exercise_library_v2(equipment);
   `);
 

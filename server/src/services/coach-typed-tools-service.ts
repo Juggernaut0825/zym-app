@@ -931,26 +931,32 @@ export class CoachTypedToolsService {
   }
 
   private async hydrateTrainingExerciseDemo(input: TrainingPlanExercise): Promise<TrainingPlanExercise> {
-    // Prefer the new exercise_library_v2 entry (sourced from ExerciseDB) when available.
+    // Prefer the in-house exercise_library_v2 entry (sourced from free-exercise-db) when available.
+    // The library schema uses primary_muscles/category/level/etc.; we project those down onto the
+    // iOS/Web-facing TrainingPlanExercise fields (body_part, target_muscle, demo_url, demo_image_urls)
+    // so existing clients render without changes. free-exercise-db ships static jpgs only — no gifs or
+    // videos — so demo_url is always the first image and demo_video_url stays empty.
     const v2Entry = input.exercise_key
       ? ExerciseSearchService.getByExternalId(input.exercise_key)
       : ExerciseSearchService.getByName(input.name);
 
     if (v2Entry) {
+      const primaryMuscle = v2Entry.primaryMuscles[0] || null;
+      const firstImage = v2Entry.imageUrls[0] || undefined;
       const base: TrainingPlanExercise = {
         ...input,
         exercise_key: v2Entry.externalId,
         name: v2Entry.name,
-        body_part: v2Entry.bodyPart ?? input.body_part ?? null,
-        target_muscle: v2Entry.targetMuscle ?? input.target_muscle ?? null,
+        body_part: primaryMuscle ?? input.body_part ?? null,
+        target_muscle: primaryMuscle ?? input.target_muscle ?? null,
         equipment: v2Entry.equipment ?? input.equipment ?? null,
         instructions: v2Entry.instructions.length > 0 ? v2Entry.instructions : input.instructions,
-        demo_url: input.demo_url || v2Entry.gifUrl || v2Entry.imageUrls[0] || undefined,
-        demo_video_url: input.demo_video_url || v2Entry.videoUrl || v2Entry.gifUrl || undefined,
+        demo_url: input.demo_url || firstImage,
+        demo_video_url: input.demo_video_url || undefined,
         demo_image_urls: input.demo_image_urls && input.demo_image_urls.length > 0
           ? input.demo_image_urls
-          : (v2Entry.imageUrls.length > 0 ? v2Entry.imageUrls : (v2Entry.gifUrl ? [v2Entry.gifUrl] : [])),
-        demo_thumbnail: input.demo_thumbnail || v2Entry.imageUrls[0] || v2Entry.gifUrl || undefined,
+          : v2Entry.imageUrls,
+        demo_thumbnail: input.demo_thumbnail || firstImage,
       };
       if (base.demo_url) {
         base.demo_thumbnail = buildDemoThumbnailUrl(base.demo_url, base.demo_thumbnail);

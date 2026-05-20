@@ -6,7 +6,7 @@ export class SearchExerciseTool implements Tool {
   definition: ToolDefinition = {
     name: 'search_exercise',
     description:
-      'Semantic search over the in-house exercise library (with demo media). Returns the top matching exercises so you can pick the ones to include in a training plan. Each result includes an exercise_key you should pass to set_training_plan so demo media renders for the user.',
+      'Semantic search over the in-house exercise library (with demo images). Returns the top matching exercises so you can pick the ones to include in a training plan. Each result includes an exercise_key you should pass to set_training_plan so demo media renders for the user.',
     parameters: {
       type: 'object',
       properties: {
@@ -17,14 +17,27 @@ export class SearchExerciseTool implements Tool {
           minLength: 2,
           maxLength: 240,
         },
-        body_part: {
+        primary_muscle: {
           type: 'string',
-          description: 'Optional body-part filter, for example chest, back, upper legs, lower legs, shoulders, upper arms, lower arms, waist, cardio.',
+          description:
+            'Optional primary-muscle filter. Common values include: chest, lats, middle back, lower back, shoulders, traps, neck, biceps, triceps, forearms, abdominals, quadriceps, hamstrings, glutes, calves, abductors, adductors.',
           maxLength: 40,
+        },
+        category: {
+          type: 'string',
+          description:
+            'Optional category filter. One of: strength, stretching, plyometrics, powerlifting, cardio, olympic weightlifting, strongman.',
+          maxLength: 40,
+        },
+        level: {
+          type: 'string',
+          description: 'Optional difficulty filter. One of: beginner, intermediate, expert.',
+          maxLength: 20,
         },
         equipment: {
           type: 'string',
-          description: 'Optional equipment filter, for example barbell, dumbbell, body weight, cable, kettlebell, leverage machine, smith machine.',
+          description:
+            'Optional equipment filter. Common values include: barbell, dumbbell, body only, cable, machine, kettlebells, bands, medicine ball, exercise ball, foam roll, e-z curl bar, other.',
           maxLength: 40,
         },
         limit: {
@@ -44,31 +57,38 @@ export class SearchExerciseTool implements Tool {
       return toJson({ error: 'query is required' });
     }
     const limit = Math.max(1, Math.min(20, Math.floor(Number(args?.limit || 10))));
-    const bodyPart = args?.body_part ? String(args.body_part).trim() : undefined;
+    const primaryMuscle = args?.primary_muscle ? String(args.primary_muscle).trim() : undefined;
+    const category = args?.category ? String(args.category).trim() : undefined;
+    const level = args?.level ? String(args.level).trim() : undefined;
     const equipment = args?.equipment ? String(args.equipment).trim() : undefined;
 
     const results = await ExerciseSearchService.search(query, {
       limit,
-      bodyPart,
+      primaryMuscle,
+      category,
+      level,
       equipment,
     });
 
     return toJson({
       query,
-      bodyPart: bodyPart || null,
+      primary_muscle: primaryMuscle || null,
+      category: category || null,
+      level: level || null,
       equipment: equipment || null,
       count: results.length,
       libraryEmpty: ExerciseSearchService.count() === 0,
       results: results.map((row) => ({
         exercise_key: row.externalId,
         name: row.name,
-        body_part: row.bodyPart,
-        target_muscle: row.targetMuscle,
-        equipment: row.equipment,
+        primary_muscles: row.primaryMuscles,
         secondary_muscles: row.secondaryMuscles,
+        category: row.category,
+        level: row.level,
+        force: row.force,
+        mechanic: row.mechanic,
+        equipment: row.equipment,
         instructions: row.instructions.slice(0, 4),
-        gif_url: row.gifUrl,
-        video_url: row.videoUrl,
         image_count: row.imageUrls.length,
         score: Number(row.score.toFixed(4)),
       })),
